@@ -19,7 +19,6 @@ exports.getMyNotifications = async (req, res) => {
   }
 };
 
-// 2. Mark Single Notification as Read
 exports.markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
