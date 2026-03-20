@@ -24,9 +24,15 @@ exports.getRestaurantMedia = async (req, res) => {
 exports.uploadMedia = async (req, res) => {
   try {
     const { restaurant_id, media_url, media_type } = req.body;
+    console.log("=== DEBUG: VARIABLES ===", { restaurant_id, media_url, media_type });
+
     const { data, error } = await supabase
       .from('restaurant_media')
-      .insert([{ restaurant_id, media_url, media_type, is_story: false }])
+      .insert([{ 
+        restaurant_id, 
+        media_url, 
+        media_type 
+      }])
       .select();
 
     if (error) throw error;
