@@ -93,12 +93,15 @@ exports.confirmReservation = async (req, res) => {
 
     // 3. Send the email if user was found
     if (userData && userData.email) {
-        const subject = "🍽️ Your Table is Confirmed!";
-        const body = `<h2>Success!</h2><p>Your reservation for ${reservation.reservation_date} is officially confirmed.</p>`;
-        
-        // This triggers your nodemailer utility
+      const subject = "🍽️ Your Table is Confirmed!";
+      const body = `<h2>Success!</h2><p>Your reservation is confirmed.</p>`;
+      try {
         await sendEmail(userData.email, subject, body);
-        console.log(`✉️ Email sent to customer: ${userData.email}`);
+        console.log("✅ NODEMAILER SUCCESS: Email sent to", userData.email);
+      } catch (err) {
+        console.error("❌ NODEMAILER FAILED:", err.message);
+        // This will tell you EXACTLY why Gmail is saying no.
+      }
     }
 
     // 4. Send the real-time notification (Socket.IO)
@@ -150,10 +153,12 @@ exports.rejectReservation = async (req, res) => {
           <p>Please try another time or check out our other partner restaurants!</p>
         </div>
       `;
-
-      // Use the real customer email from the database
-      sendEmail(userData.email, emailSubject, emailBody);
-      console.log(`✉️ Rejection email sent to: ${userData.email}`);
+      try {
+        const result = await sendEmail(userData.email, emailSubject, emailBody);
+        console.log("✅ Nodemailer success info:", result);
+      } catch (emailErr) {
+        console.error("❌ NODEMAILER DIED HERE:", emailErr);
+      }
     }
 
     // 4. Fire the Socket.IO event for real-time UI update
