@@ -1,0 +1,28 @@
+{
+  "name": "restaurant-reservation-app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://phornsinet24-coder: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@github.com/phornsinet24-coder/restaurant-reservation-app.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/phornsinet24-coder/restaurant-reservation-app/issues"
+  },
+  "homepage": "https://github.com/phornsinet24-coder/restaurant-reservation-app#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.1",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3"
+  }
+}
