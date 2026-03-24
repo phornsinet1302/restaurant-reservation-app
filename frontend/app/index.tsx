@@ -102,14 +102,14 @@ export default function WelcomeScreen() {
       {/* Hero Image Section */}
       <View style={styles.heroContainer}>
         <Image
-          source={require('@/assets/images/hero-restaurant.jpg')}
+          source={require('@/assets/hero-landing.jpg')}
           style={styles.heroImage}
           resizeMode="cover"
         />
         <LinearGradient
           colors={['transparent', 'transparent', Colors.background]}
-          locations={[0, 0.5, 1]}
-          style={styles.heroGradient}
+          locations={[0, 0.55, 1]}
+          style={styles.heroOverlay}
         />
 
         {/* Feature icons row */}
@@ -166,7 +166,7 @@ export default function WelcomeScreen() {
         <View style={styles.buttonsContainer}>
           <CustomButton
             title="Sign up"
-            onPress={() => router.push('/signup')}
+            onPress={() => router.push('/account-type')}
             variant="primary"
           />
           <CustomButton
@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  heroGradient: {
+  heroOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
@@ -211,11 +211,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 56,
+    bottom: 10,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'flex-start',
-    gap: 16,
+    gap: 18,
   },
   iconCircle: {
     width: 52,
