@@ -10,6 +10,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -44,6 +45,7 @@ export default function RestaurantSignupScreen() {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Step 2 — Identity
   const [legalName, setLegalName] = useState('');
@@ -68,12 +70,59 @@ export default function RestaurantSignupScreen() {
 
   // Step 4 — Review
   const [confirmed, setConfirmed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleBack = () => {
     if (step === 0) {
       router.back();
     } else {
       setStep(step - 1);
+    }
+  };
+
+  const submitApplication = async () => {
+    setLoading(true);
+    try {
+      const payload = {
+        email,
+        password,
+        role: 'restaurant',
+        fullName,
+        identity: {
+          legalName,
+          dob,
+          nationality,
+          cityProvince: city,
+          currentAddress: address,
+        },
+        restaurantProfile: {
+          nameEn: restNameEnglish,
+          nameKh: restNameKhmer,
+          address: restAddress,
+          city: restCity,
+          phone: restPhone,
+          category,
+          cuisine,
+          mapsLink,
+        },
+      };
+
+      const response = await axios.post('http://192.168.1.10:3000/api/auth/register', payload);
+      Alert.alert(
+        'Application Submitted',
+        'Your restaurant application has been submitted for review. We will contact you soon.',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }],
+      );
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        Alert.alert('Error', error.response?.data?.error || error.message);
+      } else if (error instanceof Error) {
+        Alert.alert('Error', error.message);
+      } else {
+        Alert.alert('Error', 'Submission failed. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -85,15 +134,11 @@ export default function RestaurantSignupScreen() {
         Alert.alert('Please confirm', 'You must confirm all information is accurate before submitting.');
         return;
       }
-      Alert.alert(
-        'Application Submitted',
-        'Your restaurant application has been submitted for review. We will contact you soon.',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }],
-      );
+      submitApplication();
     }
   };
 
-  const continueLabel = step === 3 ? 'Submit application' : step === 0 ? 'Save and continue' : 'Continue';
+  const continueLabel = step === 3 ? (loading ? 'Submitting...' : 'Submit application') : step === 0 ? 'Save and continue' : 'Continue';
 
   /* ── Dropdown helper ── */
   const renderDropdown = (
@@ -139,6 +184,11 @@ export default function RestaurantSignupScreen() {
       <Text style={styles.fieldLabel}>Email</Text>
       <View style={styles.inputWrapper}>
         <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Enter email" placeholderTextColor={Colors.border} keyboardType="email-address" autoCapitalize="none" />
+      </View>
+
+      <Text style={styles.fieldLabel}>Password</Text>
+      <View style={styles.inputWrapper}>
+        <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder="Create a password (min 6 chars)" placeholderTextColor={Colors.border} secureTextEntry />
       </View>
     </View>
   );
@@ -337,10 +387,10 @@ export default function RestaurantSignupScreen() {
           <Text style={styles.nextHintValue}>{NEXT_LABELS[step]}</Text>
         </View>
         <View style={styles.bottomButtons}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
+          <TouchableOpacity style={styles.backBtn} onPress={handleBack} disabled={loading}>
             <Text style={styles.backBtnText}>Back</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.continueBtn} activeOpacity={0.8} onPress={handleContinue}>
+          <TouchableOpacity style={styles.continueBtn} activeOpacity={0.8} onPress={handleContinue} disabled={loading}>
             <LinearGradient
               colors={[Colors.primary, Colors.primaryFaded]}
               start={{ x: 0, y: 0.5 }}

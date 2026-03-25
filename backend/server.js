@@ -1,6 +1,9 @@
-require("dotenv").config();
+// Load environment variables FIRST - before anything else
+require("dotenv").config({ path: require('path').resolve(__dirname, '.env') });
+
 const express = require("express");
 const http = require("http");
+const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
 const authRoutes = require('./routes/authRoutes');
 const restaurantRoutes = require('./routes/restaurantRoutes');
@@ -11,11 +14,14 @@ const mediaRoutes = require('./routes/mediaRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const merchantRoutes = require('./routes/merchantRoutes');
 const favoritesRoutes = require('./routes/favoritesRoutes');
+const locationRoutes = require('./routes/locationRoutes');
 const app = express();
 const { Server } = require('socket.io');
 
 
 
+// Enable CORS for all origins (for development)
+app.use(cors());
 app.use(express.json()); // Essential to read the data you send
 // Supabase connection
 const supabaseUrl = "https://rifnahhqukowayflroed.supabase.co";
@@ -34,6 +40,7 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/merchant', merchantRoutes);
 app.use('/api/favorites', favoritesRoutes);
+app.use('/api/location', locationRoutes);
 
 
 // --- NEW: SOCKET.IO SETUP ---

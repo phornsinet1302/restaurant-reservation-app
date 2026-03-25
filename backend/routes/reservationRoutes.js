@@ -16,4 +16,7 @@ router.patch('/:id/status', reservationController.updateReservationStatus);
 router.delete('/:id', reservationController.cancelReservation);
 router.post('/:id/check-in', reservationController.checkIn);
 
+// Machine confirmation route (for testing/simulating machine responses)
+router.post('/:bookingId/machine-confirm', reservationController.simulateMachineConfirmation);
+
 module.exports = router;
