@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,17 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import { API_CONFIG } from '@/app/config/apiConfig';
+
+const API_URL = API_CONFIG.BASE_URL;
 
 /* ── Helpers ── */
 
@@ -54,49 +61,328 @@ function suggestTable(guests: number) {
 
 export default function ModifyBookingScreen() {
   const params = useLocalSearchParams<{
-    id: string;
+    restaurantId: string;
     name: string;
-    ref: string;
-    date: string;
-    time: string;
-    guests: string;
-    table: string;
-    tags: string;
     address: string;
+    description: string;
   }>();
   const router = useRouter();
 
   /* State */
-  const baseDate = new Date(params.date ?? '2026-03-15');
+  const baseDate = new Date();
   const quickDates = useMemo(() => getUpcomingDates(new Date(), 4), []);
 
   const [selectedDate, setSelectedDate] = useState(baseDate);
-  const [selectedTime, setSelectedTime] = useState(params.time ?? '7:30pm');
-  const [guests, setGuests] = useState(parseInt(params.guests ?? '4', 10));
-  const [specialRequests, setSpecialRequests] = useState('Window seat preferred');
-  const [bookingName, setBookingName] = useState('William');
-  const [bookingEmail, setBookingEmail] = useState('william@email.com');
+  const [selectedTime, setSelectedTime] = useState('7:30pm');
+  const [guests, setGuests] = useState(2);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [specialRequests, setSpecialRequests] = useState('');
+  const [bookingName, setBookingName] = useState('');
+  const [bookingEmail, setBookingEmail] = useState('');
+  const [tables, setTables] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  const suggestion = suggestTable(guests);
+  const restaurantId = params.restaurantId?.trim() || '';
+  const restaurantName = params.name || 'Restaurant';
 
-  const handleSave = () => {
-    const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-    router.push({
-      pathname: '/booking-confirmation',
-      params: {
-        name: params.name ?? '',
-        ref: params.ref ?? '',
+  // Fetch user's name and email from AsyncStorage
+  useEffect(() => {
+    const fetchUserInfo = async () => {
+      try {
+        // Try to get from stored user object first
+        const userJson = await AsyncStorage.getItem('user');
+        if (userJson) {
+          const user = JSON.parse(userJson);
+          setBookingName(user.user_metadata?.full_name || user.full_name || '');
+          setBookingEmail(user.email || '');
+          return;
+        }
+
+        // Otherwise fetch from token (decode JWT if available)
+        const token = await AsyncStorage.getItem('token');
+        if (token) {
+          // Decode JWT to get email from claims
+          try {
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const decoded = JSON.parse(
+                Buffer.from(parts[1], 'base64').toString('utf-8')
+              );
+              setBookingEmail(decoded.email || '');
+            }
+          } catch (e) {
+            console.log('Could not decode JWT:', e);
+          }
+        }
+      } catch (err) {
+        console.log('Error fetching user info:', err);
+      }
+    };
+
+    fetchUserInfo();
+  }, []);
+
+  // Fetch available tables for restaurant
+  useEffect(() => {
+    const fetchTables = async () => {
+      try {
+        setLoading(true);
+        setError('');
+        
+        console.log('Fetching tables for restaurant:', restaurantId);
+        
+        if (!restaurantId) {
+          console.warn('No restaurantId provided');
+          // Use mock tables if no restaurant ID
+          const mockTables = [
+            { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
+            { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
+            { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
+            { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
+            { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
+          ];
+          setTables(mockTables);
+          setSelectedTableId(mockTables[0].id);
+          setLoading(false);
+          return;
+        }
+
+        const response = await axios.get(
+          `${API_URL}/api/tables?restaurant_id=${restaurantId}`
+        );
+        
+        console.log('Tables response:', response.data);
+        
+        const tablesData = response.data || [];
+        
+        if (tablesData.length === 0) {
+          // Use mock tables if no tables found in database
+          const mockTables = [
+            { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
+            { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
+            { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
+            { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
+            { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
+          ];
+          setTables(mockTables);
+          setSelectedTableId(mockTables[0].id);
+        } else {
+          setTables(tablesData);
+          // Select first available table by default
+          const availableTable = tablesData.find((t: any) => t.status === 'available');
+          if (availableTable) {
+            setSelectedTableId(availableTable.id);
+          } else {
+            setSelectedTableId(tablesData[0].id);
+          }
+        }
+      } catch (err: any) {
+        // Silently use mock tables as fallback - API may not be available or restaurantId may be invalid
+        const mockTables = [
+          { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
+          { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
+          { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
+          { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
+          { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
+        ];
+        setTables(mockTables);
+        setSelectedTableId(mockTables[0].id);
+        console.log('Using mock tables (API unavailable or invalid restaurant)');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (restaurantId.trim()) {
+      fetchTables();
+    } else {
+      // No restaurantId, use mock tables
+      const mockTables = [
+        { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
+        { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
+        { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
+        { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
+        { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
+      ];
+      setTables(mockTables);
+      setSelectedTableId(mockTables[0].id);
+      setLoading(false);
+    }
+  }, [restaurantId]);
+
+  const suggestion = useMemo(() => {
+    if (guests <= 2) return { table: 5, seats: 2 };
+    if (guests <= 4) return { table: 12, seats: 4 };
+    if (guests <= 6) return { table: 8, seats: 6 };
+    return { table: 3, seats: 8 };
+  }, [guests]);
+
+  const handleSave = async () => {
+    // Validation
+    if (!bookingName.trim()) {
+      Alert.alert('Required', 'Please enter your name');
+      return;
+    }
+    if (!bookingEmail.trim()) {
+      Alert.alert('Required', 'Please enter your email');
+      return;
+    }
+    if (!selectedTableId) {
+      Alert.alert('Required', 'Please select a table');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      
+      // Get auth token with detailed logging
+      console.log('=== BOOKING REQUEST START ===');
+      const token = await AsyncStorage.getItem('token');
+      console.log('Token retrieved from storage:', token ? `✓ ${token.length} chars` : '❌ NULL');
+      
+      if (token) {
+        console.log('Token first 30 chars:', token.substring(0, 30) + '...');
+        console.log('Token last 10 chars:', '...' + token.substring(token.length - 10));
+      }
+      
+      if (!token) {
+        Alert.alert(
+          'Login Required', 
+          'No auth token found. Please log in again.',
+          [
+            {
+              text: 'Go to Login',
+              onPress: () => router.push('/login'),
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      // Format date and time
+      const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+      const timeStr = convertTimeToHHMM(selectedTime);
+
+      console.log('Booking payload:', {
+        restaurantId,
+        tableId: selectedTableId,
         date: dateStr,
-        time: selectedTime,
-        guests: String(guests),
-        table: String(suggestion.table),
-        bookingName,
-        bookingEmail,
-        address: params.address ?? '',
-        specialRequests,
-      },
-    } as any);
+        time: timeStr,
+        guests,
+      });
+
+      // Make the API request
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
+      
+      console.log('Request headers:', {
+        Authorization: `Bearer [TOKEN-${token.length}-CHARS]`,
+        'Content-Type': 'application/json',
+      });
+      
+      console.log('API URL:', `${API_URL}/api/reservations`);
+
+      const response = await axios.post(
+        `${API_URL}/api/reservations`,
+        {
+          restaurant_id: restaurantId,
+          table_id: selectedTableId,
+          reservation_date: dateStr,
+          reservation_time: timeStr,
+          party_size: guests,
+          special_request: specialRequests,
+        },
+        { headers }
+      );
+
+      console.log('✓ Booking successful:', response.data);
+
+      const booking = response.data[0] || response.data;
+
+      // Navigate to confirmation
+      router.push({
+        pathname: '/booking-confirmation',
+        params: {
+          bookingId: booking.id,
+          id: booking.id,
+          name: restaurantName,
+          ref: booking.id?.slice(0, 8) || 'RRA-NEW',
+          date: dateStr,
+          time: selectedTime,
+          guests: String(guests),
+          table: selectedTableId,
+          bookingName,
+          bookingEmail,
+          address: params.address || '',
+          specialRequests,
+        },
+      } as any);
+    } catch (err: any) {
+      console.error('=== BOOKING ERROR ===');
+      console.error('Error type:', err.constructor.name);
+      console.error('Error message:', err.message);
+      console.error('Status code:', err.response?.status);
+      console.error('Status text:', err.response?.statusText);
+      console.error('Response data:', err.response?.data);
+      console.error('Request URL:', err.config?.url);
+      console.error('Request headers:', err.config?.headers);
+      
+      let errorMsg = 'Booking failed. Please try again.';
+      
+      if (err.response?.status === 401) {
+        errorMsg = 'Session expired. Please login again.';
+      } else if (err.response?.status === 400) {
+        errorMsg = err.response.data?.error || 'Invalid booking details';
+      } else if (err.response?.status === 500) {
+        errorMsg = 'Server error. Please try again later.';
+      } else if (err.message === 'Network Error') {
+        errorMsg = 'Network error. Check your connection and that the backend is running.';
+      } else if (err.response?.data?.error) {
+        errorMsg = err.response.data.error;
+      }
+      
+      Alert.alert('Booking Failed', errorMsg, [
+        {
+          text: 'Login Again',
+          onPress: () => router.push('/login'),
+        },
+        {
+          text: 'Dismiss',
+          style: 'cancel',
+        },
+      ]);
+    } finally {
+      setSubmitting(false);
+      console.log('=== BOOKING REQUEST END ===');
+    }
   };
+
+  // Helper: Convert "7:30pm" to "19:30"
+  function convertTimeToHHMM(timeStr: string): string {
+    const lower = timeStr.toLowerCase();
+    let [time, period] = [lower.slice(0, -2), lower.slice(-2)];
+    let [hours, minutes] = time.split(':').map(Number);
+    
+    if (period === 'pm' && hours !== 12) hours += 12;
+    if (period === 'am' && hours === 12) hours = 0;
+    
+    return `${String(hours).padStart(2, '0')}:${String(minutes || 0).padStart(2, '0')}`;
+  }
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>Loading tables...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -115,10 +401,7 @@ export default function ModifyBookingScreen() {
 
         {/* Restaurant card */}
         <View style={styles.restaurantCard}>
-          <Text style={styles.restaurantName}>{params.name}</Text>
-          {params.tags ? (
-            <Text style={styles.restaurantTags}>{params.tags}</Text>
-          ) : null}
+          <Text style={styles.restaurantName}>{restaurantName}</Text>
           {params.address ? (
             <View style={styles.addressRow}>
               <Ionicons name="location-outline" size={14} color="rgba(255,255,255,0.7)" />
@@ -245,17 +528,46 @@ export default function ModifyBookingScreen() {
 
         {/* Availability check */}
         <View style={styles.section}>
-          <Text style={styles.availLabel}>Availability check</Text>
-          <Text style={styles.suggestedTable}>
-            Suggested table: #{suggestion.table}
-          </Text>
-          <Text style={styles.suggestedDesc}>
-            Best fit for {guests} guest{guests > 1 ? 's' : ''} (up to{' '}
-            {suggestion.seats} seats).
-          </Text>
-          <Text style={styles.suggestedNote}>
-            No-show reservations release their table after 30 minutes.
-          </Text>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="grid-outline" size={16} color={Colors.gray} />
+            <Text style={styles.sectionLabel}>Select Table</Text>
+          </View>
+          
+          {error ? (
+            <Text style={styles.errorText}>{error}</Text>
+          ) : tables.length === 0 ? (
+            <Text style={styles.suggestedTable}>No tables available</Text>
+          ) : (
+            <View style={styles.tablesGrid}>
+              {tables.map((table) => (
+                <TouchableOpacity
+                  key={table.id}
+                  style={[
+                    styles.tableCard,
+                    selectedTableId === table.id && styles.tableCardSelected,
+                    table.status !== 'available' && styles.tableCardUnavailable,
+                  ]}
+                  onPress={() => table.status === 'available' && setSelectedTableId(table.id)}
+                  disabled={table.status !== 'available'}
+                >
+                  <Ionicons name="grid" size={24} color={selectedTableId === table.id ? Colors.primary : Colors.gray} />
+                  <Text style={[
+                    styles.tableNumber,
+                    selectedTableId === table.id && styles.tableNumberActive,
+                  ]}>
+                    Table {table.table_number}
+                  </Text>
+                  <Text style={styles.tableCapacity}>{table.capacity} seats</Text>
+                  <Text style={[
+                    styles.tableStatus,
+                    table.status === 'available' && styles.tableStatusAvailable,
+                  ]}>
+                    {table.status === 'available' ? 'Available' : 'Not Available'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Special Requests */}
@@ -302,11 +614,19 @@ export default function ModifyBookingScreen() {
       {/* Save button */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={styles.saveBtn}
+          style={[styles.saveBtn, submitting && styles.saveBtnDisabled]}
           activeOpacity={0.8}
           onPress={handleSave}
+          disabled={submitting}
         >
-          <Text style={styles.saveBtnText}>Save Changes</Text>
+          {submitting ? (
+            <>
+              <ActivityIndicator size="small" color="#FFF" />
+              <Text style={styles.saveBtnText}>Booking...</Text>
+            </>
+          ) : (
+            <Text style={styles.saveBtnText}>Confirm Booking</Text>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -594,10 +914,82 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  saveBtnDisabled: {
+    opacity: 0.7,
   },
   saveBtnText: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 16,
     color: Colors.text,
+  },
+
+  /* Table selection */
+  tablesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  tableCard: {
+    flex: 1,
+    minWidth: '45%',
+    borderWidth: 2,
+    borderColor: Colors.border,
+    borderRadius: 14,
+    padding: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF',
+  },
+  tableCardSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: `${Colors.primary}15`,
+  },
+  tableCardUnavailable: {
+    opacity: 0.5,
+  },
+  tableNumber: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 14,
+    color: Colors.text,
+    marginTop: 6,
+  },
+  tableNumberActive: {
+    color: Colors.primary,
+  },
+  tableCapacity: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.gray,
+    marginTop: 4,
+  },
+  tableStatus: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 11,
+    color: Colors.gray,
+    marginTop: 6,
+  },
+  tableStatusAvailable: {
+    color: '#2BA15C',
+    fontFamily: 'PlusJakartaSans-Medium',
+  },
+
+  /* Loading and errors */
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 12,
+  },
+  errorText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: '#E74C3C',
   },
 });

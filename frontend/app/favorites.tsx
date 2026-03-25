@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,57 +7,106 @@ import {
   Image,
   TouchableOpacity,
   ImageSourcePropType,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_CONFIG } from '@/app/config/apiConfig';
+
+const API_URL = API_CONFIG.BASE_URL;
 
 /* ── Data ── */
 
 type FavoriteRestaurant = {
   id: string;
+  restaurant_id: string;
   name: string;
-  tags: string;
+  location?: string;
   rating: string;
   distance: string;
   image: ImageSourcePropType;
+  tags?: string;
 };
-
-const FAVORITES: FavoriteRestaurant[] = [
-  {
-    id: 'f1',
-    name: 'Romeo Lane',
-    tags: 'Crafted Cocktails \u2022 Gourmet Cuisine \u2022 Best Bar',
-    rating: '4.5',
-    distance: '0.3 miles',
-    image: require('@/assets/restaurant-1.jpg'),
-  },
-  {
-    id: 'f2',
-    name: 'Sakura Sushi Bar',
-    tags: 'Japanese \u2022 Sushi \u2022 Omakase',
-    rating: '4.8',
-    distance: '0.5 miles',
-    image: require('@/assets/restaurant-3.jpg'),
-  },
-  {
-    id: 'f3',
-    name: 'Pret A Manger',
-    tags: 'Coffee \u2022 Sandwiches \u2022 Fresh Food',
-    rating: '4.0',
-    distance: '0.2 miles',
-    image: require('@/assets/restaurant-4.jpg'),
-  },
-];
 
 /* ── Component ── */
 
 export default function FavoritesScreen() {
   const router = useRouter();
-  const [favorites, setFavorites] = useState(FAVORITES);
+  const [favorites, setFavorites] = useState<FavoriteRestaurant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState<string>('');
 
-  const removeFavorite = (id: string) => {
-    setFavorites((prev) => prev.filter((f) => f.id !== id));
+  useFocusEffect(
+    React.useCallback(() => {
+      loadFavorites();
+    }, [])
+  );
+
+  const loadFavorites = async () => {
+    try {
+      setLoading(true);
+      const storedToken = await AsyncStorage.getItem('token');
+      if (!storedToken) {
+        Alert.alert('Error', 'You must be logged in to view favorites');
+        setLoading(false);
+        return;
+      }
+
+      setToken(storedToken);
+      const response = await axios.get(`${API_URL}/api/favorites`, {
+        headers: { Authorization: `Bearer ${storedToken}` },
+      });
+
+      // Map backend response to restaurant type
+      const restaurantList = response.data.map((item: any) => {
+        // Get image based on restaurant name
+        const getImage = (name: string) => {
+          const imageMap: Record<string, ImageSourcePropType> = {
+            'Romeo Lane': require('@/assets/restaurant-1.jpg'),
+            'SkyLounge Bar': require('@/assets/restaurant-2.jpg'),
+            'Sakura Sushi House': require('@/assets/restaurant-3.jpg'),
+            'Pret A Manger': require('@/assets/restaurant-4.jpg'),
+          };
+          return imageMap[name] || require('@/assets/restaurant-1.jpg');
+        };
+
+        return {
+          id: item.restaurant_id,
+          restaurant_id: item.restaurant_id,
+          name: item.name,
+          location: item.location || '42 Fleet Street, City',
+          rating: '4.5',
+          distance: '0.3 miles',
+          image: getImage(item.name),
+          tags: 'Restaurant • Dining • Local',
+        };
+      });
+
+      setFavorites(restaurantList);
+    } catch (error: any) {
+      console.error('Failed to load favorites:', error.response?.data || error.message);
+      Alert.alert('Error', 'Failed to load favorites');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeFavorite = async (restaurantId: string, restaurantName: string) => {
+    try {
+      await axios.delete(`${API_URL}/api/favorites/${restaurantId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setFavorites((prev) => prev.filter((f) => f.restaurant_id !== restaurantId));
+      Alert.alert('Removed', `${restaurantName} removed from favorites`);
+    } catch (error: any) {
+      console.error('Remove favorite error:', error.response?.data || error.message);
+      Alert.alert('Error', 'Failed to remove favorite');
+    }
   };
 
   return (
@@ -73,69 +122,81 @@ export default function FavoritesScreen() {
         </View>
       </View>
 
+      {/* Loading */}
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading favorites...</Text>
+        </View>
+      )}
+
       {/* List */}
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-      >
-        {favorites.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={styles.card}
-            activeOpacity={0.9}
-            onPress={() =>
-              router.push({
-                pathname: '/restaurant-detail',
-                params: {
-                  name: item.name,
-                  rating: item.rating,
-                  reviews: '3.2k',
-                  address: '42 Fleet Street, City',
-                  description:
-                    'Fresh, handmade food and organic coffee, served quickly and with a smile.',
-                  hours: 'Open Until 11:00pm',
-                  distance: item.distance,
-                },
-              } as any)
-            }
-          >
-            {/* Image */}
-            <View style={styles.cardImageWrapper}>
-              <Image source={item.image} style={styles.cardImage} />
+      {!loading && (
+        <ScrollView
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        >
+          {favorites.length > 0 ? (
+            favorites.map((item) => (
               <TouchableOpacity
-                style={styles.heartBtn}
-                onPress={() => removeFavorite(item.id)}
+                key={item.restaurant_id}
+                style={styles.card}
+                activeOpacity={0.9}
+                onPress={() =>
+                  router.push({
+                    pathname: '/restaurant-detail',
+                    params: {
+                      id: item.restaurant_id,
+                      name: item.name,
+                      rating: item.rating,
+                      reviews: '3.2k',
+                      address: item.location || '42 Fleet Street, City',
+                      description:
+                        'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                      hours: 'Open Until 11:00pm',
+                      distance: item.distance,
+                    },
+                  } as any)
+                }
               >
-                <Ionicons name="heart" size={20} color={Colors.accent} />
+                {/* Image */}
+                <View style={styles.cardImageWrapper}>
+                  <Image source={item.image} style={styles.cardImage} />
+                  <TouchableOpacity
+                    style={styles.heartBtn}
+                    onPress={() => removeFavorite(item.restaurant_id, item.name)}
+                  >
+                    <Ionicons name="heart" size={20} color={Colors.accent} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Info */}
+                <View style={styles.cardInfo}>
+                  <Text style={styles.cardName}>{item.name}</Text>
+                  <Text style={styles.cardTags}>{item.tags}</Text>
+                  <View style={styles.cardMeta}>
+                    <Ionicons name="star" size={14} color={Colors.primary} />
+                    <Text style={styles.cardRating}>{item.rating}</Text>
+                    <Ionicons
+                      name="location-outline"
+                      size={14}
+                      color={Colors.gray}
+                      style={{ marginLeft: 12 }}
+                    />
+                    <Text style={styles.cardDistance}>{item.distance}</Text>
+                  </View>
+                </View>
               </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="heart-outline" size={48} color={Colors.border} />
+              <Text style={styles.emptyText}>No favorites yet</Text>
+              <Text style={styles.emptySubText}>Start adding restaurants to your favorites</Text>
             </View>
-
-            {/* Info */}
-            <View style={styles.cardInfo}>
-              <Text style={styles.cardName}>{item.name}</Text>
-              <Text style={styles.cardTags}>{item.tags}</Text>
-              <View style={styles.cardMeta}>
-                <Ionicons name="star" size={14} color={Colors.primary} />
-                <Text style={styles.cardRating}>{item.rating}</Text>
-                <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={Colors.gray}
-                  style={{ marginLeft: 12 }}
-                />
-                <Text style={styles.cardDistance}>{item.distance}</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        ))}
-
-        {favorites.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="heart-outline" size={48} color={Colors.border} />
-            <Text style={styles.emptyText}>No favorites yet</Text>
-          </View>
-        )}
-      </ScrollView>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -245,6 +306,25 @@ const styles = StyleSheet.create({
   emptyText: {
     fontFamily: 'PlusJakartaSans-Medium',
     fontSize: 16,
+    color: Colors.gray,
+  },
+  emptySubText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 4,
+  },
+
+  /* Loading */
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
     color: Colors.gray,
   },
 });

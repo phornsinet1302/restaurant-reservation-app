@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,18 @@ import {
   ImageSourcePropType,
   Linking,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// import RestaurantMap from '@/components/RestaurantMap'; // Disabled - requires native build
+import { API_CONFIG } from '@/app/config/apiConfig';
 
+const API_URL = API_CONFIG.BASE_URL;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = 420;
 
@@ -100,6 +107,7 @@ function StarRow({ rating, size = 18 }: { rating: number; size?: number }) {
 export default function RestaurantDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
+    id: string;
     name: string;
     rating: string;
     reviews: string;
@@ -111,7 +119,12 @@ export default function RestaurantDetailScreen() {
 
   const [isFav, setIsFav] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [token, setToken] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  // const [restaurantLocation, setRestaurantLocation] = useState(null); // Disabled
+  // const [locationLoading, setLocationLoading] = useState(true); // Disabled
 
+  const restaurantId = (params.id || '').trim();
   const name = params.name || 'Pret A Manger';
   const rating = params.rating || '4.0';
   const reviewsCount = params.reviews || '3.2k';
@@ -123,6 +136,94 @@ export default function RestaurantDetailScreen() {
 
   const heroImage = RESTAURANT_IMAGES[name] || require('@/assets/restaurant-4.jpg');
   const closingTime = hours.replace('Open Until ', '');
+
+  useEffect(() => {
+    loadUserDataAndCheckFavorite();
+    // fetchRestaurantLocation(); // Disabled - maps not available
+  }, []);
+
+  const loadUserDataAndCheckFavorite = async () => {
+    try {
+      const storedToken = await AsyncStorage.getItem('token');
+      if (storedToken) {
+        const cleanToken = storedToken.trim();
+        setToken(cleanToken);
+        await checkIfFavorited(cleanToken, restaurantId);
+      }
+    } catch (error) {
+      console.warn('Failed to load user data:', error);
+    }
+  };
+
+  /* Disabled - RestaurantMap requires native build
+  const fetchRestaurantLocation = async () => {
+    try {
+      setLocationLoading(true);
+      const response = await axios.get(`${API_URL}/api/location/restaurant/${restaurantId}`);
+      if (response.data.success) {
+        setRestaurantLocation({
+          ...response.data.location,
+          name: name,
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to fetch restaurant location:', error);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+  */
+
+  const checkIfFavorited = async (authToken: string, resId: string) => {
+    try {
+      const response = await axios.get(`${API_URL}/api/favorites`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const isFavorited = response.data.some((fav: any) => fav.restaurant_id === resId);
+      setIsFav(isFavorited);
+    } catch (error) {
+      console.warn('Failed to check favorite status:', error);
+    }
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!token) {
+      Alert.alert('Error', 'You must be logged in to favorite restaurants');
+      return;
+    }
+
+    if (!restaurantId || restaurantId.length === 0) {
+      Alert.alert('Error', 'Restaurant ID is missing');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (isFav) {
+        // Remove from favorites
+        await axios.delete(`${API_URL}/api/favorites/${restaurantId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setIsFav(false);
+        Alert.alert('Removed', `${name} removed from favorites`);
+      } else {
+        // Add to favorites
+        await axios.post(
+          `${API_URL}/api/favorites/${restaurantId}`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setIsFav(true);
+        Alert.alert('Added', `${name} added to favorites`);
+      }
+    } catch (error: any) {
+      console.error('Favorite toggle error:', error.response?.data || error.message);
+      console.error('Restaurant ID being sent:', JSON.stringify(restaurantId));
+      Alert.alert('Error', 'Failed to update favorite. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const openGoogleMaps = () => {
     const query = encodeURIComponent(address);
@@ -152,8 +253,12 @@ export default function RestaurantDetailScreen() {
           </TouchableOpacity>
 
           {/* Favorite button */}
-          <TouchableOpacity style={styles.favBtn} onPress={() => setIsFav(!isFav)}>
-            <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={24} color={Colors.white} />
+          <TouchableOpacity 
+            style={styles.favBtn} 
+            onPress={handleToggleFavorite}
+            disabled={loading}
+          >
+            <Ionicons name={isFav ? 'heart' : 'heart-outline'} size={24} color={isFav ? Colors.accent : Colors.white} />
           </TouchableOpacity>
 
           {/* Restaurant info overlay */}
@@ -222,6 +327,7 @@ export default function RestaurantDetailScreen() {
               <Text style={styles.openMapsLink}>Open in Google Maps</Text>
             </TouchableOpacity>
           </View>
+          
           <TouchableOpacity style={styles.mapImageWrapper} onPress={openGoogleMaps}>
             <Image
               source={require('@/assets/map/Screenshot 2026-03-08 at 12.04.44 in the afternoon.png')}
@@ -232,6 +338,7 @@ export default function RestaurantDetailScreen() {
               <Text style={styles.mapOverlayText}>Tap map for directions</Text>
             </View>
           </TouchableOpacity>
+          
           <Text style={styles.mapAddress}>{address}</Text>
           <Text style={styles.mapDirectionsNote}>
             Directions use your current location as the starting point.
@@ -300,14 +407,8 @@ export default function RestaurantDetailScreen() {
               router.push({
                 pathname: '/modify-booking',
                 params: {
-                  id: 'new',
+                  restaurantId,
                   name,
-                  ref: '',
-                  date: new Date().toISOString().slice(0, 10),
-                  time: selectedSlot || '12:00pm',
-                  guests: '2',
-                  table: '',
-                  tags: '',
                   address,
                 },
               } as any)
@@ -581,6 +682,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.gray,
     marginTop: 4,
+  },
+  mapLoadingContainer: {
+    height: 300,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: '#f5f5f5',
   },
 
   /* Ratings & Reviews card */

@@ -4,7 +4,11 @@ const supabase = require('../config/supabase');
 exports.addFavorite = async (req, res) => {
   try {
     const user_id = req.user.id; // From the logged-in customer token
-    const { restaurant_id } = req.params; // From the URL
+    const restaurant_id = (req.params.restaurant_id || '').trim(); // From the URL, sanitized
+
+    if (!restaurant_id) {
+      return res.status(400).json({ error: 'Restaurant ID is required' });
+    }
 
     const { data, error } = await supabase
       .from('favorites')
@@ -27,7 +31,11 @@ exports.addFavorite = async (req, res) => {
 exports.removeFavorite = async (req, res) => {
   try {
     const user_id = req.user.id;
-    const { restaurant_id } = req.params;
+    const restaurant_id = (req.params.restaurant_id || '').trim(); // Sanitized
+
+    if (!restaurant_id) {
+      return res.status(400).json({ error: 'Restaurant ID is required' });
+    }
 
     const { error } = await supabase
       .from('favorites')

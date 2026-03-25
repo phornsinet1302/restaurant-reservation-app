@@ -10,14 +10,26 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.restaurant.tableorderapp"
+      "bundleIdentifier": "com.restaurant.tableorderapp",
+      "infoPlist": {
+        "NSAppleMusicUsageDescription": "Allow $(PRODUCT_NAME) to access your Apple Music library",
+        "NSLocationWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant."
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyCIkLAU412I5NDh_taEpWErZ7qRmDtCIbI"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.restaurant.tableorderapp"
+      "package": "com.restaurant.tableorderapp",
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -25,8 +37,15 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "react-native-maps",
+        {
+          "googleMapsApiKey": "AIzaSyA_H61Uv4BAl5FN4kx95Rolw-dKQdDk9pY"
+        }
+      ],
       "expo-router",
-      "expo-font"
+      "expo-font",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,17 @@ import {
   ImageSourcePropType,
   TouchableOpacity,
   FlatList,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_CONFIG } from '@/app/config/apiConfig';
+
+const API_URL = API_CONFIG.BASE_URL;
 
 /* ── Data ── */
 
@@ -114,6 +121,108 @@ const RESTAURANTS: Restaurant[] = [
 
 export default function HomeScreen() {
   const router = useRouter();
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [token, setToken] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [userName, setUserName] = useState<string>('Guest');
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  const [greeting, setGreeting] = useState<string>('Good morning');
+
+  useEffect(() => {
+    loadUserData();
+    updateGreeting();
+  }, []);
+
+  // Refresh user data whenever screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUserData();
+    }, [])
+  );
+
+  // Determine greeting based on current time
+  const updateGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      setGreeting('Good morning');
+    } else if (hour < 18) {
+      setGreeting('Good afternoon');
+    } else {
+      setGreeting('Good evening');
+    }
+  };
+
+  const loadUserData = async () => {
+    try {
+      const storedToken = await AsyncStorage.getItem('token');
+      if (storedToken) {
+        setToken(storedToken);
+        await fetchFavorites(storedToken);
+      }
+
+      // Load user profile data
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        setUserName(parsedUser.fullName || parsedUser.name || 'Guest');
+      }
+
+      // Load user profile image
+      const savedImage = await AsyncStorage.getItem('profileImage');
+      if (savedImage) {
+        setProfileImageUri(savedImage);
+      }
+    } catch (error) {
+      console.warn('Failed to load user data:', error);
+    }
+  };
+
+  const fetchFavorites = async (authToken: string) => {
+    try {
+      const response = await axios.get(`${API_URL}/api/favorites`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const favoriteIds = response.data.map((fav: any) => fav.restaurant_id);
+      setFavorites(favoriteIds);
+    } catch (error) {
+      console.warn('Failed to fetch favorites:', error);
+    }
+  };
+
+  const handleToggleFavorite = async (restaurantId: string, restaurantName: string) => {
+    if (!token) {
+      Alert.alert('Error', 'You must be logged in to favorite restaurants');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const isFavorited = favorites.includes(restaurantId);
+      
+      if (isFavorited) {
+        // Remove from favorites
+        await axios.delete(`${API_URL}/api/favorites/${restaurantId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setFavorites((prev) => prev.filter((id) => id !== restaurantId));
+        Alert.alert('Removed', `${restaurantName} removed from favorites`);
+      } else {
+        // Add to favorites
+        await axios.post(
+          `${API_URL}/api/favorites/${restaurantId}`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setFavorites((prev) => [...prev, restaurantId]);
+        Alert.alert('Added', `${restaurantName} added to favorites`);
+      }
+    } catch (error: any) {
+      console.error('Favorite toggle error:', error.response?.data || error.message);
+      Alert.alert('Error', 'Failed to update favorite. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <ScrollView
@@ -125,27 +234,37 @@ export default function HomeScreen() {
       <View style={styles.headerRow}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarLetter}>G</Text>
+            {profileImageUri ? (
+              <Image source={{ uri: profileImageUri }} style={styles.avatarImage} />
+            ) : (
+              <Text style={styles.avatarLetter}>{userName.charAt(0).toUpperCase()}</Text>
+            )}
           </View>
           <View>
-            <Text style={styles.greeting}>Good morning!</Text>
-            <Text style={styles.subGreeting}>Welcome, Google User</Text>
+            <Text style={styles.greeting}>{greeting}!</Text>
+            <Text style={styles.subGreeting}>Welcome, {userName}</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.bellButton} onPress={() => router.push('/notifications' as any)}>
+        <TouchableOpacity style={styles.bellButton} onPress={() => router.push('../notifications' as any)}>
           <Ionicons name="notifications-outline" size={22} color={Colors.text} />
         </TouchableOpacity>
       </View>
 
       {/* ── Search ── */}
-      <View style={styles.searchBox}>
+      <TouchableOpacity 
+        style={styles.searchBox}
+        onPress={() => router.push('./search' as any)}
+        activeOpacity={0.7}
+      >
         <Ionicons name="search" size={18} color={Colors.gray} />
         <TextInput
           style={styles.searchInput}
           placeholder="Enter postcode or town or city"
           placeholderTextColor={Colors.gray}
+          editable={false}
+          pointerEvents="none"
         />
-      </View>
+      </TouchableOpacity>
 
       {/* ── Latest Stories ── */}
       <View style={styles.sectionHeaderCol}>
@@ -162,7 +281,7 @@ export default function HomeScreen() {
         renderItem={({ item, index }) => (
           <TouchableOpacity
             style={styles.storyItem}
-            onPress={() => router.push({ pathname: '/story', params: { groupIndex: String(index) } } as any)}
+            onPress={() => router.push({ pathname: '../story', params: { groupIndex: String(index) } } as any)}
           >
             <View style={styles.storyImageWrapper}>
               <Image source={item.image} style={styles.storyImage} />
@@ -206,8 +325,9 @@ export default function HomeScreen() {
           activeOpacity={0.9}
           onPress={() =>
             router.push({
-              pathname: '/restaurant-detail',
+              pathname: '../restaurant-detail',
               params: {
+                id: restaurant.id,
                 name: restaurant.name,
                 rating: restaurant.rating,
                 reviews: '3.2k',
@@ -234,8 +354,15 @@ export default function HomeScreen() {
               <Text style={styles.restaurantName}>{restaurant.name}</Text>
             </View>
             <View style={styles.restaurantActions}>
-              <TouchableOpacity>
-                <Ionicons name="heart-outline" size={22} color={Colors.text} />
+              <TouchableOpacity 
+                onPress={() => handleToggleFavorite(restaurant.id, restaurant.name)}
+                disabled={loading}
+              >
+                <Ionicons 
+                  name={favorites.includes(restaurant.id) ? 'heart' : 'heart-outline'} 
+                  size={22} 
+                  color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
+                />
               </TouchableOpacity>
               <TouchableOpacity style={styles.detailsButton}>
                 <Text style={styles.detailsText}>Details</Text>
@@ -295,6 +422,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#F0E5C0',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
   },
   avatarLetter: {
     fontFamily: 'PlusJakartaSans-Bold',

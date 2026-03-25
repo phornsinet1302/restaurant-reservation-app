@@ -112,7 +112,7 @@ export default function BookingsScreen() {
 
   const handleModify = (booking: Booking) => {
     router.push({
-      pathname: '/modify-booking',
+      pathname: '../modify-booking',
       params: {
         id: booking.id,
         name: booking.name,

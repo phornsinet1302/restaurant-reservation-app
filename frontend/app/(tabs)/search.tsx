@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -7,24 +9,12 @@ import {
   Image,
   TouchableOpacity,
   ScrollView,
-  ImageSourcePropType,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
-
-/* ── Data ── */
-
-type SearchRestaurant = {
-  id: string;
-  name: string;
-  address: string;
-  description: string;
-  hours: string;
-  distance: string;
-  rating: string;
-  image: ImageSourcePropType;
-};
 
 const FILTERS = [
   { id: 'all', emoji: '🔍', label: 'All' },
@@ -33,64 +23,116 @@ const FILTERS = [
   { id: 'cafe', emoji: '☕', label: 'Café' },
 ];
 
-const NEARBY: SearchRestaurant[] = [
-  {
-    id: 'n1',
-    name: 'Pret A Manger',
-    address: '42 Fleet Street, City',
-    description: 'Fresh, handmade food and organic coffee,\nserved quickly and with a smile.',
-    hours: 'Open Until 3:00pm',
-    distance: '0.2 miles',
-    rating: '4.0',
-    image: require('@/assets/restaurant-4.jpg'),
-  },
-  {
-    id: 'n2',
-    name: 'Romeo Lane',
-    address: '7 Bell Yard, Holborn',
-    description: 'Experience the finest seasonal dining with\nan elegant and intimate atmosphere.',
-    hours: 'Open Until 11:00pm',
-    distance: '0.3 miles',
-    rating: '4.5',
-    image: require('@/assets/restaurant-1.jpg'),
-  },
-  {
-    id: 'n3',
-    name: 'SkyLounge Bar',
-    address: '14 Bishopsgate, EC2N',
-    description: 'Rooftop cocktails with panoramic city\nviews and a vibrant atmosphere.',
-    hours: 'Open Until 1:00am',
-    distance: '0.8 miles',
-    rating: '4.8',
-    image: require('@/assets/restaurant-2.jpg'),
-  },
-  {
-    id: 'n4',
-    name: 'Sakura Sushi House',
-    address: '23 Kingsway, Covent Garden',
-    description: 'Authentic Japanese cuisine crafted by\nmaster sushi chefs since 2005.',
-    hours: 'Open Until 10:30pm',
-    distance: '1.2 miles',
-    rating: '4.7',
-    image: require('@/assets/restaurant-3.jpg'),
-  },
-  {
-    id: 'n5',
-    name: 'The Golden Hind',
-    address: '73 Marylebone Lane, W1U',
-    description: 'Traditional British fish and chips in a\ncharming setting since 1914.',
-    hours: 'Open Until 10:00pm',
-    distance: '1.5 miles',
-    rating: '4.4',
-    image: require('@/assets/restaurant-1.jpg'),
-  },
-];
+import { API_CONFIG } from '@/app/config/apiConfig';
 
-/* ── Component ── */
+const API_URL = API_CONFIG.BASE_URL;
 
 export default function SearchScreen() {
+  const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [restaurants, setRestaurants] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [token, setToken] = useState<string>('');
+  const [toggleLoading, setToggleLoading] = useState(false);
   const router = useRouter();
+
+  // Load favorites on mount
+  useEffect(() => {
+    loadFavoritesAndToken();
+  }, []);
+
+  const loadFavoritesAndToken = async () => {
+    try {
+      const storedToken = await AsyncStorage.getItem('token');
+      if (storedToken) {
+        setToken(storedToken);
+        await fetchFavorites(storedToken);
+      }
+    } catch (error) {
+      console.warn('Failed to load favorites:', error);
+    }
+  };
+
+  const fetchFavorites = async (authToken: string) => {
+    try {
+      const response = await axios.get(`${API_URL}/api/favorites`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const favoriteIds = response.data.map((fav: any) => fav.restaurant_id);
+      setFavorites(favoriteIds);
+    } catch (error) {
+      console.warn('Failed to fetch favorites:', error);
+    }
+  };
+
+  const handleToggleFavorite = async (restaurantId: string, restaurantName: string) => {
+    if (!token) {
+      Alert.alert('Error', 'You must be logged in to favorite restaurants');
+      return;
+    }
+
+    setToggleLoading(true);
+    try {
+      const isFavorited = favorites.includes(restaurantId);
+
+      if (isFavorited) {
+        // Remove from favorites
+        await axios.delete(`${API_URL}/api/favorites/${restaurantId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setFavorites((prev) => prev.filter((id) => id !== restaurantId));
+      } else {
+        // Add to favorites
+        await axios.post(
+          `${API_URL}/api/favorites/${restaurantId}`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setFavorites((prev) => [...prev, restaurantId]);
+      }
+    } catch (error: any) {
+      console.error('Favorite toggle error:', error.response?.data || error.message);
+      Alert.alert('Error', 'Failed to update favorite. Please try again.');
+    } finally {
+      setToggleLoading(false);
+    }
+  };
+
+  // Fetch restaurants based on search term
+  const fetchRestaurants = async (query: string) => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      const url = query 
+        ? `${API_URL}/api/restaurants?search=${encodeURIComponent(query)}`
+        : `${API_URL}/api/restaurants`;
+      
+      const response = await axios.get(url);
+      setRestaurants(response.data || []);
+    } catch (err) {
+      console.error('Search error:', err);
+      setError('Failed to fetch restaurants');
+      setRestaurants([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm.length > 0) {
+        fetchRestaurants(searchTerm);
+      } else {
+        fetchRestaurants('');
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   return (
     <ScrollView
@@ -100,10 +142,10 @@ export default function SearchScreen() {
     >
       {/* Header */}
       <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.backButton}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Search nearby restaurants</Text>
+        <Text style={styles.headerTitle}>Search restaurants</Text>
       </View>
 
       {/* Search bar */}
@@ -111,9 +153,16 @@ export default function SearchScreen() {
         <Ionicons name="search" size={18} color={Colors.gray} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search restaurants..."
+          placeholder="Search by name or location..."
           placeholderTextColor={Colors.gray}
+          value={searchTerm}
+          onChangeText={setSearchTerm}
         />
+        {searchTerm ? (
+          <TouchableOpacity onPress={() => setSearchTerm('')}>
+            <Ionicons name="close" size={18} color={Colors.gray} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {/* Filter pills */}
@@ -144,72 +193,92 @@ export default function SearchScreen() {
         ))}
       </ScrollView>
 
-      {/* Count */}
-      <Text style={styles.countText}>
-        Nearby restaurants around you ({NEARBY.length})
-      </Text>
+      {/* Loading indicator */}
+      {loading && (
+        <View style={styles.centerContent}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Searching...</Text>
+        </View>
+      )}
+
+      {/* Error message */}
+      {error && !loading && (
+        <View style={styles.centerContent}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      {/* No results */}
+      {!loading && restaurants.length === 0 && searchTerm && (
+        <View style={styles.centerContent}>
+          <Ionicons name="search" size={48} color={Colors.gray} style={{ marginBottom: 12 }} />
+          <Text style={styles.noResultsText}>No restaurants found</Text>
+          <Text style={styles.noResultsSubText}>Try searching with different keywords</Text>
+        </View>
+      )}
+
+      {/* Count text */}
+      {!loading && restaurants.length > 0 && (
+        <Text style={styles.countText}>Found {restaurants.length} restaurant(s)</Text>
+      )}
 
       {/* Cards */}
-      {NEARBY.map((r) => (
+      {restaurants.map((r: any) => (
         <TouchableOpacity
           key={r.id}
           style={styles.card}
           activeOpacity={0.9}
           onPress={() =>
             router.push({
-              pathname: '/restaurant-detail',
+              pathname: '../restaurant-detail',
               params: {
+                id: r.id,
                 name: r.name,
-                rating: r.rating,
-                reviews: '3.2k',
-                address: r.address,
-                description: r.description.replace('\n', ' '),
-                hours: r.hours,
-                distance: r.distance,
+                address: r.address || 'No address provided',
+                description: r.description || 'No description',
               },
             } as any)
           }
         >
-          {/* Image */}
+          {/* Placeholder Image */}
           <View style={styles.cardImageWrapper}>
-            <Image source={r.image} style={styles.cardImage} />
+            <View style={styles.placeholderImage}>
+              <Ionicons name="restaurant" size={48} color={Colors.gray} />
+            </View>
             <View style={styles.ratingBadge}>
               <Ionicons name="star" size={13} color="#FFFBF0" />
-              <Text style={styles.ratingText}>{r.rating}</Text>
+              <Text style={styles.ratingText}>4.5</Text>
             </View>
           </View>
 
           {/* Name row */}
           <View style={styles.cardNameRow}>
-            <Text style={styles.cardName}>{r.name}</Text>
+            <Text style={styles.cardName} numberOfLines={1}>{r.name}</Text>
             <View style={styles.cardActions}>
-              <TouchableOpacity>
-                <Ionicons name="heart-outline" size={22} color={Colors.text} />
+              <TouchableOpacity
+                onPress={() => handleToggleFavorite(r.id, r.name)}
+                disabled={toggleLoading}
+              >
+                <Ionicons
+                  name={favorites.includes(r.id) ? 'heart' : 'heart-outline'}
+                  size={22}
+                  color={favorites.includes(r.id) ? Colors.accent : Colors.text}
+                />
               </TouchableOpacity>
               <TouchableOpacity style={styles.detailsBtn}>
-                <Text style={styles.detailsBtnText}>Details</Text>
+                <Text style={styles.detailsBtnText}>View</Text>
                 <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Address */}
-          <Text style={styles.cardAddress}>{r.address}</Text>
+          <Text style={styles.cardAddress} numberOfLines={1}>{r.address}</Text>
 
           {/* Description */}
-          <Text style={styles.cardDesc}>{r.description}</Text>
-
-          {/* Meta */}
-          <View style={styles.cardMeta}>
-            <View style={styles.metaItem}>
-              <Ionicons name="time-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{r.hours}</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <Ionicons name="location-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{r.distance}</Text>
-            </View>
-          </View>
+          {r.description && (
+            <Text style={styles.cardDesc} numberOfLines={2}>{r.description}</Text>
+          )}
         </TouchableOpacity>
       ))}
     </ScrollView>
@@ -324,6 +393,13 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  placeholderImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: Colors.lightGray || '#F5EFDC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   ratingBadge: {
     position: 'absolute',
     top: 14,
@@ -388,20 +464,37 @@ const styles = StyleSheet.create({
     color: Colors.gray,
     marginTop: 8,
   },
-  cardMeta: {
-    flexDirection: 'row',
+
+  /* Center content for loading/error/empty states */
+  centerContent: {
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 20,
-    marginTop: 10,
+    paddingVertical: 60,
+    paddingHorizontal: 20,
   },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: {
+  loadingText: {
     fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 13,
+    fontSize: 16,
+    color: Colors.text,
+    marginTop: 12,
+  },
+  errorText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 16,
+    color: Colors.error,
+    textAlign: 'center',
+  },
+  noResultsText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 18,
+    color: Colors.text,
+    marginTop: 12,
+  },
+  noResultsSubText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
     color: Colors.gray,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
