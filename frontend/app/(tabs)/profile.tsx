@@ -14,9 +14,11 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
 
 /* ── Data ── */
 
@@ -39,6 +41,17 @@ export default function ProfileScreen() {
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
+
+  // Check if user is guest when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (isGuest) {
+        setShowGuestModal(true);
+      }
+    }, [isGuest])
+  );
 
   // Load user profile data on mount
   useEffect(() => {
@@ -344,12 +357,12 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Header */}
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
       <Text style={styles.heading}>Profile</Text>
       <Text style={styles.subHeading}>Manage your account</Text>
 
@@ -555,7 +568,14 @@ export default function ProfileScreen() {
         <Ionicons name="log-out-outline" size={20} color={Colors.accent} />
         <Text style={styles.logoutText}>Log out</Text>
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Profile"
+      />
+    </View>
   );
 }
 

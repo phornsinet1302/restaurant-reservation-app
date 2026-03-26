@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const jwt = require('jsonwebtoken');
 
 const protect = async (req, res, next) => {
   try {
@@ -22,9 +23,44 @@ const protect = async (req, res, next) => {
     console.log('Token length:', token.length);
     console.log('Token first 30 chars:', token.substring(0, 30));
     console.log('Token last 10 chars:', '...' + token.substring(token.length - 10));
-    console.log('Verifying token with Supabase...');
     
-    // Verify token using Supabase's getUser method
+    // Try to verify as JWT first (for our custom tokens from email verification)
+    try {
+      console.log('Attempting JWT verification...');
+      let decoded;
+      const jwtSecret = process.env.JWT_SECRET;
+      const jwtSecretFallback = process.env.JWT_S3CRET;
+      
+      try {
+        decoded = jwt.verify(token, jwtSecret || 'your-secret-key-change-in-production');
+      } catch (err) {
+        // Try with fallback if first attempt fails
+        if (jwtSecretFallback) {
+          console.log('First JWT verification failed, trying fallback secret...');
+          decoded = jwt.verify(token, jwtSecretFallback);
+        } else {
+          throw err;
+        }
+      }
+      
+      console.log('✓ JWT token verified successfully');
+      
+      req.user = {
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role || 'customer'
+      };
+      
+      console.log('✓ User ID:', req.user.id);
+      console.log('✓ User email:', req.user.email);
+      console.log('=== AUTH MIDDLEWARE END (SUCCESS - JWT) ===\n');
+      return next();
+    } catch (jwtErr) {
+      console.log('JWT verification failed, trying Supabase...');
+    }
+
+    // If JWT fails, try Supabase verification
+    console.log('Verifying token with Supabase...');
     const { data: { user }, error } = await supabase.auth.getUser(token);
     
     if (error || !user) {
@@ -40,7 +76,7 @@ const protect = async (req, res, next) => {
       role: user.user_metadata?.role || 'customer'
     };
 
-    console.log('✓ Token verified successfully');
+    console.log('✓ Token verified successfully (Supabase)');
     console.log('✓ User ID:', req.user.id);
     console.log('✓ User email:', req.user.email);
     console.log('=== AUTH MIDDLEWARE END (SUCCESS) ===\n');

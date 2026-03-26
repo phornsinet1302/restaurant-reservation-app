@@ -10,8 +10,10 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
 
 /* ── Types ── */
 
@@ -88,6 +90,17 @@ const BOOKINGS: Booking[] = [
 export default function BookingsScreen() {
   const [activeTab, setActiveTab] = useState(0);
   const router = useRouter();
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
+
+  // Check if user is guest when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (isGuest) {
+        setShowGuestModal(true);
+      }
+    }, [isGuest])
+  );
 
   const tabStatusMap: Record<number, BookingStatus[]> = {
     0: ['Upcoming'],
@@ -139,13 +152,13 @@ export default function BookingsScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Header */}
-      <Text style={styles.heading}>Booking History</Text>
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <Text style={styles.heading}>Booking History</Text>
       <Text style={styles.subHeading}>Manage your reservations</Text>
 
       {/* Tab selector */}
@@ -244,7 +257,14 @@ export default function BookingsScreen() {
           )}
         </View>
       ))}
-    </ScrollView>
+      </ScrollView>
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Bookings"
+      />
+    </View>
   );
 }
 

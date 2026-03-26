@@ -15,6 +15,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
 
 const FILTERS = [
   { id: 'all', emoji: '🔍', label: 'All' },
@@ -36,6 +38,8 @@ export default function SearchScreen() {
   const [favorites, setFavorites] = useState<string[]>([]);
   const [token, setToken] = useState<string>('');
   const [toggleLoading, setToggleLoading] = useState(false);
+  const [showGuestModal, setShowGuestModal] = useState(false);
+  const { isGuest } = useAuth();
   const router = useRouter();
 
   // Load favorites on mount
@@ -68,6 +72,11 @@ export default function SearchScreen() {
   };
 
   const handleToggleFavorite = async (restaurantId: string, restaurantName: string) => {
+    if (isGuest) {
+      setShowGuestModal(true);
+      return;
+    }
+
     if (!token) {
       Alert.alert('Error', 'You must be logged in to favorite restaurants');
       return;
@@ -135,11 +144,11 @@ export default function SearchScreen() {
   }, [searchTerm]);
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
       {/* Header */}
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -281,7 +290,14 @@ export default function SearchScreen() {
           )}
         </TouchableOpacity>
       ))}
-    </ScrollView>
+      </ScrollView>
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Favorites"
+      />
+    </View>
   );
 }
 

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
+import { useAuth } from '@/hooks/useAuth';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * 1.19;
@@ -42,6 +43,7 @@ export default function WelcomeScreen() {
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const autoPlayTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { setIsGuest } = useAuth();
 
   const scrollToIndex = useCallback((index: number) => {
     flatListRef.current?.scrollToIndex({ index, animated: true });
@@ -176,7 +178,10 @@ export default function WelcomeScreen() {
           />
           <CustomButton
             title="Continue as Guest"
-            onPress={() => router.replace('/(tabs)')}
+            onPress={async () => {
+              await setIsGuest(true);
+              router.replace('/(tabs)');
+            }}
             variant="text"
           />
         </View>

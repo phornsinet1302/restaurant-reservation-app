@@ -61,6 +61,10 @@ export default function RootLayout() {
           name="help-support"
           options={{ animation: 'slide_from_right' }}
         />
+        <Stack.Screen
+          name="verify-email"
+          options={{ animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Oops!' }} />
       </Stack>
     </>

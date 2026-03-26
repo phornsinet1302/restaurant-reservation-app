@@ -14,12 +14,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // import RestaurantMap from '@/components/RestaurantMap'; // Disabled - requires native build
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
 
 const API_URL = API_CONFIG.BASE_URL;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -121,6 +123,8 @@ export default function RestaurantDetailScreen() {
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [token, setToken] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
   // const [restaurantLocation, setRestaurantLocation] = useState(null); // Disabled
   // const [locationLoading, setLocationLoading] = useState(true); // Disabled
 
@@ -403,16 +407,20 @@ export default function RestaurantDetailScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.bookTableBtn}
-            onPress={() =>
-              router.push({
-                pathname: '/modify-booking',
-                params: {
-                  restaurantId,
-                  name,
-                  address,
-                },
-              } as any)
-            }
+            onPress={() => {
+              if (isGuest) {
+                setShowGuestModal(true);
+              } else {
+                router.push({
+                  pathname: '/modify-booking',
+                  params: {
+                    restaurantId,
+                    name,
+                    address,
+                  },
+                } as any);
+              }
+            }}
           >
             <Text style={styles.bookTableText}>Book a Table</Text>
           </TouchableOpacity>
@@ -437,6 +445,12 @@ export default function RestaurantDetailScreen() {
         <View style={{ height: 40 }} />
         </View>
       </ScrollView>
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Booking"
+      />
     </View>
   );
 }

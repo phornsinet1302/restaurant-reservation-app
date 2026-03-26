@@ -16,6 +16,8 @@ import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -39,26 +41,48 @@ export default function FavoritesScreen() {
   const [favorites, setFavorites] = useState<FavoriteRestaurant[]>([]);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string>('');
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
-      loadFavorites();
-    }, [])
+      if (isGuest) {
+        setShowGuestModal(true);
+      } else {
+        loadFavorites();
+      }
+    }, [isGuest])
   );
 
   const loadFavorites = async () => {
     try {
       setLoading(true);
       const storedToken = await AsyncStorage.getItem('token');
+      
+      console.log('=== FAVORITES DEBUG ===');
+      console.log('Token exists:', !!storedToken);
+      if (storedToken) {
+        console.log('Token length:', storedToken.length);
+        console.log('Token first 30 chars:', storedToken.substring(0, 30));
+        console.log('Token type:', typeof storedToken);
+      }
+      
       if (!storedToken) {
-        Alert.alert('Error', 'You must be logged in to view favorites');
+        console.log('❌ No token found in AsyncStorage');
+        Alert.alert('Error', 'You must be logged in to view favorites. Please sign up or login first.');
         setLoading(false);
         return;
       }
 
       setToken(storedToken);
+      console.log('Making request to:', `${API_URL}/api/favorites`);
+      console.log('Authorization header:', `Bearer ${storedToken.substring(0, 30)}...`);
+      
       const response = await axios.get(`${API_URL}/api/favorites`, {
-        headers: { Authorization: `Bearer ${storedToken}` },
+        headers: { 
+          Authorization: `Bearer ${storedToken}`,
+          'Content-Type': 'application/json'
+        },
       });
 
       // Map backend response to restaurant type
@@ -197,6 +221,12 @@ export default function FavoritesScreen() {
           )}
         </ScrollView>
       )}
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Favorites"
+      />
     </View>
   );
 }

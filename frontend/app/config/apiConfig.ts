@@ -1,8 +1,12 @@
 /**
  * Configuration for API endpoints
+ * 
+ * For Expo testing:
+ * - Simulator: use 'http://localhost:3000'
+ * - Physical device: use 'http://10.0.34.15:3000' (your machine's local IP)
  */
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://10.1.64.40:3000';
+const API_BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
 
 export const API_CONFIG = {
   BASE_URL: API_BASE_URL,
