@@ -309,17 +309,30 @@ exports.googleSignUp = async (req, res) => {
     }
 
     // Use access_token/id_token to fetch user info from Google
-    const token = access_token || id_token;
-    const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    let googleUser;
 
-    if (!googleUserResponse.ok) {
-      console.error("Google verification failed:", googleUserResponse.status, googleUserResponse.statusText);
-      return res.status(400).json({ error: "Failed to verify Google token" });
+    if (id_token) {
+      // Verify id_token via Google's tokeninfo endpoint
+      const tokenInfoResponse = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(id_token)}`);
+      if (!tokenInfoResponse.ok) {
+        console.error("Google id_token verification failed:", tokenInfoResponse.status);
+        return res.status(400).json({ error: "Failed to verify Google ID token" });
+      }
+      const tokenInfo = await tokenInfoResponse.json();
+      googleUser = { email: tokenInfo.email, name: tokenInfo.name, id: tokenInfo.sub };
+    } else {
+      // Use access_token to fetch user info from Google
+      const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${access_token}` }
+      });
+      if (!googleUserResponse.ok) {
+        console.error("Google verification failed:", googleUserResponse.status, googleUserResponse.statusText);
+        return res.status(400).json({ error: "Failed to verify Google token" });
+      }
+      googleUser = await googleUserResponse.json();
+      googleUser = { email: googleUser.email, name: googleUser.name, id: googleUser.id };
     }
 
-    const googleUser = await googleUserResponse.json();
     const { email, name: fullName, id: googleId } = googleUser;
 
     if (!email) {
@@ -379,9 +392,13 @@ exports.googleSignUp = async (req, res) => {
     }
 
     // Create new user
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUpWithPassword({
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email: email,
-      password: googleId + email + 'google'
+      password: googleId + email + 'google',
+      options: {
+        data: { full_name: fullName },
+        emailRedirectTo: undefined,
+      }
     });
 
     if (signUpError) {
@@ -389,7 +406,24 @@ exports.googleSignUp = async (req, res) => {
       return res.status(400).json({ error: signUpError.message });
     }
 
+    if (!signUpData?.user) {
+      console.error("Google Sign Up: No user returned from signUp");
+      return res.status(400).json({ error: "Sign up failed - no user created" });
+    }
+
     const userId = signUpData.user.id;
+
+    // Auto sign-in to get a valid session (signUp with email confirmation may not return a session)
+    let session = signUpData.session;
+    if (!session) {
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: googleId + email + 'google'
+      });
+      if (!signInError && signInData?.session) {
+        session = signInData.session;
+      }
+    }
 
     // Insert into public.users
     const { error: userError } = await supabase
@@ -415,9 +449,10 @@ exports.googleSignUp = async (req, res) => {
 
     return res.status(201).json({
       message: "Google sign up successful!",
-      session: signUpData.session,
+      session: session || { access_token: require('jsonwebtoken').sign({ sub: userId, email }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' }) },
       user: {
-        ...signUpData.user,
+        id: userId,
+        email: email,
         role: newProfile?.role || 'customer',
         fullName: newProfile?.name,
         phone: newProfile?.phone,
@@ -441,17 +476,28 @@ exports.googleLogin = async (req, res) => {
     }
 
     // Use access_token to fetch user info from Google
-    const token = access_token || id_token;
-    const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    let googleUser;
 
-    if (!googleUserResponse.ok) {
-      console.error("Google verification failed:", googleUserResponse.status, googleUserResponse.statusText);
-      return res.status(400).json({ error: "Failed to verify Google token" });
+    if (id_token) {
+      const tokenInfoResponse = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(id_token)}`);
+      if (!tokenInfoResponse.ok) {
+        console.error("Google id_token verification failed:", tokenInfoResponse.status);
+        return res.status(400).json({ error: "Failed to verify Google ID token" });
+      }
+      const tokenInfo = await tokenInfoResponse.json();
+      googleUser = { email: tokenInfo.email, name: tokenInfo.name, id: tokenInfo.sub };
+    } else {
+      const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${access_token}` }
+      });
+      if (!googleUserResponse.ok) {
+        console.error("Google verification failed:", googleUserResponse.status, googleUserResponse.statusText);
+        return res.status(400).json({ error: "Failed to verify Google token" });
+      }
+      googleUser = await googleUserResponse.json();
+      googleUser = { email: googleUser.email, name: googleUser.name, id: googleUser.id };
     }
 
-    const googleUser = await googleUserResponse.json();
     const { email, name: fullName, id: googleId } = googleUser;
 
     if (!email) {
