@@ -1,48 +1,132 @@
 const supabase = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 
-// @desc     Register new user
+// ❌ REMOVED AsyncStorage import from here
+
 exports.registerUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    console.log('Registering email:', email);
+    const { email, password, role = 'customer', fullName, phone, dateOfBirth, bio, identity, restaurantProfile } = req.body;
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password
-    });
+    // Validation
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
 
-    if (error) throw error;
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
 
-    res.status(201).json({ 
-      message: "User created! Please check your email for confirmation.", 
-      user: data.user 
-    });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(400).json({ error: error.message });
-  }
-};
-
-// @desc     Login user
-exports.loginUser = async (req, res) => { 
-  try {
-    const { email, password } = req.body;
-    
-    const { data, error } = await supabase.auth.signInWithPassword({
+    // 1. Create user in Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
     });
 
-    if (error) return res.status(401).json({ error: error.message });
+    if (authError) return res.status(400).json({ error: authError.message });
 
-    // This data.session contains your access_token and refresh_token
-    return res.status(200).json({
-      message: "Logged in",
-      session: data.session, 
-      user: data.user
+    const userId = authData.user.id;
+
+    // 2. Insert into public.users with full profile info
+    const userData = {
+      id: userId,
+      email: email,
+      name: fullName || email.split('@')[0], // Use email part if no fullName provided
+      phone: phone || null, // Save phone number
+      role: role,
+    };
+
+    // Add dateOfBirth and bio for customer signups
+    if (role === 'customer') {
+      userData.date_of_birth = dateOfBirth || null;
+      userData.bio = bio || null;
+    }
+
+    // Only add identity fields for restaurant users
+    if (role === 'restaurant') {
+      userData.legal_name = identity?.legalName || null;
+      userData.dob = identity?.dob || null;
+      userData.nationality = identity?.nationality || null;
+      userData.city_province = identity?.cityProvince || null;
+      userData.address = identity?.currentAddress || null;
+    }
+
+    const { error: userError } = await supabase
+      .from('users')
+      .insert([userData]);
+
+    if (userError) {
+      console.error("❌ DATABASE ERROR:", userError.message);
+      return res.status(400).json({ error: "Registration failed: " + userError.message });
+    }
+
+    // 3. Insert into restaurants if owner
+    if (role === 'restaurant' && restaurantProfile) {
+      await supabase.from('restaurants').insert([{
+        merchant_id: userId,
+        name: restaurantProfile.nameEn,
+        address: restaurantProfile.address
+      }]);
+    }
+
+    return res.status(201).json({ 
+      message: role === 'customer' ? "Signup successful!" : "Restaurant application submitted!",
+      session: authData.session,
+      user: {
+        ...authData.user,
+        fullName,
+        phone,
+        dateOfBirth,
+        bio
+      }
     });
+
   } catch (error) {
+    console.error("Global Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+// @desc    Login user (with Role Detection)
+exports.loginUser = async (req, res) => { 
+  try {
+    const { email, password } = req.body;
+    
+    // 1. Authenticate with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError) return res.status(401).json({ error: authError.message });
+
+    // 2. Fetch the user's full profile from our custom public.users table
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('role, name, phone, date_of_birth, bio')
+      .eq('id', authData.user.id)
+      .single();
+
+    if (profileError) {
+      console.error('Profile fetch error:', profileError);
+      // Fallback: If profile fails, we still have the auth session
+    }
+
+    // 3. Return everything to the Frontend
+    return res.status(200).json({
+      message: "Logged in successfully",
+      session: authData.session, 
+      user: {
+        ...authData.user,
+        email: authData.user.email,  // Explicitly include email
+        role: profile?.role || 'customer', // Default to customer if not found
+        fullName: profile?.name,
+        phone: profile?.phone,
+        dateOfBirth: profile?.date_of_birth,
+        bio: profile?.bio
+      }
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ error: "Server error during login" });
   }
 };
@@ -87,48 +171,714 @@ exports.logoutUser = async (req, res) => {
   return res.status(200).json({ message: "Logged out successfully" });
 };
 
+// 1. Get Profile
 exports.getProfile = async (req, res) => {
-  // The middleware already attached the user to req.user!
-  res.status(200).json({ 
-    message: "Profile fetched successfully",
-    user: req.user 
-  });
-};
-
-// @desc     Get current user profile
-exports.getProfile = async (req, res) => {
-  // req.user was set by our middleware security guard
-  res.status(200).json({
-    success: true,
-    user: req.user
-  });
-};
-
-exports.updateProfile = async (req, res) => {
   try {
-    const { fullName } = req.body;
-    
-    // Extract the token from the "Authorization: Bearer <token>" header
-    const token = req.headers.authorization?.split(' ')[1];
+    const userId = req.user.id;
 
-    if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    // Pass the token inside the 'jwt' field to fix the "Auth session missing" error
-    const { data, error } = await supabase.auth.updateUser(
-      { data: { full_name: fullName } },
-      { jwt: token } 
-    );
+    // Fetch the profile and attempt to join with restaurants
+    const { data: profile, error } = await supabase
+      .from('users')
+      .select('*, restaurants(*)') 
+      .eq('id', userId)
+      .single();
 
     if (error) throw error;
 
     res.status(200).json({
       success: true,
+      user: profile 
+    });
+  } catch (error) {
+    console.error("Profile Fetch Error:", error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// 2. Update Profile
+exports.updateProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { fullName, phone, dateOfBirth, bio, restaurantData } = req.body;
+
+    console.log('\n=== UPDATE PROFILE START ===');
+    console.log('🆔 User ID:', userId);
+    console.log('📝 Received data:', { fullName, phone, dateOfBirth, bio });
+
+    // Validate date format if provided
+    if (dateOfBirth) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
+      if (!dateRegex.test(dateOfBirth)) {
+        console.log('❌ Invalid date format, expected YYYY-MM-DD');
+        return res.status(400).json({ error: 'Invalid date format. Please use YYYY-MM-DD (e.g., 1990-03-15)' });
+      }
+      
+      // Validate it's a valid date
+      const dateObj = new Date(dateOfBirth);
+      if (isNaN(dateObj.getTime())) {
+        console.log('❌ Invalid date value');
+        return res.status(400).json({ error: 'Invalid date value' });
+      }
+    }
+
+    // Prepare update object with all available fields
+    const updateData = {};
+    if (fullName) updateData.name = fullName;
+    if (phone) updateData.phone = phone;
+    if (dateOfBirth) updateData.date_of_birth = dateOfBirth;
+    if (bio) updateData.bio = bio;
+
+    console.log('💾 Update data to save:', updateData);
+
+    const { error: userError } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', userId);
+
+    if (userError) {
+      console.error('❌ UPDATE ERROR:', userError);
+      throw userError;
+    }
+    console.log('✅ User updated successfully');
+
+    // B. Update Restaurant table only if user is a merchant/restaurant
+    if (restaurantData) {
+      console.log('🏪 Updating restaurant data...');
+      const { error: restError } = await supabase
+        .from('restaurants')
+        .update({
+          name: restaurantData.nameEn,
+          address: restaurantData.address,
+          description: restaurantData.description
+        })
+        .eq('merchant_id', userId);
+
+      if (restError) {
+        console.error('❌ RESTAURANT UPDATE ERROR:', restError);
+        throw restError;
+      }
+      console.log('✅ Restaurant updated successfully');
+    }
+
+    // Fetch and return the updated user profile
+    console.log('📚 Fetching updated profile from database...');
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('role, name, phone, date_of_birth, bio, email')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) {
+      console.error('❌ PROFILE FETCH ERROR:', profileError);
+      throw profileError;
+    }
+
+    console.log('✅ Profile fetched:', profile);
+    console.log('=== UPDATE PROFILE END ===\n');
+
+    res.status(200).json({
+      success: true,
       message: "Profile updated successfully",
+      user: {
+        id: userId,
+        email: profile.email,
+        role: profile.role,
+        fullName: profile.name,
+        phone: profile.phone,
+        dateOfBirth: profile.date_of_birth,
+        bio: profile.bio
+      }
+    });
+  } catch (error) {
+    console.error("\n❌ UPDATE PROFILE ERROR:", error.message);
+    console.error('Full error:', error);
+    console.log('=== UPDATE PROFILE END (ERROR) ===\n');
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// @desc    Google OAuth Sign Up
+exports.googleSignUp = async (req, res) => {
+  try {
+    const { access_token, id_token } = req.body;
+
+    if (!access_token && !id_token) {
+      return res.status(400).json({ error: "access_token or id_token is required" });
+    }
+
+    // Use access_token/id_token to fetch user info from Google
+    const token = access_token || id_token;
+    const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!googleUserResponse.ok) {
+      console.error("Google verification failed:", googleUserResponse.status, googleUserResponse.statusText);
+      return res.status(400).json({ error: "Failed to verify Google token" });
+    }
+
+    const googleUser = await googleUserResponse.json();
+    const { email, name: fullName, id: googleId } = googleUser;
+
+    if (!email) {
+      return res.status(400).json({ error: "Could not retrieve email from Google" });
+    }
+
+    // Check if user already exists
+    const { data: existingUser, error: queryError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (!queryError && existingUser) {
+      // User exists, sign them in instead
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: googleId + email + 'google'
+      });
+
+      if (signInError) {
+        console.error("Sign in error for existing user:", signInError);
+        // Generate JWT token as fallback
+        const jwt = require('jsonwebtoken');
+        const jwtToken = jwt.sign(
+          { sub: existingUser.id, email: email },
+          process.env.JWT_SECRET || 'your-secret-key',
+          { expiresIn: '7d' }
+        );
+
+        const { data: profile } = await supabase
+          .from('users')
+          .select('role, name, phone, date_of_birth, bio')
+          .eq('id', existingUser.id)
+          .single();
+
+        return res.status(200).json({
+          message: "User already exists. Logged in successfully!",
+          session: { access_token: jwtToken },
+          user: {
+            id: existingUser.id,
+            email: email,
+            role: profile?.role || 'customer',
+            fullName: profile?.name,
+            phone: profile?.phone,
+            dateOfBirth: profile?.date_of_birth,
+            bio: profile?.bio
+          }
+        });
+      }
+
+      return res.status(200).json({
+        message: "User already exists. Logged in successfully!",
+        session: signInData.session,
+        user: signInData.user
+      });
+    }
+
+    // Create new user
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUpWithPassword({
+      email: email,
+      password: googleId + email + 'google'
+    });
+
+    if (signUpError) {
+      console.error("Google Sign Up Error:", signUpError.message);
+      return res.status(400).json({ error: signUpError.message });
+    }
+
+    const userId = signUpData.user.id;
+
+    // Insert into public.users
+    const { error: userError } = await supabase
+      .from('users')
+      .insert([{
+        id: userId,
+        email: email,
+        name: fullName || email.split('@')[0],
+        role: 'customer'
+      }]);
+
+    if (userError && !userError.message.includes('duplicate')) {
+      console.error("Google Sign Up DB Error:", userError.message);
+      return res.status(400).json({ error: userError.message });
+    }
+
+    // Fetch the profile with all fields
+    const { data: newProfile } = await supabase
+      .from('users')
+      .select('role, name, phone, date_of_birth, bio')
+      .eq('id', userId)
+      .single();
+
+    return res.status(201).json({
+      message: "Google sign up successful!",
+      session: signUpData.session,
+      user: {
+        ...signUpData.user,
+        role: newProfile?.role || 'customer',
+        fullName: newProfile?.name,
+        phone: newProfile?.phone,
+        dateOfBirth: newProfile?.date_of_birth,
+        bio: newProfile?.bio
+      }
+    });
+  } catch (error) {
+    console.error("Google Sign Up Error:", error);
+    res.status(500).json({ error: "Google sign up failed: " + error.message });
+  }
+};
+
+// @desc    Google OAuth Login
+exports.googleLogin = async (req, res) => {
+  try {
+    const { access_token, id_token } = req.body;
+
+    if (!access_token && !id_token) {
+      return res.status(400).json({ error: "access_token or id_token is required" });
+    }
+
+    // Use access_token to fetch user info from Google
+    const token = access_token || id_token;
+    const googleUserResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (!googleUserResponse.ok) {
+      console.error("Google verification failed:", googleUserResponse.status, googleUserResponse.statusText);
+      return res.status(400).json({ error: "Failed to verify Google token" });
+    }
+
+    const googleUser = await googleUserResponse.json();
+    const { email, name: fullName, id: googleId } = googleUser;
+
+    if (!email) {
+      return res.status(400).json({ error: "Could not retrieve email from Google" });
+    }
+
+    // Check if user exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found. Please sign up first." });
+    }
+
+    // Sign in with password (same password as signup)
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: googleId + email + 'google'
+    });
+
+    if (authError) {
+      console.error("Google Login SignIn Error:", authError.message);
+      // If password doesn't match, user may have signed up differently
+      // Create a JWT token instead
+      const jwt = require('jsonwebtoken');
+      const jwtToken = jwt.sign(
+        { sub: existingUser.id, email: email },
+        process.env.JWT_SECRET || 'your-secret-key',
+        { expiresIn: '7d' }
+      );
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, name, phone, date_of_birth, bio')
+        .eq('id', existingUser.id)
+        .single();
+
+      return res.status(200).json({
+        message: "Google login successful",
+        session: { access_token: jwtToken },
+        user: {
+          id: existingUser.id,
+          email: email,
+          role: profile?.role || 'customer',
+          fullName: profile?.name,
+          phone: profile?.phone,
+          dateOfBirth: profile?.date_of_birth,
+          bio: profile?.bio
+        }
+      });
+    }
+
+    // Fetch user profile
+    const { data: profile } = await supabase
+      .from('users')
+      .select('role, name, phone, date_of_birth, bio')
+      .eq('id', authData.user.id)
+      .single();
+
+    return res.status(200).json({
+      message: "Google login successful",
+      session: authData.session,
+      user: {
+        ...authData.user,
+        role: profile?.role || 'customer',
+        fullName: profile?.name,
+        phone: profile?.phone,
+        dateOfBirth: profile?.date_of_birth,
+        bio: profile?.bio
+      }
+    });
+  } catch (error) {
+    console.error("Google Login Error:", error);
+    res.status(500).json({ error: "Google login failed: " + error.message });
+  }
+};
+
+// @desc    Apple OAuth Sign Up
+exports.appleSignUp = async (req, res) => {
+  try {
+    const { identityToken, user } = req.body;
+
+    if (!identityToken) {
+      return res.status(400).json({ error: "identityToken is required" });
+    }
+
+    // Decode identity token (without verification for now - in production use Apple's public key)
+    const parts = identityToken.split('.');
+    if (parts.length !== 3) {
+      return res.status(400).json({ error: "Invalid identity token format" });
+    }
+
+    let decoded;
+    try {
+      decoded = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    } catch (e) {
+      return res.status(400).json({ error: "Failed to decode identity token" });
+    }
+
+    const email = user?.email || decoded.email || 'apple-user@example.com';
+    const fullName = user?.name 
+      ? `${user.name.givenName || ''} ${user.name.familyName || ''}`.trim()
+      : email.split('@')[0];
+    const appleId = decoded.sub || 'apple-' + Date.now();
+
+    if (!email || email === 'apple-user@example.com') {
+      return res.status(400).json({ error: "Could not retrieve email from Apple" });
+    }
+
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    let authData;
+    if (existingUser) {
+      // User exists, try to sign in
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: appleId + email + 'apple'
+      });
+
+      if (signInError && !signInError.message.includes('Invalid')) {
+        console.error("Apple sign in error:", signInError);
+      }
+
+      // Generate JWT token
+      const jwt_token = require('jsonwebtoken');
+      const token = jwt_token.sign(
+        { sub: existingUser.id, email: email },
+        process.env.JWT_SECRET || 'your-secret-key',
+        { expiresIn: '24h' }
+      );
+
+      authData = {
+        session: { access_token: token },
+        user: { id: existingUser.id, email: email }
+      };
+    } else {
+      // Create new user
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUpWithPassword({
+        email: email,
+        password: appleId + email + 'apple'
+      });
+
+      if (signUpError) {
+        console.error("Apple Sign Up Error:", signUpError.message);
+        return res.status(400).json({ error: signUpError.message });
+      }
+
+      const userId = signUpData.user.id;
+
+      // Insert into public.users
+      const { error: userError } = await supabase
+        .from('users')
+        .insert([{
+          id: userId,
+          email: email,
+          name: fullName,
+          role: 'customer'
+        }]);
+
+      if (userError && !userError.message.includes('duplicate')) {
+        console.error("Apple Sign Up DB Error:", userError.message);
+        return res.status(400).json({ error: userError.message });
+      }
+
+      authData = signUpData;
+    }
+
+    return res.status(201).json({
+      message: "Apple sign up successful!",
+      session: authData.session,
+      user: authData.user
+    });
+  } catch (error) {
+    console.error("Apple Sign Up Error:", error);
+    res.status(500).json({ error: "Apple sign up failed: " + error.message });
+  }
+};
+
+// @desc    Apple OAuth Login
+exports.appleLogin = async (req, res) => {
+  try {
+    const { identityToken, user } = req.body;
+
+    if (!identityToken) {
+      return res.status(400).json({ error: "identityToken is required" });
+    }
+
+    // Decode identity token
+    const parts = identityToken.split('.');
+    if (parts.length !== 3) {
+      return res.status(400).json({ error: "Invalid identity token format" });
+    }
+
+    let decoded;
+    try {
+      decoded = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    } catch (e) {
+      return res.status(400).json({ error: "Failed to decode identity token" });
+    }
+
+    const email = user?.email || decoded.email || 'apple-user@example.com';
+    const appleId = decoded.sub || 'apple-' + Date.now();
+
+    if (!email || email === 'apple-user@example.com') {
+      return res.status(400).json({ error: "Could not retrieve email from Apple" });
+    }
+
+    // Check if user exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found. Please sign up first." });
+    }
+
+    // Sign in with password (same password as signup)
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: appleId + email + 'apple'
+    });
+
+    if (authError) {
+      console.error("Apple Login SignIn Error:", authError.message);
+      // If password doesn't match, user may have signed up differently
+      // Create a JWT token instead
+      const jwt = require('jsonwebtoken');
+      const jwtToken = jwt.sign(
+        { sub: existingUser.id, email: email },
+        process.env.JWT_SECRET || 'your-secret-key',
+        { expiresIn: '7d' }
+      );
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, name')
+        .eq('id', existingUser.id)
+        .single();
+
+      return res.status(200).json({
+        message: "Apple login successful",
+        session: { access_token: jwtToken },
+        user: {
+          id: existingUser.id,
+          email: email,
+          role: profile?.role || 'customer',
+          fullName: profile?.name,
+        }
+      });
+    }
+
+    // Fetch user profile
+    const { data: profile } = await supabase
+      .from('users')
+      .select('role, name')
+      .eq('id', authData.user.id)
+      .single();
+
+    return res.status(200).json({
+      message: "Apple login successful",
+      session: authData.session,
+      user: {
+        ...authData.user,
+        role: profile?.role || 'customer',
+        fullName: profile?.name,
+      }
+    });
+  } catch (error) {
+    console.error("Apple Login Error:", error);
+    res.status(500).json({ error: "Apple login failed: " + error.message });
+  }
+};
+
+// @desc    Verify Email Code
+exports.verifyEmailCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+      return res.status(400).json({ error: "Email and code are required" });
+    }
+
+    // Get the stored verification code
+    const emailController = require('./emailController');
+    const storedCodeData = emailController.verificationCodes.get(email);
+
+    // Validate the code exists and hasn't expired
+    if (!storedCodeData) {
+      return res.status(400).json({ error: "No verification code found. Please request a new one." });
+    }
+
+    if (Date.now() > storedCodeData.expiry) {
+      // Code has expired, remove it
+      emailController.verificationCodes.delete(email);
+      return res.status(400).json({ error: "Verification code has expired. Please request a new one." });
+    }
+
+    // Check if the code matches
+    if (code !== storedCodeData.code) {
+      return res.status(400).json({ error: "Invalid verification code" });
+    }
+
+    // Remove the used code
+    emailController.verificationCodes.delete(email);
+
+    // In production, you'd also mark email as verified in the database
+    // For now, just confirm the verification was successful
+    console.log('Email verified for:', email);
+
+    res.status(200).json({ 
+      message: "Email verified successfully", 
+      success: true 
+    });
+  } catch (error) {
+    console.error("Email verification error:", error);
+    res.status(500).json({ error: "Email verification failed: " + error.message });
+  }
+};
+
+// @desc    Reset Password with token
+exports.resetPassword = async (req, res) => {
+  try {
+    const { password, confirmPassword } = req.body;
+    const userId = req.user.id; // From auth middleware
+
+    if (!password || !confirmPassword) {
+      return res.status(400).json({ error: "Password and confirm password are required" });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ error: "Passwords do not match" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    // Update password in Supabase Auth
+    const { data, error } = await supabase.auth.updateUser({
+      password: password
+    });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(200).json({ 
+      message: "Password reset successfully",
       user: data.user
     });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    console.error("Reset Password Error:", error);
+    res.status(500).json({ error: "Failed to reset password: " + error.message });
+  }
+};
+
+// @desc    Complete profile setup after first login
+exports.completeProfileSetup = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { fullName, phone, bio } = req.body;
+
+    if (!fullName) {
+      return res.status(400).json({ error: "Full name is required" });
+    }
+
+    console.log('Completing profile for user:', userId);
+    console.log('Data:', { fullName, phone, bio });
+
+    // Update user profile in Supabase
+    const { data, error } = await supabase
+      .from('users')
+      .update({
+        name: fullName,
+        phone: phone || null,
+      })
+      .eq('id', userId)
+      .select();
+
+    if (error) {
+      console.error('Supabase update error:', error);
+      return res.status(400).json({ error: "Failed to update profile: " + error.message });
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.status(200).json({
+      message: "Profile setup completed successfully",
+      user: data[0]
+    });
+  } catch (error) {
+    console.error("Profile Setup Error:", error);
+    res.status(500).json({ error: "Failed to complete profile setup: " + error.message });
+  }
+};
+
+// @desc    Check if user profile is complete
+exports.checkProfileCompletion = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, phone, email, profile_completed')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(200).json({
+      profileCompleted: data.profile_completed === true,
+      user: data
+    });
+  } catch (error) {
+    console.error("Check Profile Error:", error);
+    res.status(500).json({ error: "Failed to check profile: " + error.message });
   }
 };

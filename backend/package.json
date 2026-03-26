@@ -16,6 +16,7 @@
     "@supabase/supabase-js": "^2.99.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
+    "expo": "^55.0.8",
     "express": "^5.2.1",
     "nodemailer": "^8.0.2",
     "pg": "^8.20.0",

@@ -22,6 +22,30 @@ const User = sequelize.define('User', {
   role: {
     type: DataTypes.ENUM('admin', 'staff', 'customer'),
     defaultValue: 'customer'
+  },
+  verification_code: {
+    type: DataTypes.STRING,
+    allowNull: true
+  },
+  verification_code_expiry: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  email_verified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  profile_completed: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  date_of_birth: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  bio: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 });
 
