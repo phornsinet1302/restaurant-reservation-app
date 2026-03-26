@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, Alert } from 'react-native';
 import axios from 'axios';
 import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
+import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -21,16 +21,31 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  // Use Web Client ID for Expo Go testing
-  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || 'YOUR_WEB_CLIENT_ID';
+  // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
+  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
+  const redirectUri = Platform.OS === 'ios'
+    ? `com.googleusercontent.apps.${iosClientId.split('.apps.googleusercontent.com')[0]}:/oauthredirect`
+    : 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: webClientId,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || 'YOUR_IOS_CLIENT_ID',
-    webClientId: webClientId,
-    scopes: ['profile', 'email'],
-    usePKCE: true,
-  });
+  const googleClientId = Platform.OS === 'ios'
+    ? iosClientId
+    : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
+
+  const discovery = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  };
+
+  const [request, response, promptAsync] = useAuthRequest(
+    {
+      clientId: googleClientId,
+      redirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: ResponseType.Code,
+      usePKCE: true,
+    },
+    discovery
+  );
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
@@ -39,16 +54,36 @@ export default function LoginScreen() {
       console.log('Google auth result:', result);
       
       if (result?.type === 'success') {
-        const { access_token } = result.params;
+        const { code } = result.params;
         
-        if (!access_token) {
-          Alert.alert('Error', 'Failed to get Google access token');
+        if (!code) {
+          Alert.alert('Error', 'Failed to get authorization code');
+          return;
+        }
+
+        // Exchange code for tokens (no client_secret needed for iOS public client)
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: googleClientId,
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code',
+            code_verifier: request?.codeVerifier || '',
+          }).toString(),
+        });
+
+        const tokens = await tokenResponse.json();
+
+        if (!tokens.access_token) {
+          Alert.alert('Error', tokens.error_description || 'Token exchange failed');
           return;
         }
 
         console.log('Sending access_token to backend...');
         const response = await axios.post(API_CONFIG.ENDPOINTS.AUTH.GOOGLE_LOGIN, {
-          access_token,
+          access_token: tokens.access_token,
         });
 
         console.log('Backend response:', response.data);
