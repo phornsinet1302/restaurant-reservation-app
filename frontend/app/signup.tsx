@@ -66,7 +66,7 @@ export default function SignUpScreen() {
         });
 
         console.log('Backend response:', response.data);
-        const token = response.data.session?.access_token;
+        const token = response.data.access_token || response.data.session?.access_token;
         if (token) {
           await AsyncStorage.setItem('token', token);
           
@@ -119,7 +119,7 @@ export default function SignUpScreen() {
           user: credential.user,
         });
 
-        const token = response.data.session?.access_token;
+        const token = response.data.access_token || response.data.session?.access_token;
         if (token) {
           await AsyncStorage.setItem('token', token);
           
@@ -194,10 +194,26 @@ export default function SignUpScreen() {
         });
         
         console.log('Signup response:', response.data);
+        console.log('Full response data structure:', JSON.stringify(response.data, null, 2));
         
         // Store token and user info
-        if (response.data.session?.access_token) {
-          const token = response.data.session.access_token;
+        let token = null;
+        
+        // Try multiple paths to find the token
+        if (response.data.access_token) {
+          token = response.data.access_token;
+          console.log('✓ Token found in response.data.access_token (primary)');
+        } else if (response.data.session?.access_token) {
+          token = response.data.session.access_token;
+          console.log('✓ Token found in response.data.session.access_token (fallback 1)');
+        } else if (response.data.session) {
+          console.log('⚠️  Session exists but no direct access_token found. Session structure:', response.data.session);
+          token = response.data.session.access_token;
+        } else {
+          console.log('❌ No session or access_token found in response');
+        }
+        
+        if (token) {
           console.log('=== TOKEN STORAGE START ===');
           console.log('Token length:', token.length);
           console.log('Token first 30 chars:', token.slice(0, 30));
@@ -210,6 +226,9 @@ export default function SignUpScreen() {
           console.log('Verification - Token retrieved:', verifyToken ? 'YES ✓' : 'NO ❌');
           console.log('Verification - Tokens match:', verifyToken === token ? 'YES ✓' : 'NO ❌');
           console.log('=== TOKEN STORAGE END ===');
+        } else {
+          console.log('⚠️  WARNING: No token could be extracted from signup response!');
+          console.log('Response keys:', Object.keys(response.data));
         }
         
         // Also store user info for later use
@@ -236,9 +255,12 @@ export default function SignUpScreen() {
           // Don't fail the signup if email sending fails, just log it
         }
 
-        Alert.alert('Success', 'Signup successful! Welcome!');
-        // Route to home page (tabs)
-        router.replace('/(tabs)');
+        Alert.alert('Success', 'Signup successful! Please verify your email.');
+        // Route to email verification page
+        router.replace({
+          pathname: '/verify-email',
+          params: { email }
+        });
       } catch (error) {
         console.log('Signup error:', error);
         let errorMessage = 'Signup failed. Please try again.';

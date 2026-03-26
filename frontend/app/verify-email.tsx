@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 
@@ -58,10 +59,16 @@ export default function VerifyEmailScreen() {
   };
 
   const handleVerify = async (code?: string) => {
-    const verificationCode = code || codes.join('');
+    const verificationCode = (code || codes.join('')).trim(); // Ensure trimmed
     
     if (verificationCode.length !== 6) {
       Alert.alert('Error', 'Please enter all 6 digits');
+      return;
+    }
+    
+    // Validate that all characters are digits
+    if (!/^\d{6}$/.test(verificationCode)) {
+      Alert.alert('Error', 'Verification code must contain only 6 digits');
       return;
     }
 
@@ -72,18 +79,74 @@ export default function VerifyEmailScreen() {
       // Call backend to verify the code
       const response = await axios.post(`${API_URL}/api/auth/verify-email-code`, { 
         email,
-        code: verificationCode
+        code: verificationCode // Send as string
       });
 
       console.log('Verification response:', response.data);
+      console.log('Full response structure:', JSON.stringify(response.data, null, 2));
+      console.log('Response status:', response.status);
+      console.log('Response headers:', JSON.stringify(response.headers, null, 2));
       
+      // Extract token from response (try multiple paths)
+      let token = null;
+      if (response.data.access_token) {
+        token = response.data.access_token;
+        console.log('✓ Token found at response.data.access_token');
+      } else if (response.data.session?.access_token) {
+        token = response.data.session.access_token;
+        console.log('✓ Token found at response.data.session.access_token');
+      } else {
+        console.log('❌ NO TOKEN FOUND IN RESPONSE!');
+        console.log('Response keys:', Object.keys(response.data));
+        console.log('If session exists, session keys:', response.data.session ? Object.keys(response.data.session) : 'N/A');
+        if (response.data.session) {
+          console.log('Session data:', JSON.stringify(response.data.session, null, 2));
+        }
+        console.log('Full response data:', JSON.stringify(response.data, null, 2));
+      }
+      
+      // Store the token
+      if (token) {
+        console.log('=== TOKEN STORAGE START ===');
+        console.log('Token length:', token.length);
+        console.log('Token first 30 chars:', token.substring(0, 30));
+        
+        await AsyncStorage.setItem('token', token);
+        
+        // Verify it was actually stored
+        const storedToken = await AsyncStorage.getItem('token');
+        console.log('Verification - Token retrieved:', storedToken ? '✓ YES' : '✗ NO');
+        console.log('Verification - Tokens match:', storedToken === token ? '✓ YES' : '✗ NO');
+        console.log('=== TOKEN STORAGE END ===');
+        
+        if (!storedToken) {
+          console.error('❌ CRITICAL: Token was not actually stored!');
+          Alert.alert('Error', 'Failed to store authentication token. Please try again.');
+          return;
+        }
+      } else {
+        console.error('❌ CRITICAL: No token in verification response');
+        Alert.alert('Error', 'No authentication token received. Please try again.');
+        return;
+      }
+      
+      // Also store user info if provided
+      if (response.data.user) {
+        await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+        console.log('✓ User info stored for:', response.data.user.email);
+      }
+      
+      // Clear guest mode flag
+      await AsyncStorage.removeItem('guestMode');
+      
+      console.log('✓ All data stored successfully. Navigating to home...');
       Alert.alert('Success', 'Email verified successfully!');
       
-      // Navigate to profile setup
-      router.push({
-        pathname: '/onboarding',
-        params: { email }
-      });
+      // Add a small delay to ensure everything is flushed to disk
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Navigate directly to home page (profile was already created during signup)
+      router.replace('/(tabs)');
     } catch (error) {
       let errorMessage = 'Failed to verify email. Please try again.';
       

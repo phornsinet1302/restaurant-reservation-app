@@ -18,6 +18,8 @@ import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -127,6 +129,8 @@ export default function HomeScreen() {
   const [userName, setUserName] = useState<string>('Guest');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [greeting, setGreeting] = useState<string>('Good morning');
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   useEffect(() => {
     loadUserData();
@@ -190,6 +194,11 @@ export default function HomeScreen() {
   };
 
   const handleToggleFavorite = async (restaurantId: string, restaurantName: string) => {
+    if (isGuest) {
+      setShowGuestModal(true);
+      return;
+    }
+
     if (!token) {
       Alert.alert('Error', 'You must be logged in to favorite restaurants');
       return;
@@ -225,11 +234,11 @@ export default function HomeScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
       {/* ── Header ── */}
       <View style={styles.headerRow}>
         <View style={styles.headerLeft}>
@@ -384,7 +393,14 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
       ))}
-    </ScrollView>
+      </ScrollView>
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Favorites"
+      />
+    </View>
   );
 }
 

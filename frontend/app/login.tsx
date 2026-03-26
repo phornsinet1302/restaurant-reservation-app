@@ -52,7 +52,7 @@ export default function LoginScreen() {
         });
 
         console.log('Backend response:', response.data);
-        const token = response.data.session?.access_token;
+        const token = response.data.access_token || response.data.session?.access_token;
         if (token) {
           await AsyncStorage.setItem('token', token);
           
@@ -60,6 +60,9 @@ export default function LoginScreen() {
           if (response.data.user) {
             await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
           }
+          
+          // Clear guest mode flag
+          await AsyncStorage.removeItem('guestMode');
           
           Alert.alert('Success', 'Logged in with Google successfully!');
           router.replace('/(tabs)');
@@ -104,7 +107,7 @@ export default function LoginScreen() {
           user: credential.user,
         });
 
-        const token = response.data.session?.access_token;
+        const token = response.data.access_token || response.data.session?.access_token;
         if (token) {
           await AsyncStorage.setItem('token', token);
           
@@ -112,6 +115,9 @@ export default function LoginScreen() {
           if (response.data.user) {
             await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
           }
+          
+          // Clear guest mode flag
+          await AsyncStorage.removeItem('guestMode');
           
           Alert.alert('Success', 'Logged in with Apple successfully!');
           router.replace('/(tabs)');
@@ -149,7 +155,7 @@ export default function LoginScreen() {
       
       console.log('Login response:', response.data);
       
-      const token = response.data.session?.access_token;
+      const token = response.data.access_token || response.data.session?.access_token;
       if (token) {
         console.log('=== TOKEN STORAGE START ===');
         console.log('Token length:', token.length);
@@ -177,6 +183,9 @@ export default function LoginScreen() {
         } else {
           console.log('⚠️ No user data in response');
         }
+        
+        // Clear guest mode flag
+        await AsyncStorage.removeItem('guestMode');
         
         Alert.alert('Success', 'Logged in successfully!');
         router.replace('/(tabs)');

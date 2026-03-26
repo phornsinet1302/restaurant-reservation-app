@@ -71,6 +71,7 @@ exports.registerUser = async (req, res) => {
     return res.status(201).json({ 
       message: role === 'customer' ? "Signup successful!" : "Restaurant application submitted!",
       session: authData.session,
+      access_token: authData.session?.access_token || null,
       user: {
         ...authData.user,
         fullName,
@@ -113,7 +114,8 @@ exports.loginUser = async (req, res) => {
     // 3. Return everything to the Frontend
     return res.status(200).json({
       message: "Logged in successfully",
-      session: authData.session, 
+      session: authData.session,
+      access_token: authData.session?.access_token || null,
       user: {
         ...authData.user,
         email: authData.user.email,  // Explicitly include email
@@ -757,24 +759,123 @@ exports.verifyEmailCode = async (req, res) => {
       return res.status(400).json({ error: "Verification code has expired. Please request a new one." });
     }
 
+    // Normalize code for comparison - convert to string and trim whitespace
+    const normalizedCode = String(code).trim();
+    const normalizedStoredCode = String(storedCodeData.code).trim();
+    
+    console.log('Code verification:');
+    console.log('  Received code:', `"${normalizedCode}"`, `(type: ${typeof normalizedCode}, length: ${normalizedCode.length})`);
+    console.log('  Stored code:', `"${normalizedStoredCode}"`, `(type: ${typeof normalizedStoredCode}, length: ${normalizedStoredCode.length})`);
+    
     // Check if the code matches
-    if (code !== storedCodeData.code) {
+    if (normalizedCode !== normalizedStoredCode) {
+      console.log('❌ Code mismatch!');
       return res.status(400).json({ error: "Invalid verification code" });
     }
+    
+    console.log('✓ Code matches!');
 
     // Remove the used code
     emailController.verificationCodes.delete(email);
 
-    // In production, you'd also mark email as verified in the database
-    // For now, just confirm the verification was successful
-    console.log('Email verified for:', email);
+    console.log('\n=== VERIFY EMAIL CODE START ===');
+    console.log('Email to verify:', email);
+
+    // Mark email as verified in the database (if column exists, non-critical if it fails)
+    try {
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ email_verified: true })
+        .eq('email', email);
+
+      if (updateError) {
+        console.log('⚠️  Warning marking email as verified:', updateError.message);
+        // Not critical - continue anyway
+      } else {
+        console.log('✓ Email marked as verified in database');
+      }
+    } catch (err) {
+      console.log('⚠️  Exception marking email as verified:', err.message);
+      // Not critical - continue anyway
+    }
+
+    // Get the user from Supabase
+    console.log('Fetching user data from database...');
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (userError) {
+      console.error('❌ Error fetching user:', userError.message);
+      return res.status(404).json({ error: "User not found: " + userError.message });
+    }
+
+    if (!userData) {
+      console.error('❌ User not found in database');
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    console.log('✓ User found:', userData.id);
+
+    // Create a JWT token for the user
+    // This is a simple JWT token - in production, use proper key management
+    const jwtSecret = process.env.JWT_SECRET || process.env.JWT_S3CRET;
+    console.log('Generating JWT token...');
+    console.log('JWT_SECRET env var exists:', !!process.env.JWT_SECRET);
+    console.log('JWT_S3CRET env var exists:', !!process.env.JWT_S3CRET);
+    console.log('Using secret:', jwtSecret ? 'YES (length: ' + jwtSecret.length + ')' : 'NO - USING DEFAULT');
+    
+    const tokenPayload = {
+      id: userData.id,
+      email: userData.email,
+      role: userData.role,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+    };
+
+    let token;
+    try {
+      token = jwt.sign(tokenPayload, jwtSecret || 'your-secret-key-change-in-production');
+      console.log('✓ JWT token generated successfully');
+      console.log('Token length:', token.length);
+      console.log('Token first 30 chars:', token.substring(0, 30));
+    } catch (signErr) {
+      console.error('❌ Error signing JWT token:', signErr.message);
+      return res.status(500).json({ error: "Failed to generate authentication token: " + signErr.message });
+    }
+
+    console.log('✓ Email verified successfully for user:', userData.id);
+    console.log('=== VERIFY EMAIL CODE END ===\n');
 
     res.status(200).json({ 
-      message: "Email verified successfully", 
-      success: true 
+      message: "Email verified successfully",
+      success: true,
+      access_token: token,
+      session: {
+        access_token: token,
+        user: {
+          id: userData.id,
+          email: userData.email
+        }
+      },
+      user: {
+        id: userData.id,
+        email: userData.email,
+        fullName: userData.name,
+        phone: userData.phone,
+        dateOfBirth: userData.date_of_birth,
+        bio: userData.bio,
+        role: userData.role,
+        email_verified: true
+      }
     });
   } catch (error) {
-    console.error("Email verification error:", error);
+    console.error("❌ Email verification error:", error);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    console.log('=== VERIFY EMAIL CODE END (ERROR) ===\n');
     res.status(500).json({ error: "Email verification failed: " + error.message });
   }
 };
