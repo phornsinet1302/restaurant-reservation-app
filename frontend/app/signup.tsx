@@ -370,20 +370,20 @@ export default function SignUpScreen() {
             {/* Social buttons - DISABLED FOR NOW */}
             <View style={styles.socialContainer}>
               <TouchableOpacity
-                style={[styles.socialButton, { opacity: 0.5 }]}
-                onPress={() => Alert.alert('Coming Soon', 'Google signup is being configured')}
-                disabled={true}
-              >
-                <Text style={styles.googleIcon}>G</Text>
-                <Text style={styles.socialText}>Sign up with Google (Coming Soon)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.socialButton, { opacity: 0.5 }]}
-                onPress={() => Alert.alert('Coming Soon', 'Apple signup is being configured')}
-                disabled={true}
-              >
-                <Ionicons name="logo-apple" size={20} color={Colors.text} />
-                <Text style={styles.socialText}>Sign up with Apple (Coming Soon)</Text>
+                  style={styles.socialButton}
+                  onPress={handleGoogleSignUp}
+                  disabled={googleLoading}
+                >
+                  <Text style={styles.googleIcon}>G</Text>
+                  <Text style={styles.socialText}>{googleLoading ? 'Opening Google...' : 'Sign up with Google'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.socialButton}
+                  onPress={handleAppleSignUp}
+                  disabled={appleLoading}
+                >
+                  <Ionicons name="logo-apple" size={20} color={Colors.text} />
+                  <Text style={styles.socialText}>{appleLoading ? 'Opening Apple...' : 'Sign up with Apple'}</Text>
               </TouchableOpacity>
             </View>
           </>
