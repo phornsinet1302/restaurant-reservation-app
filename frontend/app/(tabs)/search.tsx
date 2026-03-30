@@ -42,9 +42,10 @@ export default function SearchScreen() {
   const { isGuest } = useAuth();
   const router = useRouter();
 
-  // Load favorites on mount
+  // Load favorites and fetch initial restaurants on mount
   useEffect(() => {
     loadFavoritesAndToken();
+    fetchRestaurants(''); // Load all restaurants on initial mount
   }, []);
 
   const loadFavoritesAndToken = async () => {
@@ -115,15 +116,19 @@ export default function SearchScreen() {
       setLoading(true);
       setError('');
       
-      const url = query 
-        ? `${API_URL}/api/restaurants?search=${encodeURIComponent(query)}`
-        : `${API_URL}/api/restaurants`;
+      let url = `${API_URL}/api/restaurants`;
+      if (query && query.length > 0) {
+        url += `?search=${encodeURIComponent(query)}`;
+      }
       
-      const response = await axios.get(url);
+      console.log('🔍 Fetching from:', url);
+      const response = await axios.get(url, { timeout: 10000 });
+      console.log('✅ Response received:', response.data);
       setRestaurants(response.data || []);
-    } catch (err) {
-      console.error('Search error:', err);
-      setError('Failed to fetch restaurants');
+    } catch (err: any) {
+      console.error('❌ Search error:', err.message);
+      console.error('❌ Error details:', err.response?.data || err);
+      setError('Unable to load restaurants. Please try again.');
       setRestaurants([]);
     } finally {
       setLoading(false);

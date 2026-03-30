@@ -38,11 +38,6 @@ export default function GuestLoginModal({ visible, onClose, feature }: GuestLogi
     >
       <SafeAreaView style={styles.overlay}>
         <View style={styles.container}>
-          {/* Close button */}
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Ionicons name="close" size={24} color={Colors.text} />
-          </TouchableOpacity>
-
           {/* Icon */}
           <View style={styles.iconContainer}>
             <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} />
@@ -92,10 +87,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 40,
   },
-  closeButton: {
-    alignSelf: 'flex-end',
-    marginBottom: 12,
-  },
+
   iconContainer: {
     alignItems: 'center',
     marginBottom: 20,

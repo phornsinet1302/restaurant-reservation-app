@@ -1,9 +1,7 @@
 const supabase = require('../config/supabase');
 
-// 1. Get My Notifications
 exports.getMyNotifications = async (req, res) => {
   try {
-    // We get the user_id from your auth token!
     const user_id = req.user.id; 
 
     const { data, error } = await supabase
@@ -36,7 +34,6 @@ exports.markAsRead = async (req, res) => {
   }
 };
 
-// 3. Mark ALL Notifications as Read
 exports.markAllAsRead = async (req, res) => {
   try {
     const user_id = req.user.id;
@@ -45,7 +42,7 @@ exports.markAllAsRead = async (req, res) => {
       .from('notifications')
       .update({ is_read: true })
       .eq('user_id', user_id)
-      .eq('is_read', false) // Only update the unread ones
+      .eq('is_read', false) 
       .select();
 
     if (error) throw error;
