@@ -247,23 +247,23 @@ export default function LoginScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        {/* Social buttons - DISABLED FOR NOW */}
+        {/* Social buttons */}
         <View style={styles.socialContainer}>
           <TouchableOpacity
-            style={[styles.socialButton, { opacity: 0.5 }]}
-            onPress={() => Alert.alert('Coming Soon', 'Google login is being configured')}
-            disabled={true}
+            style={styles.socialButton}
+            onPress={handleGoogleLogin}
+            disabled={googleLoading}
           >
             <Text style={styles.googleIcon}>G</Text>
-            <Text style={styles.socialText}>Sign in with Google (Coming Soon)</Text>
+            <Text style={styles.socialText}>{googleLoading ? 'Opening Google...' : 'Sign in with Google'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.socialButton, { opacity: 0.5 }]}
-            onPress={() => Alert.alert('Coming Soon', 'Apple login is being configured')}
-            disabled={true}
+            style={styles.socialButton}
+            onPress={handleAppleLogin}
+            disabled={appleLoading}
           >
             <Ionicons name="logo-apple" size={20} color={Colors.text} />
-            <Text style={styles.socialText}>Sign in with Apple (Coming Soon)</Text>
+            <Text style={styles.socialText}>{appleLoading ? 'Opening Apple...' : 'Sign in with Apple'}</Text>
           </TouchableOpacity>
         </View>
 

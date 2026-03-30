@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '@/constants/Colors';
+import { API_CONFIG } from '@/app/config/apiConfig';
 
 const STEPS = [
   { label: 'Account', progress: 0.17 },
@@ -107,7 +108,7 @@ export default function RestaurantSignupScreen() {
         },
       };
 
-      const response = await axios.post('http://192.168.1.10:3000/api/auth/register', payload);
+      const response = await axios.post(API_CONFIG.ENDPOINTS.AUTH.REGISTER, payload);
       Alert.alert(
         'Application Submitted',
         'Your restaurant application has been submitted for review. We will contact you soon.',

@@ -67,8 +67,33 @@ exports.registerUser = async (req, res) => {
       return res.status(400).json({ error: "Failed to store password: " + passwordError.message });
     }
 
-    // 3. Create auth record in Supabase auth_users (if it exists) or store hash separately
-    // For now, we'll store the hashed password in a custom auth_passwords table or use a workaround
+    // 3. If restaurant role, also create restaurant entry
+    if (role === 'restaurant' && restaurantProfile) {
+      const restaurantData = {
+        name: restaurantProfile.nameEn,
+        name_khmer: restaurantProfile.nameKh || null,
+        category: restaurantProfile.category || null,
+        cuisine: restaurantProfile.cuisine || null,
+        address: restaurantProfile.address || null,
+        phone: restaurantProfile.phone || null,
+        city_province: restaurantProfile.city || null,
+        maps_link: restaurantProfile.mapsLink || null,
+        merchant_id: userId,
+        description: `${restaurantProfile.category || ''} - ${restaurantProfile.cuisine || ''}`.trim() || null,
+      };
+
+      const { error: restaurantError } = await supabase
+        .from('restaurants')
+        .insert([restaurantData]);
+
+      if (restaurantError) {
+        console.error("⚠️ RESTAURANT PROFILE ERROR (non-fatal):", restaurantError.message);
+        // Continue even if restaurant profile fails, user can update later
+      } else {
+        console.log('✅ Restaurant profile created');
+      }
+    }
+
     console.log('✅ User created in database');
 
     // 4. Generate JWT token for immediate use
