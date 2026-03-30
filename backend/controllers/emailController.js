@@ -10,8 +10,9 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// In-memory storage for verification codes (in production, use Redis or database)
+// In-memory storage for verification codes and reset codes (in production, use Redis or database)
 const verificationCodes = new Map();
+const resetCodes = new Map();
 
 // Send email verification code
 exports.sendVerificationEmail = async (req, res) => {
@@ -120,22 +121,9 @@ exports.sendPasswordResetEmail = async (req, res) => {
     };
 
     // Store reset code in memory (in production, use Redis or database)
-    const emailController = require('./emailController');
-    if (!emailController.resetCodes) {
-      emailController.resetCodes = new Map();
-    }
-    emailController.resetCodes.set(email, resetCodeData);
+    resetCodes.set(email, resetCodeData);
 
     console.log('✅ Password reset code generated for', email, '- Code:', resetCode);
-
-    // Send email with the reset code
-    const transporter = require('nodemailer').createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -365,5 +353,6 @@ exports.resendVerificationCode = async (req, res) => {
   }
 };
 
-// Export verificationCodes for use in other controllers
+// Export verificationCodes and resetCodes for use in other controllers
 exports.verificationCodes = verificationCodes;
+exports.resetCodes = resetCodes;
