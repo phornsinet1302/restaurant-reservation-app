@@ -1,4 +1,3 @@
-// utils/emailService.js
 const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
@@ -11,7 +10,7 @@ const transporter = nodemailer.createTransport({
 
 const sendEmail = async (to, subject, html) => {
   try {
-    console.log(`Attempting to send email to: ${to}...`); // LOG 1
+    console.log(`Attempting to send email to: ${to}...`);
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -21,10 +20,10 @@ const sendEmail = async (to, subject, html) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("✅ Email sent successfully:", info.messageId); // LOG 2
+    console.log("✅ Email sent successfully:", info.messageId);
     return info;
   } catch (error) {
-    console.error("❌ NODEMAILER ERROR:", error.message); // LOG 3
+    console.error("❌ NODEMAILER ERROR:", error.message); 
     throw error;
   }
 };

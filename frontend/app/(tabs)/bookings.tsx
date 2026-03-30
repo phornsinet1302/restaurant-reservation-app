@@ -10,10 +10,10 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/hooks/useAuth';
-import GuestLoginModal from '@/components/GuestLoginModal';
+import CustomButton from '@/components/CustomButton';
 
 /* ── Types ── */
 
@@ -91,16 +91,8 @@ export default function BookingsScreen() {
   const [activeTab, setActiveTab] = useState(0);
   const router = useRouter();
   const { isGuest } = useAuth();
-  const [showGuestModal, setShowGuestModal] = useState(false);
 
-  // Check if user is guest when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      if (isGuest) {
-        setShowGuestModal(true);
-      }
-    }, [isGuest])
-  );
+
 
   const tabStatusMap: Record<number, BookingStatus[]> = {
     0: ['Upcoming'],
@@ -161,32 +153,50 @@ export default function BookingsScreen() {
         <Text style={styles.heading}>Booking History</Text>
       <Text style={styles.subHeading}>Manage your reservations</Text>
 
-      {/* Tab selector */}
-      <View style={styles.tabRow}>
-        {TABS.map((tab, idx) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, activeTab === idx && styles.tabActive]}
-            onPress={() => setActiveTab(idx)}
-          >
-            <Text
-              style={[styles.tabText, activeTab === idx && styles.tabTextActive]}
-            >
-              {tab}
-            </Text>
+      {isGuest ? (
+        <View style={styles.guestViewContainer}>
+          <View style={styles.guestIcon}>
+            <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} />
+          </View>
+          <Text style={styles.guestTitle}>Login Required</Text>
+          <Text style={styles.guestMessage}>Sign in to your account to view and manage your bookings.</Text>
+          <CustomButton
+            title="Log In"
+            onPress={() => router.push('/login')}
+            variant="primary"
+          />
+          <TouchableOpacity onPress={() => router.push('/account-type')} style={styles.guestSignupLink}>
+            <Text style={styles.guestSignupText}>Don't have an account? Sign Up</Text>
           </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Booking cards */}
-      {filtered.length === 0 && (
-        <View style={styles.emptyState}>
-          <Ionicons name="calendar-outline" size={48} color={Colors.border} />
-          <Text style={styles.emptyText}>No {TABS[activeTab].toLowerCase()} bookings</Text>
         </View>
-      )}
+      ) : (
+        <>
+          {/* Tab selector */}
+          <View style={styles.tabRow}>
+            {TABS.map((tab, idx) => (
+              <TouchableOpacity
+                key={tab}
+                style={[styles.tab, activeTab === idx && styles.tabActive]}
+                onPress={() => setActiveTab(idx)}
+              >
+                <Text
+                  style={[styles.tabText, activeTab === idx && styles.tabTextActive]}
+                >
+                  {tab}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-      {filtered.map((booking) => (
+          {/* Booking cards */}
+          {filtered.length === 0 && (
+            <View style={styles.emptyState}>
+              <Ionicons name="calendar-outline" size={48} color={Colors.border} />
+              <Text style={styles.emptyText}>No {TABS[activeTab].toLowerCase()} bookings</Text>
+            </View>
+          )}
+
+          {filtered.map((booking) => (
         <View key={booking.id} style={styles.bookingCard}>
           {/* Top section */}
           <View style={styles.bookingTop}>
@@ -257,13 +267,11 @@ export default function BookingsScreen() {
           )}
         </View>
       ))}
+        </>
+      )}
       </ScrollView>
 
-      <GuestLoginModal
-        visible={showGuestModal}
-        onClose={() => setShowGuestModal(false)}
-        feature="Bookings"
-      />
+
     </View>
   );
 }
@@ -446,5 +454,41 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 14,
     color: Colors.text,
+  },
+
+  /* Guest view */
+  guestViewContainer: {
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestIcon: {
+    marginBottom: 24,
+  },
+  guestTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 20,
+    color: Colors.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  guestMessage: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginBottom: 24,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  guestSignupLink: {
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  guestSignupText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 14,
+    color: Colors.primary,
+    textDecorationLine: 'underline',
   },
 });

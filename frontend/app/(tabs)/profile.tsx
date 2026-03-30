@@ -14,11 +14,11 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
-import GuestLoginModal from '@/components/GuestLoginModal';
+import CustomButton from '@/components/CustomButton';
 
 /* ── Data ── */
 
@@ -43,15 +43,6 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const { isGuest } = useAuth();
   const [showGuestModal, setShowGuestModal] = useState(false);
-
-  // Check if user is guest when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      if (isGuest) {
-        setShowGuestModal(true);
-      }
-    }, [isGuest])
-  );
 
   // Load user profile data on mount
   useEffect(() => {
@@ -366,50 +357,79 @@ export default function ProfileScreen() {
       <Text style={styles.heading}>Profile</Text>
       <Text style={styles.subHeading}>Manage your account</Text>
 
-      {/* Avatar */}
-      <View style={styles.avatarSection}>
-        <TouchableOpacity
-          style={styles.avatarOuter}
-          onPress={handlePickImage}
-          disabled={uploading}
-        >
-          {profileImageUri ? (
-            <>
-              <Image
-                source={{ uri: profileImageUri }}
-                style={styles.avatar}
-              />
-              {uploading && (
-                <View style={styles.uploadingOverlay}>
-                  <ActivityIndicator size="small" color={Colors.primary} />
+      {isGuest ? (
+        <View style={styles.guestProfileContainer}>
+          {/* Avatar */}
+          <View style={styles.guestAvatarSection}>
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={48} color={Colors.primary} />
+            </View>
+            <Text style={styles.guestNote}>Guest User</Text>
+          </View>
+
+          {/* Message */}
+          <View style={styles.guestMessageContainer}>
+            <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} style={styles.guestMessageIcon} />
+            <Text style={styles.guestMessageTitle}>Profile Not Available</Text>
+            <Text style={styles.guestMessageText}>Create an account to save your profile information and booking history.</Text>
+          </View>
+
+          {/* Action Buttons */}
+          <CustomButton
+            title="Create Account"
+            onPress={() => router.push('/account-type')}
+            variant="primary"
+          />
+          <TouchableOpacity style={styles.guestLoginLink} onPress={() => router.push('/login')}>
+            <Text style={styles.guestLoginText}>Already have an account? Log In</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          {/* Avatar */}
+          <View style={styles.avatarSection}>
+            <TouchableOpacity
+              style={styles.avatarOuter}
+              onPress={handlePickImage}
+              disabled={uploading}
+            >
+              {profileImageUri ? (
+                <>
+                  <Image
+                    source={{ uri: profileImageUri }}
+                    style={styles.avatar}
+                  />
+                  {uploading && (
+                    <View style={styles.uploadingOverlay}>
+                      <ActivityIndicator size="small" color={Colors.primary} />
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarLetter}>
+                    {fullName.charAt(0).toUpperCase()}
+                  </Text>
                 </View>
               )}
-            </>
-          ) : (
-            <View style={styles.avatar}>
-              <Text style={styles.avatarLetter}>
-                {fullName.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <TouchableOpacity
-            style={styles.cameraIcon}
-            onPress={handlePickImage}
-            disabled={uploading}
-          >
-            {uploading ? (
-              <ActivityIndicator size="small" color={Colors.primary} />
-            ) : (
-              <Ionicons name="camera-outline" size={16} color={Colors.text} />
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
-        <Text style={styles.name}>{fullName}</Text>
-        <Text style={styles.email}>{email}</Text>
-      </View>
+              <TouchableOpacity
+                style={styles.cameraIcon}
+                onPress={handlePickImage}
+                disabled={uploading}
+              >
+                {uploading ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Ionicons name="camera-outline" size={16} color={Colors.text} />
+                )}
+              </TouchableOpacity>
+            </TouchableOpacity>
+            <Text style={styles.name}>{fullName}</Text>
+            <Text style={styles.email}>{email}</Text>
+          </View>
 
-      {/* Form card */}
-      <View style={styles.formCard}>
+          {/* Form card */}
+          <View style={styles.formCard}>
         {/* Full Name */}
         <View style={styles.fieldGroup}>
           <View style={styles.fieldLabelRow}>
@@ -541,10 +561,10 @@ export default function ProfileScreen() {
             {isEditing ? 'Save Profile' : 'Edit Profile'}
           </Text>
         </TouchableOpacity>
-      </View>
+          </View>
 
-      {/* Menu items */}
-      <View style={styles.menuCard}>
+          {/* Menu items */}
+          <View style={styles.menuCard}>
         {MENU_ITEMS.map((item, idx) => (
           <TouchableOpacity
             key={idx}
@@ -558,23 +578,19 @@ export default function ProfileScreen() {
             <Ionicons name="chevron-forward" size={18} color={Colors.gray} />
           </TouchableOpacity>
         ))}
-      </View>
+          </View>
 
-      {/* Log out */}
-      <TouchableOpacity
-        style={styles.logoutBtn}
-        onPress={handleLogout}
-      >
-        <Ionicons name="log-out-outline" size={20} color={Colors.accent} />
-        <Text style={styles.logoutText}>Log out</Text>
-      </TouchableOpacity>
+          {/* Log out */}
+          <TouchableOpacity
+            style={styles.logoutBtn}
+            onPress={handleLogout}
+          >
+            <Ionicons name="log-out-outline" size={20} color={Colors.accent} />
+            <Text style={styles.logoutText}>Log out</Text>
+          </TouchableOpacity>
+        </>
+      )}
       </ScrollView>
-
-      <GuestLoginModal
-        visible={showGuestModal}
-        onClose={() => setShowGuestModal(false)}
-        feature="Profile"
-      />
     </View>
   );
 }
@@ -799,5 +815,55 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 15,
     color: Colors.accent,
+  },
+
+  /* Guest Profile */
+  guestProfileContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestAvatarSection: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  guestNote: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 16,
+  },
+  guestMessageContainer: {
+    alignItems: 'center',
+    marginBottom: 32,
+    paddingHorizontal: 20,
+  },
+  guestMessageIcon: {
+    marginBottom: 16,
+  },
+  guestMessageTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 18,
+    color: Colors.text,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  guestMessageText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginBottom: 24,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+  guestLoginLink: {
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  guestLoginText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 14,
+    color: Colors.primary,
+    textDecorationLine: 'underline',
   },
 });

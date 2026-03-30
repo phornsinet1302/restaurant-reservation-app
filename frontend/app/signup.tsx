@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import {
@@ -35,20 +36,17 @@ export default function SignUpScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [step, setStep] = useState(1); // Step 1: Email/Password, Step 2: Full Profile
 
-  // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
-  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
-  const redirectUri = Platform.OS === 'ios'
-    ? `com.googleusercontent.apps.${iosClientId.split('.apps.googleusercontent.com')[0]}:/oauthredirect`
-    : 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
+  // Use the Web Client ID for all platforms (Expo handles the redirect)
+  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
+  const redirectUri = 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
 
-  const googleClientId = Platform.OS === 'ios'
-    ? iosClientId
-    : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
-
-  const discovery = {
-    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenEndpoint: 'https://oauth2.googleapis.com/token',
-  };
+  const discovery = useMemo(
+    () => ({
+      authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenEndpoint: 'https://oauth2.googleapis.com/token',
+    }),
+    []
+  );
 
   const [request, response, promptAsync] = useAuthRequest(
     {

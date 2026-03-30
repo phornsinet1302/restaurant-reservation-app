@@ -127,6 +127,7 @@ export default function HomeScreen() {
   const [token, setToken] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [userName, setUserName] = useState<string>('Guest');
+  const [userEmail, setUserEmail] = useState<string>('');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
   const [greeting, setGreeting] = useState<string>('Good morning');
   const { isGuest } = useAuth();
@@ -169,6 +170,7 @@ export default function HomeScreen() {
       if (userData) {
         const parsedUser = JSON.parse(userData);
         setUserName(parsedUser.fullName || parsedUser.name || 'Guest');
+        setUserEmail(parsedUser.email || '');
       }
 
       // Load user profile image
@@ -243,15 +245,25 @@ export default function HomeScreen() {
       <View style={styles.headerRow}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            {profileImageUri ? (
+            {isGuest ? (
+              // Show avatar icon for guests
+              <Ionicons name="person-circle" size={44} color={Colors.primary} />
+            ) : profileImageUri ? (
+              // Show profile picture if user has one
               <Image source={{ uri: profileImageUri }} style={styles.avatarImage} />
             ) : (
+              // Show user initial or avatar fallback
               <Text style={styles.avatarLetter}>{userName.charAt(0).toUpperCase()}</Text>
             )}
           </View>
           <View>
             <Text style={styles.greeting}>{greeting}!</Text>
-            <Text style={styles.subGreeting}>Welcome, {userName}</Text>
+            <Text style={styles.subGreeting}>
+              Welcome, {isGuest ? 'Guest' : userName}
+            </Text>
+            {!isGuest && userEmail && (
+              <Text style={styles.userEmail}>{userEmail}</Text>
+            )}
           </View>
         </View>
         <TouchableOpacity style={styles.bellButton} onPress={() => router.push('../notifications' as any)}>
@@ -460,6 +472,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.gray,
     marginTop: 1,
+  },
+  userEmail: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 11,
+    color: Colors.gray,
+    marginTop: 2,
   },
   bellButton: {
     width: 44,
