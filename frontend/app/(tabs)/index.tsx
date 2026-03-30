@@ -171,12 +171,20 @@ export default function HomeScreen() {
         const parsedUser = JSON.parse(userData);
         setUserName(parsedUser.fullName || parsedUser.name || 'Guest');
         setUserEmail(parsedUser.email || '');
-      }
 
-      // Load user profile image
-      const savedImage = await AsyncStorage.getItem('profileImage');
-      if (savedImage) {
-        setProfileImageUri(savedImage);
+        // Load user profile image - use user ID for unique key
+        if (parsedUser.id || parsedUser.email) {
+          const userIdKey = parsedUser.id || parsedUser.email;
+          const savedImage = await AsyncStorage.getItem(`profileImage_${userIdKey}`);
+          if (savedImage) {
+            setProfileImageUri(savedImage);
+          } else {
+            setProfileImageUri(null); // Clear old image if user has none
+          }
+        }
+      } else {
+        // No user data, clear profile image
+        setProfileImageUri(null);
       }
     } catch (error) {
       console.warn('Failed to load user data:', error);

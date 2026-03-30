@@ -15,6 +15,8 @@ router.post('/logout', authController.logoutUser);
 router.post('/send-verification-email', emailController.sendVerificationEmail);
 router.post('/resend-verification-code', emailController.resendVerificationCode);
 router.post('/send-password-reset-email', emailController.sendPasswordResetEmail);
+router.post('/verify-reset-code', authController.verifyResetCode);
+router.post('/reset-password-with-code', authController.resetPasswordWithCode);
 router.post('/verify-email-code', authController.verifyEmailCode);
 
 // --- OAuth Routes ---
