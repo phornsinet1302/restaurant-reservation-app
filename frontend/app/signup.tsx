@@ -1,9 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
-import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import {
   View,
@@ -40,94 +38,21 @@ export default function SignUpScreen() {
   const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
   const redirectUri = 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
 
-  const discovery = useMemo(
-    () => ({
-      authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-      tokenEndpoint: 'https://oauth2.googleapis.com/token',
-    }),
-    []
-  );
-
-  const [request, response, promptAsync] = useAuthRequest(
-    {
-      clientId: googleClientId,
-      redirectUri,
-      scopes: ['openid', 'profile', 'email'],
-      responseType: ResponseType.Code,
-      usePKCE: true,
-    },
-    discovery
-  );
-
   const handleGoogleSignUp = async () => {
     setGoogleLoading(true);
     try {
-      const result = await promptAsync();
-      console.log('Google auth result:', result);
+      // Step 1: Open Google OAuth in browser
+      const url = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `scope=openid+profile+email&` +
+        `client_id=${googleClientId}&` +
+        `response_type=code&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}`;
       
-      if (result?.type === 'success') {
-        const { code } = result.params;
-        
-        if (!code) {
-          Alert.alert('Error', 'Failed to get authorization code');
-          return;
-        }
-
-        // Exchange code for tokens (no client_secret needed for iOS public client)
-        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            code,
-            client_id: googleClientId,
-            redirect_uri: redirectUri,
-            grant_type: 'authorization_code',
-            code_verifier: request?.codeVerifier || '',
-          }).toString(),
-        });
-
-        const tokens = await tokenResponse.json();
-
-        if (!tokens.access_token) {
-          Alert.alert('Error', tokens.error_description || 'Token exchange failed');
-          return;
-        }
-
-        console.log('Sending access_token to backend...');
-        const response = await axios.post(API_CONFIG.ENDPOINTS.AUTH.GOOGLE_SIGNUP, {
-          access_token: tokens.access_token,
-        });
-
-        console.log('Backend response:', response.data);
-        const token = response.data.access_token || response.data.session?.access_token;
-        if (token) {
-          await AsyncStorage.setItem('token', token);
-          
-          // Also store user profile data from response
-          if (response.data.user) {
-            await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
-          }
-          
-          Alert.alert('Success', 'Signed up with Google successfully!');
-          router.replace('/(tabs)');
-        } else {
-          Alert.alert('Error', 'No token received from backend');
-        }
-      } else if (result?.type === 'error') {
-        console.log('Google auth error:', result.params);
-        Alert.alert('Error', `Authentication failed: ${result.params?.error || 'Unknown error'}`);
-      } else {
-        console.log('Google auth cancelled');
-      }
+      await WebBrowser.openBrowserAsync(url);
+      // After user completes signup on Google, they'll be redirected back to app
     } catch (error) {
-      console.error('Google signup exception:', error);
-      if (axios.isAxiosError(error)) {
-        Alert.alert('Error', error.response?.data?.error || error.message);
-      } else if (error instanceof Error) {
-        Alert.alert('Error', error.message);
-      } else {
-        Alert.alert('Error', 'Google sign up failed');
-      }
+      console.error('Google signup error:', error);
+      Alert.alert('Error', 'Google signup failed. Please try again.');
     } finally {
       setGoogleLoading(false);
     }
@@ -276,24 +201,13 @@ export default function SignUpScreen() {
           console.log('User info stored:', response.data.user.email);
         }
 
-        // Send verification email
-        try {
-          console.log('Sending verification email to:', email);
-          await axios.post(API_CONFIG.ENDPOINTS.AUTH.SEND_VERIFICATION_EMAIL, {
-            email,
-          });
-          console.log('Verification email sent successfully');
-        } catch (emailError) {
-          console.log('Error sending verification email:', emailError);
-          // Don't fail the signup if email sending fails, just log it
-        }
-
-        Alert.alert('Success', 'Signup successful! Please verify your email.');
-        // Route to email verification page
-        router.replace({
-          pathname: '/verify-email',
-          params: { email }
-        });
+        // ✅ TEMPORARY: Skip email verification entirely - go straight to home
+        console.log('✅ Signup successful! Redirecting to home screen...');
+        Alert.alert('Success', 'Welcome! Your account is ready.');
+        
+        // Clear guest mode and redirect to home
+        await AsyncStorage.removeItem('guestMode');
+        router.replace('/(tabs)');
       } catch (error) {
         console.log('Signup error:', error);
         let errorMessage = 'Signup failed. Please try again.';
@@ -453,23 +367,23 @@ export default function SignUpScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            {/* Social buttons - Only show on Step 1 */}
+            {/* Social buttons - DISABLED FOR NOW */}
             <View style={styles.socialContainer}>
               <TouchableOpacity
-                style={styles.socialButton}
-                onPress={handleGoogleSignUp}
-                disabled={googleLoading || !request}
+                style={[styles.socialButton, { opacity: 0.5 }]}
+                onPress={() => Alert.alert('Coming Soon', 'Google signup is being configured')}
+                disabled={true}
               >
                 <Text style={styles.googleIcon}>G</Text>
-                <Text style={styles.socialText}>{googleLoading ? 'Signing up...' : 'Sign up with Google'}</Text>
+                <Text style={styles.socialText}>Sign up with Google (Coming Soon)</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.socialButton}
-                onPress={handleAppleSignUp}
-                disabled={appleLoading}
+                style={[styles.socialButton, { opacity: 0.5 }]}
+                onPress={() => Alert.alert('Coming Soon', 'Apple signup is being configured')}
+                disabled={true}
               >
                 <Ionicons name="logo-apple" size={20} color={Colors.text} />
-                <Text style={styles.socialText}>{appleLoading ? 'Signing up...' : 'Sign up with Apple'}</Text>
+                <Text style={styles.socialText}>Sign up with Apple (Coming Soon)</Text>
               </TouchableOpacity>
             </View>
           </>

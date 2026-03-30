@@ -9,13 +9,11 @@ import {
   TextInput,
   Alert,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import axios from 'axios';
 import { Colors } from '@/constants/Colors';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomButton from '@/components/CustomButton';
 import { API_CONFIG } from '@/app/config/apiConfig';
 
@@ -26,9 +24,20 @@ export default function ResetPasswordScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { token } = useLocalSearchParams();
+  const { email, resetCode } = useLocalSearchParams();
 
-  const validatePassword = () => {
+  React.useEffect(() => {
+    console.log('✅ ResetPasswordScreen mounted');
+    console.log('   Email:', email);
+    console.log('   Reset Code:', resetCode);
+  }, [email, resetCode]);
+
+  const validateForm = () => {
+    if (!email || !resetCode) {
+      Alert.alert('Error', 'Invalid session. Please try forgot password again.');
+      return false;
+    }
+
     if (!newPassword || !confirmPassword) {
       Alert.alert('Error', 'Please enter both password fields');
       return false;
@@ -48,39 +57,24 @@ export default function ResetPasswordScreen() {
   };
 
   const handleResetPassword = async () => {
-    if (!validatePassword()) {
+    if (!validateForm()) {
       return;
     }
 
     setLoading(true);
     try {
-      // Get token from AsyncStorage (user should be logged in)
-      const authToken = await AsyncStorage.getItem('token');
-      
-      if (!authToken) {
-        Alert.alert('Error', 'Session expired. Please login again.');
-        router.replace('/login');
-        return;
-      }
+      console.log('🔐 Resetting password for email:', email);
 
-      console.log('Resetting password...');
-
-      // Call the protected reset-password endpoint
       const response = await axios.post(
-        `${API_CONFIG.BASE_URL}/api/auth/reset-password`,
+        `${API_CONFIG.BASE_URL}/api/auth/reset-password-with-code`,
         {
+          email: email,
+          resetCode: resetCode,
           newPassword: newPassword,
-          confirmPassword: confirmPassword,
-          resetToken: token, // Include the token from deeplink if available
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
         }
       );
 
-      console.log('Password reset response:', response.data);
+      console.log('✅ Password reset successful:', response.data);
 
       Alert.alert(
         'Success',
@@ -89,8 +83,6 @@ export default function ResetPasswordScreen() {
           {
             text: 'OK',
             onPress: () => {
-              // Clear token and navigate to login
-              AsyncStorage.removeItem('token');
               router.replace('/login');
             },
           },
@@ -100,17 +92,12 @@ export default function ResetPasswordScreen() {
       let errorMessage = 'Failed to reset password. Please try again.';
 
       if (axios.isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          errorMessage = 'Session expired. Please login again.';
-          AsyncStorage.removeItem('token');
-          setTimeout(() => router.replace('/login'), 1000);
-        } else if (error.response?.data?.error) {
+        if (error.response?.data?.error) {
           errorMessage = error.response.data.error;
-        } else if (error.response?.status === 400) {
-          errorMessage = 'Invalid password. Please try again.';
         }
       }
 
+      console.error('❌ Password reset error:', errorMessage);
       Alert.alert('Error', errorMessage);
     } finally {
       setLoading(false);
@@ -130,13 +117,19 @@ export default function ResetPasswordScreen() {
           >
             <Ionicons name="chevron-back" size={24} color={Colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Reset Password</Text>
+          <Text style={styles.title}>Create New Password</Text>
           <View style={{ width: 24 }} />
         </View>
 
         <View style={styles.content}>
+          <View style={styles.iconContainer}>
+            <View style={styles.icon}>
+              <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} />
+            </View>
+          </View>
+
           <Text style={styles.subtitle}>
-            Enter your new password below
+            Create a strong new password for your account
           </Text>
 
           {/* New Password Input */}
@@ -150,6 +143,7 @@ export default function ResetPasswordScreen() {
                 value={newPassword}
                 onChangeText={setNewPassword}
                 placeholderTextColor="#999"
+                editable={!loading}
               />
               <TouchableOpacity
                 onPress={() => setShowPassword(!showPassword)}
@@ -173,11 +167,12 @@ export default function ResetPasswordScreen() {
             <View style={styles.passwordInputWrapper}>
               <TextInput
                 style={styles.input}
-                placeholder="Confirm password"
+                placeholder="Confirm new password"
                 secureTextEntry={!showConfirmPassword}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 placeholderTextColor="#999"
+                editable={!loading}
               />
               <TouchableOpacity
                 onPress={() => setShowConfirmPassword(!showConfirmPassword)}
@@ -224,11 +219,11 @@ export default function ResetPasswordScreen() {
         {/* Reset Button */}
         <View style={styles.buttonContainer}>
           <CustomButton
-            title={loading ? 'Resetting...' : 'Reset Password'}
+            title={loading ? 'Saving...' : 'Save New Password'}
             onPress={handleResetPassword}
-            disabled={loading || !newPassword || !confirmPassword}
+            disabled={loading || !newPassword || !confirmPassword || newPassword !== confirmPassword}
             style={{
-              opacity: loading || !newPassword || !confirmPassword ? 0.6 : 1,
+              opacity: loading || !newPassword || !confirmPassword || newPassword !== confirmPassword ? 0.6 : 1,
             }}
           />
         </View>
@@ -277,6 +272,18 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 24,
+  },
+  iconContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  icon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#F0E8DC',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   subtitle: {
     fontSize: 16,
@@ -345,7 +352,7 @@ const styles = StyleSheet.create({
   },
   loginLink: {
     fontSize: 14,
-    color: '#D4A574',
+    color: Colors.primary,
     fontWeight: '600',
   },
 });

@@ -81,12 +81,17 @@ export default function ProfileScreen() {
     }
   };
 
-  // Load saved profile image from AsyncStorage
+  // Load saved profile image from AsyncStorage - use user-specific key
   const loadProfileImage = async () => {
     try {
-      const savedImage = await AsyncStorage.getItem('profileImage');
-      if (savedImage) {
-        setProfileImageUri(savedImage);
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        const userIdKey = parsedUser.id || parsedUser.email || 'default';
+        const savedImage = await AsyncStorage.getItem(`profileImage_${userIdKey}`);
+        if (savedImage) {
+          setProfileImageUri(savedImage);
+        }
       }
     } catch (error) {
       console.log('Error loading profile image:', error);
@@ -166,9 +171,16 @@ export default function ProfileScreen() {
     try {
       setUploading(true);
 
-      // For now, save the image URI locally
-      // In production, you would upload to a server
-      await AsyncStorage.setItem('profileImage', imageUri);
+      // Get user ID/email for unique storage key
+      const userData = await AsyncStorage.getItem('user');
+      let userIdKey = 'default';
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        userIdKey = parsedUser.id || parsedUser.email || 'default';
+      }
+
+      // Save the image URI with user-specific key
+      await AsyncStorage.setItem(`profileImage_${userIdKey}`, imageUri);
       setProfileImageUri(imageUri);
 
       Alert.alert('Success', 'Profile picture updated successfully!');

@@ -35,20 +35,48 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
-      await axios.post(`${API_URL}/api/auth/send-password-reset-email`, { 
+      const response = await axios.post(`${API_URL}/api/auth/send-password-reset-email`, { 
         email 
       });
 
-      Alert.alert(
-        'Success',
-        'Password reset link sent to your email. Please check your inbox.',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.push('/login')
-          }
-        ]
-      );
+      console.log('📧 Password reset response:', response.data);
+
+      // If development mode and code is provided, show it
+      if (response.data.devCode) {
+        Alert.alert(
+          'Reset Code (Development Mode)',
+          `Your reset code is:\n\n${response.data.devCode}\n\n${response.data.devMessage || ''}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                console.log('🔄 Navigating to verify-reset-code with email:', email);
+                router.replace({
+                  pathname: '/verify-reset-code',
+                  params: { email }
+                });
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Success',
+          'Reset code sent to your email. Please check your inbox.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                console.log('🔄 Navigating to verify-reset-code with email:', email);
+                router.replace({
+                  pathname: '/verify-reset-code',
+                  params: { email }
+                });
+              }
+            }
+          ]
+        );
+      }
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
         Alert.alert('Error', 'Email not found. Please check and try again.');
@@ -83,7 +111,7 @@ export default function ForgotPasswordScreen() {
         {/* Title */}
         <Text style={styles.title}>Forgot Password?</Text>
         <Text style={styles.subtitle}>
-          Enter your email address and we'll send you a link to reset your password.
+          Enter your email address and we'll send you a 6-digit code to reset your password.
         </Text>
 
         {/* Email Input */}
@@ -111,7 +139,7 @@ export default function ForgotPasswordScreen() {
           disabled={loading || !email}
         >
           <Text style={styles.sendText}>
-            {loading ? 'Sending...' : 'Send Reset Link'}
+            {loading ? 'Sending...' : 'Send Reset Code'}
           </Text>
         </TouchableOpacity>
 
