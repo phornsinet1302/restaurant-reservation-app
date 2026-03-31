@@ -84,10 +84,13 @@ export default function RestaurantSignupScreen() {
   const submitApplication = async () => {
     setLoading(true);
     try {
+      // Retrieve role from AsyncStorage (set during account-type selection)
+      const selectedRole = await AsyncStorage.getItem('selectedRole') || 'restaurant';
+      
       const payload = {
         email,
         password,
-        role: 'restaurant',
+        role: selectedRole,
         fullName,
         identity: {
           legalName,
@@ -124,6 +127,8 @@ export default function RestaurantSignupScreen() {
       }
     } finally {
       setLoading(false);
+      // Clear the selected role after signup attempt
+      await AsyncStorage.removeItem('selectedRole');
     }
   };
 

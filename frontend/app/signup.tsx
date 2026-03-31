@@ -132,8 +132,12 @@ export default function SignUpScreen() {
 
       setLoading(true);
       try {
+        // Retrieve role from AsyncStorage (set during account-type selection)
+        const selectedRole = await AsyncStorage.getItem('selectedRole') || 'customer';
+        
         console.log('Attempting signup with:', { 
-          email, 
+          email,
+          role: selectedRole,
           fullName, 
           phone,
           dateOfBirth,
@@ -144,7 +148,7 @@ export default function SignUpScreen() {
         const response = await axios.post(API_CONFIG.ENDPOINTS.AUTH.REGISTER, {
           email,
           password,
-          role: 'customer',
+          role: selectedRole,
           fullName,
           phone,
           dateOfBirth: dateOfBirth || null,
@@ -229,6 +233,8 @@ export default function SignUpScreen() {
         alert('Error: ' + errorMessage);
       } finally {
         setLoading(false);
+        // Clear the selected role after signup attempt
+        await AsyncStorage.removeItem('selectedRole');
       }
     }
   };

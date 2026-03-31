@@ -3,8 +3,21 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AccountTypeScreen() {
+  const handleSelectRole = async (role: 'customer' | 'restaurant') => {
+    try {
+      await AsyncStorage.setItem('selectedRole', role);
+      if (role === 'customer') {
+        router.push('/signup');
+      } else {
+        router.push('/restaurant-signup');
+      }
+    } catch (error) {
+      console.error('Error storing role:', error);
+    }
+  };
   return (
     <ScrollView
       style={styles.container}
@@ -26,7 +39,7 @@ export default function AccountTypeScreen() {
       <TouchableOpacity
         style={styles.accountCard}
         activeOpacity={0.7}
-        onPress={() => router.push('/signup')}
+        onPress={() => handleSelectRole('customer')}
       >
         <View style={styles.accountIconCircle}>
           <Ionicons name="person-add-outline" size={24} color={Colors.primary} />
@@ -45,7 +58,7 @@ export default function AccountTypeScreen() {
         <Text style={styles.infoText}>
           Registering as a Cambodia restaurant owner? Use restaurant access and select Create owner account to begin onboarding.
         </Text>
-        <TouchableOpacity onPress={() => router.push('/restaurant-signup')}>
+        <TouchableOpacity onPress={() => handleSelectRole('restaurant')}>
           <Text style={styles.infoLink}>Open restaurant access</Text>
         </TouchableOpacity>
       </View>
