@@ -1,12 +1,31 @@
-const supabase = require('../config/supabase'); // Make sure this path matches your setup!
+const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 
 // 1. Add Menu Item
 exports.addMenuItem = async (req, res) => {
   try {
-    const { restaurant_id, name, description, price, category, image_url } = req.body;
-    const { data, error } = await supabase
+    let { restaurant_id, name, description, price, category, image_url, is_available } = req.body;
+
+    // If no restaurant_id provided, resolve from the authenticated user
+    if (!restaurant_id && req.user) {
+      const { data: restaurant } = await supabase
+        .from('restaurants')
+        .select('id')
+        .eq('merchant_id', req.user.id)
+        .single();
+      if (restaurant) restaurant_id = restaurant.id;
+    }
+
+    if (!restaurant_id) {
+      return res.status(400).json({ error: 'No restaurant found for your account.' });
+    }
+
+    const insertData = { restaurant_id, name, description, price, category, image_url };
+    if (typeof is_available !== 'undefined') insertData.is_available = is_available;
+
+    const { data, error } = await supabaseAdmin
       .from('menu_items')
-      .insert([{ restaurant_id, name, description, price, category, image_url }])
+      .insert([insertData])
       .select();
 
     if (error) throw error;
@@ -57,7 +76,7 @@ exports.updateMenuItem = async (req, res) => {
     const { id } = req.params;
     const updates = req.body; // Allows updating price, name, is_available, etc.
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('menu_items')
       .update(updates)
       .eq('id', id)
@@ -74,7 +93,7 @@ exports.updateMenuItem = async (req, res) => {
 exports.deleteMenuItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('menu_items')
       .delete()
       .eq('id', id);

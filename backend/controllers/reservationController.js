@@ -1,6 +1,5 @@
 const supabase = require('../config/supabase');
-
-// 1. CREATE RESERVATION (POST)
+const { supabaseAdmin } = require('../config/supabase');
 exports.createReservation = async (req, res) => {
   try {
     const { restaurant_id, table_id, reservation_date, reservation_time, party_size, special_request } = req.body;
@@ -13,15 +12,15 @@ exports.createReservation = async (req, res) => {
     console.log('Creating reservation for user:', req.user.id);
     console.log('Reservation data:', { restaurant_id, table_id, reservation_date, reservation_time, party_size });
     
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('reservations')
       .insert([{ 
-        customer_id: req.user.id, // Maps the logged-in user to customer_id
+        customer_id: req.user.id,
         restaurant_id, 
         table_id, 
         reservation_date, 
         reservation_time, 
-        party_size,               // Uses party_size
+        party_size,
         special_request,
         status: 'pending'
       }])
@@ -67,7 +66,7 @@ exports.getReservationDetails = async (req, res) => {
 exports.updateReservationStatus = async (req, res) => {
   const { status } = req.body; 
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('reservations')
     .update({ status })
     .eq('id', req.params.id)
@@ -79,11 +78,11 @@ exports.updateReservationStatus = async (req, res) => {
 
 // 5. CANCEL RESERVATION (DELETE)
 exports.cancelReservation = async (req, res) => {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('reservations')
     .update({ status: 'cancelled' })
     .eq('id', req.params.id)
-    .eq('customer_id', req.user.id) // Ensures you can only cancel YOUR reservation
+    .eq('customer_id', req.user.id)
     .select();
 
   if (error) return res.status(400).json({ error: error.message });
@@ -92,7 +91,7 @@ exports.cancelReservation = async (req, res) => {
 
 // 6. CHECK-IN (POST)
 exports.checkIn = async (req, res) => {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('reservations')
     .update({ status: 'completed' }) 
     .eq('id', req.params.id)
@@ -119,7 +118,7 @@ exports.simulateMachineConfirmation = async (req, res) => {
 
     const status = action === 'confirm' ? 'confirmed' : 'rejected';
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('reservations')
       .update({ status })
       .eq('id', bookingId)

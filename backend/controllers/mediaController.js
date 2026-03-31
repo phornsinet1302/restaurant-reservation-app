@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 
 // 1. Get Restaurant Media (Gallery & Active Stories)
 exports.getRestaurantMedia = async (req, res) => {
@@ -26,7 +26,7 @@ exports.uploadMedia = async (req, res) => {
     const { restaurant_id, media_url, media_type } = req.body;
     console.log("=== DEBUG: VARIABLES ===", { restaurant_id, media_url, media_type });
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('restaurant_media')
       .insert([{ 
         restaurant_id, 
@@ -50,7 +50,7 @@ exports.uploadStory = async (req, res) => {
     // Calculate expiration time (24 hours from right now)
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('restaurant_media')
       .insert([{ 
         restaurant_id, 
@@ -72,7 +72,7 @@ exports.uploadStory = async (req, res) => {
 exports.deleteMedia = async (req, res) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('restaurant_media')
       .delete()
       .eq('id', id);

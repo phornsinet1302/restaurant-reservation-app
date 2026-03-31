@@ -1,4 +1,5 @@
-const supabase = require('../config/supabase'); // Make sure this path is correct for your setup
+const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 
 // 1. GET ALL TABLES (Public - so customers can see them)
 exports.getAllTables = async (req, res) => {
@@ -21,14 +22,14 @@ exports.getAllTables = async (req, res) => {
 exports.createTable = async (req, res) => {
   const { restaurant_id, table_number, capacity, status } = req.body;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('tables')
     .insert([
       { 
         restaurant_id, 
         table_number, 
         capacity, 
-        status: status || 'available' // Defaults to available if not provided
+        status: status || 'available'
       }
     ])
     .select();
@@ -42,7 +43,7 @@ exports.updateTable = async (req, res) => {
   const { id } = req.params; // Get the table ID from the URL
   const updates = req.body;  // What needs to be changed (e.g., status to "unavailable")
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('tables')
     .update(updates)
     .eq('id', id)
@@ -56,7 +57,7 @@ exports.updateTable = async (req, res) => {
 exports.deleteTable = async (req, res) => {
   const { id } = req.params;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('tables')
     .delete()
     .eq('id', id)

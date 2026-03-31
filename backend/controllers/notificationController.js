@@ -1,6 +1,5 @@
 const supabase = require('../config/supabase');
-
-exports.getMyNotifications = async (req, res) => {
+const { supabaseAdmin } = require('../config/supabase'); = async (req, res) => {
   try {
     const user_id = req.user.id; 
 
@@ -21,7 +20,7 @@ exports.markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true })
       .eq('id', id)
@@ -38,7 +37,7 @@ exports.markAllAsRead = async (req, res) => {
   try {
     const user_id = req.user.id;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true })
       .eq('user_id', user_id)
@@ -57,7 +56,7 @@ exports.deleteNotification = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('notifications')
       .delete()
       .eq('id', id);

@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 
 // ❌ REMOVED AsyncStorage import from here
@@ -46,7 +47,7 @@ exports.registerUser = async (req, res) => {
     }
 
     // Insert user into users table
-    const { data: insertedUser, error: userError } = await supabase
+    const { data: insertedUser, error: userError } = await supabaseAdmin
       .from('users')
       .insert([userData])
       .select('*');
@@ -57,7 +58,7 @@ exports.registerUser = async (req, res) => {
     }
 
     // Store the hashed password in the users table
-    const { error: passwordError } = await supabase
+    const { error: passwordError } = await supabaseAdmin
       .from('users')
       .update({ password_hash: hashedPassword })
       .eq('id', userId);
@@ -82,7 +83,7 @@ exports.registerUser = async (req, res) => {
         description: `${restaurantProfile.category || ''} - ${restaurantProfile.cuisine || ''}`.trim() || null,
       };
 
-      const { error: restaurantError } = await supabase
+      const { error: restaurantError } = await supabaseAdmin
         .from('restaurants')
         .insert([restaurantData]);
 
@@ -288,7 +289,7 @@ exports.updateProfile = async (req, res) => {
 
     console.log('💾 Update data to save:', updateData);
 
-    const { error: userError } = await supabase
+    const { error: userError } = await supabaseAdmin
       .from('users')
       .update(updateData)
       .eq('id', userId);
@@ -302,7 +303,7 @@ exports.updateProfile = async (req, res) => {
     // B. Update Restaurant table only if user is a merchant/restaurant
     if (restaurantData) {
       console.log('🏪 Updating restaurant data...');
-      const { error: restError } = await supabase
+      const { error: restError } = await supabaseAdmin
         .from('restaurants')
         .update({
           name: restaurantData.nameEn,
@@ -512,7 +513,7 @@ exports.googleSignUp = async (req, res) => {
     }
 
     // Insert into public.users
-    const { error: userError } = await supabase
+    const { error: userError } = await supabaseAdmin
       .from('users')
       .insert([{
         id: userId,
@@ -759,7 +760,7 @@ exports.appleSignUp = async (req, res) => {
       };
     } else {
       // Create new user
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUpWithPassword({
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: email,
         password: appleId + email + 'apple'
       });
@@ -772,7 +773,7 @@ exports.appleSignUp = async (req, res) => {
       const userId = signUpData.user.id;
 
       // Insert into public.users
-      const { error: userError } = await supabase
+      const { error: userError } = await supabaseAdmin
         .from('users')
         .insert([{
           id: userId,
@@ -1077,7 +1078,7 @@ exports.completeProfileSetup = async (req, res) => {
     console.log('Data:', { fullName, phone, bio });
 
     // Update user profile in Supabase
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('users')
       .update({
         name: fullName,
@@ -1194,7 +1195,7 @@ exports.resetPasswordWithCode = async (req, res) => {
     const passwordHash = await bcrypt.hash(newPassword, saltRounds);
 
     // Update password in database - using upsert to handle missing columns
-    const { data: updateData, error: updateError } = await supabase
+    const { data: updateData, error: updateError } = await supabaseAdmin
       .from('users')
       .update({
         password_hash: passwordHash,
