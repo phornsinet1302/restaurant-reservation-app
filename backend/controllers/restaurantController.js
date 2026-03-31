@@ -1,6 +1,5 @@
 const supabase = require('../config/supabase');
-
-exports.getRestaurants = async (req, res) => {
+const { supabaseAdmin } = require('../config/supabase'); = async (req, res) => {
   const { search, filter } = req.query;
   
   try {
@@ -44,7 +43,7 @@ exports.getRestaurantDetails = async (req, res) => {
 
 exports.createRestaurant = async (req, res) => {
   const { name, description, address, opening_hours } = req.body;
-  const { data, error } = await supabase.from('restaurants').insert([
+  const { data, error } = await supabaseAdmin.from('restaurants').insert([
     { name, description, address, opening_hours, merchant_id: req.user.id }
   ]).select();
 
@@ -54,7 +53,7 @@ exports.createRestaurant = async (req, res) => {
 
 
 exports.updateRestaurant = async (req, res) => {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('restaurants')
     .update(req.body)
     .eq('id', req.params.id)

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, Alert } from 'react-native';
 import axios from 'axios';
 import * as WebBrowser from 'expo-web-browser';
+import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -20,27 +21,101 @@ export default function LoginScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  // Use the Web Client ID for all platforms (Expo handles the redirect)
-  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
-  const redirectUri = 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
+  // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
+  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
+  const googleRedirectUri = Platform.OS === 'ios'
+    ? `com.googleusercontent.apps.${iosClientId.split('.apps.googleusercontent.com')[0]}:/oauthredirect`
+    : 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
+
+  const googleClientId = Platform.OS === 'ios'
+    ? iosClientId
+    : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
+
+  const discovery = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  };
+
+  const [request, response, promptAsync] = useAuthRequest(
+    {
+      clientId: googleClientId,
+      redirectUri: googleRedirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: ResponseType.Code,
+      usePKCE: true,
+    },
+    discovery
+  );
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     try {
-      // Step 1: Open Google OAuth in browser
-      const url = `https://accounts.google.com/o/oauth2/v2/auth?` +
-        `scope=openid+profile+email&` +
-        `client_id=${googleClientId}&` +
-        `response_type=code&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}`;
+      const result = await promptAsync();
+      console.log('Google auth result:', result);
       
-      await WebBrowser.openBrowserAsync(url);
-      // After user completes login on Google, they'll be redirected back to app
-      // The backend will need to handle the callback
-      
+      if (result?.type === 'success') {
+        const { code } = result.params;
+        
+        if (!code) {
+          Alert.alert('Error', 'Failed to get authorization code');
+          return;
+        }
+
+        // Exchange code for tokens
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: googleClientId,
+            redirect_uri: googleRedirectUri,
+            grant_type: 'authorization_code',
+            code_verifier: request?.codeVerifier || '',
+          }).toString(),
+        });
+
+        const tokens = await tokenResponse.json();
+
+        if (!tokens.access_token) {
+          Alert.alert('Error', tokens.error_description || 'Token exchange failed');
+          return;
+        }
+
+        console.log('Sending access_token to backend...');
+        const backendResponse = await axios.post(API_CONFIG.ENDPOINTS.AUTH.GOOGLE_LOGIN, {
+          access_token: tokens.access_token,
+        });
+
+        console.log('Backend response:', backendResponse.data);
+        const token = backendResponse.data.session?.access_token;
+        if (token) {
+          await AsyncStorage.setItem('token', token);
+          if (backendResponse.data.user) {
+            await AsyncStorage.setItem('user', JSON.stringify(backendResponse.data.user));
+          }
+          await AsyncStorage.removeItem('guestMode');
+          
+          const googleUserRole = backendResponse.data.user?.role;
+          if (googleUserRole === 'merchant' || googleUserRole === 'restaurant') {
+            Alert.alert('Success', 'Logged in with Google successfully!');
+            router.replace('/(merchant-tabs)');
+          } else {
+            Alert.alert('Success', 'Logged in with Google successfully!');
+            router.replace('/(tabs)');
+          }
+        } else {
+          Alert.alert('Error', 'No token received from backend');
+        }
+      } else if (result?.type === 'error') {
+        Alert.alert('Error', `Authentication failed: ${result.params?.error || 'Unknown error'}`);
+      }
     } catch (error) {
       console.error('Google login error:', error);
-      Alert.alert('Error', 'Google login failed. Please try again.');
+      if (axios.isAxiosError(error)) {
+        Alert.alert('Error', error.response?.data?.error || error.message);
+      } else {
+        Alert.alert('Error', 'Google login failed. Please try again.');
+      }
     } finally {
       setGoogleLoading(false);
     }
@@ -76,8 +151,14 @@ export default function LoginScreen() {
           // Clear guest mode flag
           await AsyncStorage.removeItem('guestMode');
           
-          Alert.alert('Success', 'Logged in with Apple successfully!');
-          router.replace('/(tabs)');
+          const appleUserRole = response.data.user?.role;
+          if (appleUserRole === 'merchant' || appleUserRole === 'restaurant') {
+            Alert.alert('Success', 'Logged in with Apple successfully!');
+            router.replace('/(merchant-tabs)');
+          } else {
+            Alert.alert('Success', 'Logged in with Apple successfully!');
+            router.replace('/(tabs)');
+          }
         } else {
           Alert.alert('Error', 'No token received');
         }
@@ -144,8 +225,15 @@ export default function LoginScreen() {
         // Clear guest mode flag
         await AsyncStorage.removeItem('guestMode');
         
-        Alert.alert('Success', 'Logged in successfully!');
-        router.replace('/(tabs)');
+        // Route based on user role
+        const userRole = response.data.user?.role;
+        if (userRole === 'merchant' || userRole === 'restaurant') {
+          Alert.alert('Success', 'Logged in successfully!');
+          router.replace('/(merchant-tabs)');
+        } else {
+          Alert.alert('Success', 'Logged in successfully!');
+          router.replace('/(tabs)');
+        }
       } else {
         Alert.alert('Error', 'Login failed: No token received');
       }

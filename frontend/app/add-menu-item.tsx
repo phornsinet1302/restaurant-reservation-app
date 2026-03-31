@@ -1,0 +1,318 @@
+import React, { useState } from 'react';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  TextInput, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '@/constants/Colors';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import * as ImagePicker from 'expo-image-picker';
+import { API_CONFIG } from '@/app/config/apiConfig';
+
+type Availability = 'available' | 'sold_out' | 'time_based';
+
+export default function AddMenuItemScreen() {
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('');
+  const [price, setPrice] = useState('7.50');
+  const [availability, setAvailability] = useState<Availability>('available');
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const adjustPrice = (delta: number) => {
+    const current = parseFloat(price) || 0;
+    const newPrice = Math.max(0, current + delta);
+    setPrice(newPrice.toFixed(2));
+  };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setImageUri(result.assets[0].uri);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter a dish name');
+      return;
+    }
+    if (!price.trim() || isNaN(parseFloat(price))) {
+      Alert.alert('Error', 'Please enter a valid price');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const token = await AsyncStorage.getItem('token');
+
+      const payload: any = {
+        name: name.trim(),
+        description: description.trim(),
+        category: category.trim() || 'Main',
+        price: parseFloat(price),
+        is_available: availability !== 'sold_out',
+        is_time_based: availability === 'time_based',
+      };
+
+      if (imageUri) {
+        payload.image_url = imageUri;
+      }
+
+      await axios.post(`${API_CONFIG.BASE_URL}/api/menu`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      Alert.alert('Success', 'Menu item added successfully!', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || 'Failed to add menu item';
+      Alert.alert('Error', msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const availabilityOptions: { key: Availability; label: string; activeColor: string; activeBg: string }[] = [
+    { key: 'available', label: 'Available', activeColor: Colors.white, activeBg: '#4A6741' },
+    { key: 'sold_out', label: 'Sold Out', activeColor: Colors.white, activeBg: '#E74C3C' },
+    { key: 'time_based', label: 'Time Based', activeColor: Colors.text, activeBg: Colors.primary },
+  ];
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={22} color={Colors.text} />
+        </TouchableOpacity>
+        <View>
+          <Text style={styles.title}>Add New Dish</Text>
+          <Text style={styles.subtitle}>This dish will appear on your customer-facing menu</Text>
+        </View>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Photo Upload */}
+        <TouchableOpacity style={styles.photoArea} onPress={pickImage}>
+          {imageUri ? (
+            <Image source={{ uri: imageUri }} style={styles.photoPreview} />
+          ) : (
+            <>
+              <View style={styles.cameraIcon}>
+                <Ionicons name="camera-outline" size={28} color={Colors.gray} />
+              </View>
+              <Text style={styles.photoTitle}>Add a photo of this dish</Text>
+              <Text style={styles.photoSubtitle}>Tap to upload from your device</Text>
+              <View style={styles.choosePhotoBtn}>
+                <Ionicons name="images-outline" size={16} color={Colors.primary} />
+                <Text style={styles.choosePhotoText}>Choose Photo</Text>
+              </View>
+            </>
+          )}
+        </TouchableOpacity>
+
+        {/* Dish Name */}
+        <Text style={styles.label}>Dish Name</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Fish Amok"
+          placeholderTextColor={Colors.gray}
+          value={name}
+          onChangeText={setName}
+        />
+
+        {/* Description */}
+        <Text style={styles.label}>Description</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder="Briefly describe the dish, ingredients, or style"
+          placeholderTextColor={Colors.gray}
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
+
+        {/* Category & Price row */}
+        <View style={styles.row}>
+          <View style={styles.halfField}>
+            <Text style={styles.label}>Category</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Main, Starter"
+              placeholderTextColor={Colors.gray}
+              value={category}
+              onChangeText={setCategory}
+            />
+          </View>
+          <View style={styles.halfField}>
+            <Text style={styles.label}>Price</Text>
+            <View style={styles.priceRow}>
+              <TouchableOpacity style={styles.priceArrow} onPress={() => adjustPrice(-1)}>
+                <Ionicons name="remove" size={18} color={Colors.text} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.priceInput}
+                value={'$' + price}
+                onChangeText={(text) => {
+                  const cleaned = text.replace(/[^0-9.]/g, '');
+                  setPrice(cleaned);
+                }}
+                keyboardType="decimal-pad"
+              />
+              <TouchableOpacity style={styles.priceArrow} onPress={() => adjustPrice(1)}>
+                <Ionicons name="add" size={18} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Availability */}
+        <Text style={styles.label}>Availability</Text>
+        <View style={styles.availabilityRow}>
+          {availabilityOptions.map(opt => {
+            const isActive = availability === opt.key;
+            return (
+              <TouchableOpacity
+                key={opt.key}
+                style={[
+                  styles.availChip,
+                  isActive && { backgroundColor: opt.activeBg, borderColor: opt.activeBg },
+                ]}
+                onPress={() => setAvailability(opt.key)}
+              >
+                <Text style={[
+                  styles.availText,
+                  isActive && { color: opt.activeColor },
+                ]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      {/* Submit Button */}
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={[styles.submitBtn, submitting && { opacity: 0.6 }]}
+          onPress={handleSubmit}
+          disabled={submitting}
+        >
+          {submitting ? (
+            <ActivityIndicator color={Colors.white} />
+          ) : (
+            <Text style={styles.submitText}>Add to Menu</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.background },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingTop: 60, paddingHorizontal: 20, paddingBottom: 16,
+  },
+  backBtn: {
+    width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center',
+  },
+  title: { fontFamily: 'PlusJakartaSans-Bold', fontSize: 22, color: Colors.text },
+  subtitle: { fontFamily: 'PlusJakartaSans-Regular', fontSize: 13, color: Colors.gray, marginTop: 2 },
+
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 24 },
+
+  /* Photo upload */
+  photoArea: {
+    borderWidth: 2, borderColor: Colors.border, borderStyle: 'dashed',
+    borderRadius: 16, padding: 28, alignItems: 'center', marginBottom: 24,
+    backgroundColor: '#FEFCF4',
+  },
+  cameraIcon: { marginBottom: 10 },
+  photoTitle: { fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 15, color: Colors.text, marginBottom: 4 },
+  photoSubtitle: { fontFamily: 'PlusJakartaSans-Regular', fontSize: 13, color: Colors.gray, marginBottom: 14 },
+  choosePhotoBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1, borderColor: Colors.primary,
+  },
+  choosePhotoText: { fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 13, color: Colors.primary },
+  photoPreview: { width: '100%', height: 200, borderRadius: 12 },
+
+  /* Form fields */
+  label: {
+    fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 14, color: Colors.text, marginBottom: 8,
+  },
+  input: {
+    backgroundColor: Colors.white, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+    fontFamily: 'PlusJakartaSans-Regular', fontSize: 14, color: Colors.text,
+    borderWidth: 1, borderColor: Colors.border, marginBottom: 20,
+  },
+  textArea: { minHeight: 100, textAlignVertical: 'top' },
+
+  row: { flexDirection: 'row', gap: 14 },
+  halfField: { flex: 1 },
+
+  /* Price with arrows */
+  priceRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.white, borderRadius: 14,
+    borderWidth: 1, borderColor: Colors.border, marginBottom: 20,
+    overflow: 'hidden',
+  },
+  priceArrow: {
+    width: 42, height: 48, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F5F0E0',
+  },
+  priceInput: {
+    flex: 1, textAlign: 'center',
+    fontFamily: 'PlusJakartaSans-Medium', fontSize: 14, color: Colors.text,
+    paddingVertical: 14,
+  },
+
+  /* Availability chips */
+  availabilityRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  availChip: {
+    paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
+  },
+  availText: { fontFamily: 'PlusJakartaSans-Medium', fontSize: 13, color: Colors.text },
+
+  /* Bottom bar */
+  bottomBar: { paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12 },
+  submitBtn: {
+    backgroundColor: Colors.primary, borderRadius: 16, paddingVertical: 16,
+    alignItems: 'center',
+  },
+  submitText: { fontFamily: 'PlusJakartaSans-Bold', fontSize: 16, color: Colors.white },
+});

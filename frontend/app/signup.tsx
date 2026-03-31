@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
+import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import {
   View,
@@ -34,25 +35,93 @@ export default function SignUpScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [step, setStep] = useState(1); // Step 1: Email/Password, Step 2: Full Profile
 
-  // Use the Web Client ID for all platforms (Expo handles the redirect)
-  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
-  const redirectUri = 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
+  // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
+  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
+  const googleRedirectUri = Platform.OS === 'ios'
+    ? `com.googleusercontent.apps.${iosClientId.split('.apps.googleusercontent.com')[0]}:/oauthredirect`
+    : 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
+
+  const googleClientId = Platform.OS === 'ios'
+    ? iosClientId
+    : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
+
+  const discovery = {
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  };
+
+  const [request, response, promptAsync] = useAuthRequest(
+    {
+      clientId: googleClientId,
+      redirectUri: googleRedirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: ResponseType.Code,
+      usePKCE: true,
+    },
+    discovery
+  );
 
   const handleGoogleSignUp = async () => {
     setGoogleLoading(true);
     try {
-      // Step 1: Open Google OAuth in browser
-      const url = `https://accounts.google.com/o/oauth2/v2/auth?` +
-        `scope=openid+profile+email&` +
-        `client_id=${googleClientId}&` +
-        `response_type=code&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}`;
+      const result = await promptAsync();
+      console.log('Google auth result:', result);
       
-      await WebBrowser.openBrowserAsync(url);
-      // After user completes signup on Google, they'll be redirected back to app
+      if (result?.type === 'success') {
+        const { code } = result.params;
+        
+        if (!code) {
+          Alert.alert('Error', 'Failed to get authorization code');
+          return;
+        }
+
+        // Exchange code for tokens
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: googleClientId,
+            redirect_uri: googleRedirectUri,
+            grant_type: 'authorization_code',
+            code_verifier: request?.codeVerifier || '',
+          }).toString(),
+        });
+
+        const tokens = await tokenResponse.json();
+
+        if (!tokens.access_token) {
+          Alert.alert('Error', tokens.error_description || 'Token exchange failed');
+          return;
+        }
+
+        console.log('Sending access_token to backend...');
+        const backendResponse = await axios.post(API_CONFIG.ENDPOINTS.AUTH.GOOGLE_SIGNUP, {
+          access_token: tokens.access_token,
+        });
+
+        console.log('Backend response:', backendResponse.data);
+        const token = backendResponse.data.session?.access_token;
+        if (token) {
+          await AsyncStorage.setItem('token', token);
+          if (backendResponse.data.user) {
+            await AsyncStorage.setItem('user', JSON.stringify(backendResponse.data.user));
+          }
+          Alert.alert('Success', 'Signed up with Google successfully!');
+          router.replace('/(tabs)');
+        } else {
+          Alert.alert('Error', 'No token received from backend');
+        }
+      } else if (result?.type === 'error') {
+        Alert.alert('Error', `Authentication failed: ${result.params?.error || 'Unknown error'}`);
+      }
     } catch (error) {
       console.error('Google signup error:', error);
-      Alert.alert('Error', 'Google signup failed. Please try again.');
+      if (axios.isAxiosError(error)) {
+        Alert.alert('Error', error.response?.data?.error || error.message);
+      } else {
+        Alert.alert('Error', 'Google signup failed. Please try again.');
+      }
     } finally {
       setGoogleLoading(false);
     }

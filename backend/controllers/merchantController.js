@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 const sendEmail = require('../utils/emailService');
 
 // 1. Get Dashboard Overview (Total stats for the merchant)
@@ -75,7 +76,7 @@ exports.confirmReservation = async (req, res) => {
     const { id } = req.params;
 
     // 1. Update the reservation
-    const { data: reservation, error: resError } = await supabase
+    const { data: reservation, error: resError } = await supabaseAdmin
       .from('reservations')
       .update({ status: 'confirmed' })
       .eq('id', id)
@@ -124,12 +125,12 @@ exports.rejectReservation = async (req, res) => {
     const { id } = req.params;
 
     // 1. Update the reservation status in the database
-    const { data: reservation, error: resError } = await supabase
+    const { data: reservation, error: resError } = await supabaseAdmin
       .from('reservations')
-      .update({ status: 'rejected' }) // Matches your UI 'Decline' logic
+      .update({ status: 'rejected' })
       .eq('id', id)
       .select()
-      .single(); // Returns the updated object directly
+      .single();
 
     if (resError) throw resError;
     if (!reservation) return res.status(404).json({ message: "Reservation not found." });

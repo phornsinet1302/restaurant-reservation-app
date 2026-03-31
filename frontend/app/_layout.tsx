@@ -21,6 +21,7 @@ export default function RootLayout() {
         <Stack.Screen name="signup" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="login" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(merchant-tabs)" />
         <Stack.Screen
           name="story"
           options={{
@@ -63,6 +64,38 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="verify-email"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="add-menu-item"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="restaurant-listing"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="manage-stories"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="merchant-settings"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="edit-profile"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="business-addresses"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="language"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="about"
           options={{ animation: 'slide_from_right' }}
         />
         <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Oops!' }} />
