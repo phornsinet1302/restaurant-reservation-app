@@ -1,25 +1,30 @@
 const supabase = require('../config/supabase');
-const { supabaseAdmin } = require('../config/supabase'); = async (req, res) => {
+const { supabaseAdmin } = require('../config/supabase');
+
+exports.searchRestaurants = async (req, res) => {
   const { search, filter } = req.query;
   
   try {
-    let query = supabase.from('restaurants').select('*');
-    
     // Search by name or address/location
     if (search) {
       const searchTerm = `%${search}%`;
-      // Use OR filter to search in both name and address
+      // Use OR filter to search in both name and address, only published restaurants
       const { data, error } = await supabase
         .from('restaurants')
         .select('*')
+        .eq('is_published', true)
         .or(`name.ilike.${searchTerm},address.ilike.${searchTerm}`);
       
       if (error) return res.status(400).json({ error: error.message });
       return res.status(200).json(data);
     }
     
-    // Get all restaurants if no search
-    const { data, error } = await query;
+    // Get all published restaurants if no search
+    const { data, error } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('is_published', true);
+      
     if (error) return res.status(400).json({ error: error.message });
     res.status(200).json(data);
   } catch (error) {
@@ -42,13 +47,102 @@ exports.getRestaurantDetails = async (req, res) => {
 
 
 exports.createRestaurant = async (req, res) => {
-  const { name, description, address, opening_hours } = req.body;
-  const { data, error } = await supabaseAdmin.from('restaurants').insert([
-    { name, description, address, opening_hours, merchant_id: req.user.id }
-  ]).select();
+  try {
+    const merchantId = req.user.id;
+    const { name, description, address, opening_hours, closing_hours, phone, category, cuisine, latitude, longitude } = req.body;
+    
+    console.log('🍽️ Creating restaurant for merchant:', merchantId);
+    console.log('   Merchant ID length:', merchantId?.length);
+    console.log('   Merchant ID type:', typeof merchantId);
+    console.log('📝 Restaurant data:', { name, address, phone });
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(201).json(data);
+    // IMPORTANT: Ensure merchant exists in users table before foreign key constraint
+    console.log('🔍 Checking if merchant exists in users table...');
+    const { data: existingUser, error: selectError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('id', merchantId);
+
+    console.log('   Select result:', existingUser, 'Error:', selectError);
+
+    if (!existingUser || existingUser.length === 0) {
+      console.log('⚠️  Merchant not found in users table, auto-creating...');
+      const { data: insertedUser, error: userError } = await supabaseAdmin
+        .from('users')
+        .insert([{
+          id: merchantId,
+          email: req.user.email || `merchant-${merchantId}@restaurant.local`,
+          role: 'restaurant'
+        }])
+        .select();
+
+      if (userError) {
+        console.error('❌ Failed to create merchant user:', userError.message);
+        console.error('   Full error:', JSON.stringify(userError));
+        return res.status(400).json({ error: 'Failed to initialize merchant account: ' + userError.message });
+      }
+      console.log('✅ Merchant user created:', insertedUser);
+      
+      // Verify the user was actually created
+      const { data: verifyUser, error: verifyError } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('id', merchantId);
+      console.log('✅ Verification - User exists:', verifyUser?.length > 0, 'Error:', verifyError?.message);
+    } else {
+      console.log('✅ Merchant already exists in users table');
+    }
+
+    // First: Verify merchant exists one more time with explicit logging
+    console.log('🔍 Final verification before insert...');
+    const verifyQuery = `SELECT id FROM users WHERE id = '${merchantId}'`;
+    console.log('   Query:', verifyQuery);
+    
+    const { data: finalVerify, error: verifyError } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('id', merchantId);
+    
+    console.log('   Result:', finalVerify, 'Error:', verifyError);
+
+    // WORKAROUND: Use direct insert with latitude/longitude properly set
+    const { data, error } = await supabaseAdmin
+      .from('restaurants')
+      .insert([{
+        merchant_id: merchantId,
+        name: name || 'Untitled Restaurant',
+        description: description || '',
+        address: address || '',
+        opening_hours: opening_hours || '10:00AM',
+        closing_hours: closing_hours || '11:00PM',
+        phone: phone || '',
+        category: category || '',
+        cuisine: cuisine || '',
+        latitude: parseFloat(latitude) || null,
+        longitude: parseFloat(longitude) || null,
+        is_published: false,
+      }])
+      .select();
+
+    if (error) {
+      console.error('❌ Restaurant creation error:', error.message);
+      console.error('   Error code:', error.code);
+      console.error('   Error status:', error.status);
+      console.error('   Full error:', JSON.stringify(error));
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.log('✅ Restaurant created:', data[0]?.id);
+    res.status(201).json({
+      success: true,
+      message: "Restaurant created successfully",
+      data: data[0]
+    });
+  } catch (err) {
+    console.error('❌ Error creating restaurant:', err.message);
+    console.error('   Error details:', err);
+    res.status(500).json({ error: "Failed to create restaurant: " + err.message });
+  }
 };
 
 
@@ -104,5 +198,263 @@ exports.getRestaurantMedia = async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
+};
+
+// ======================== MERCHANT RESTAURANT LISTING MANAGEMENT ========================
+
+// Define required fields for publishing a restaurant
+const REQUIRED_FIELDS = [
+  'name',
+  'description',
+  'address',
+  'phone',
+  'category',
+  'cuisine',
+  'opening_hours',
+  'closing_hours'
+];
+
+/**
+ * @desc Get merchant's restaurant listing (for editing)
+ * @route GET /api/merchant/restaurant
+ * @access Private (merchant only)
+ */
+exports.getMerchantRestaurant = async (req, res) => {
+  try {
+    const merchantId = req.user.id;
+
+    console.log('📋 Fetching merchant restaurant for merchant:', merchantId);
+
+    // Get merchant's restaurant
+    const { data: restaurant, error } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('merchant_id', merchantId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // No restaurant found, return null
+        console.log('⚠️ No restaurant found for merchant:', merchantId);
+        return res.status(200).json({ data: null, message: "No restaurant listing yet" });
+      }
+      throw error;
+    }
+
+    console.log('✅ Restaurant found:', restaurant.id);
+    res.status(200).json({
+      success: true,
+      data: restaurant
+    });
+  } catch (error) {
+    console.error('❌ Error fetching merchant restaurant:', error.message);
+    res.status(500).json({ error: "Failed to fetch restaurant: " + error.message });
+  }
+};
+
+/**
+ * @desc Update merchant's restaurant listing
+ * @route PUT /api/merchant/restaurant
+ * @access Private (merchant only)
+ */
+exports.updateMerchantRestaurant = async (req, res) => {
+  try {
+    const merchantId = req.user.id;
+    const updates = req.body;
+
+    console.log('📝 Updating merchant restaurant for:', merchantId);
+    console.log('📝 Updates:', Object.keys(updates));
+
+    // First, check if restaurant exists
+    const { data: existingRestaurant, error: fetchError } = await supabase
+      .from('restaurants')
+      .select('id')
+      .eq('merchant_id', merchantId)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      throw fetchError;
+    }
+
+    // If no restaurant exists, return error
+    if (!existingRestaurant) {
+      console.log('❌ No restaurant found for merchant:', merchantId);
+      return res.status(404).json({ error: "Restaurant not found. Please contact support." });
+    }
+
+    // Update restaurant
+    const { data: updatedRestaurant, error: updateError } = await supabaseAdmin
+      .from('restaurants')
+      .update(updates)
+      .eq('merchant_id', merchantId)
+      .select('*');
+
+    if (updateError) {
+      console.error('❌ Update error:', updateError.message);
+      throw updateError;
+    }
+
+    console.log('✅ Restaurant updated successfully');
+    res.status(200).json({
+      success: true,
+      message: "Restaurant listing updated successfully",
+      data: updatedRestaurant[0]
+    });
+  } catch (error) {
+    console.error('❌ Error updating restaurant:', error.message);
+    res.status(500).json({ error: "Failed to update restaurant: " + error.message });
+  }
+};
+
+/**
+ * @desc Validate if restaurant has all required fields
+ * @route POST /api/merchant/restaurant/validate
+ * @access Private (merchant only)
+ */
+exports.validateRestaurantListing = async (req, res) => {
+  try {
+    const merchantId = req.user.id;
+
+    console.log('✔️ Validating merchant restaurant:', merchantId);
+
+    const { data: restaurant, error } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('merchant_id', merchantId)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      return res.status(200).json({
+        isValid: false,
+        missingFields: REQUIRED_FIELDS,
+        message: "Restaurant listing not found"
+      });
+    }
+
+    if (error) throw error;
+
+    // Check for missing fields
+    const missingFields = REQUIRED_FIELDS.filter(field => !restaurant[field]);
+
+    const isValid = missingFields.length === 0;
+
+    console.log(`${isValid ? '✅' : '❌'} Validation result - Valid: ${isValid}, Missing: ${missingFields.length}`);
+
+    res.status(200).json({
+      success: true,
+      isValid,
+      missingFields,
+      numMissing: missingFields.length,
+      message: isValid 
+        ? "Restaurant listing is complete and ready to publish"
+        : `Missing ${missingFields.length} field(s): ${missingFields.join(', ')}`
+    });
+  } catch (error) {
+    console.error('❌ Validation error:', error.message);
+    res.status(500).json({ error: "Validation failed: " + error.message });
+  }
+};
+
+/**
+ * @desc Publish merchant's restaurant (make it visible to customers)
+ * @route POST /api/merchant/restaurant/publish
+ * @access Private (merchant only)
+ */
+exports.publishRestaurant = async (req, res) => {
+  try {
+    const merchantId = req.user.id;
+
+    console.log('🚀 Publishing restaurant for merchant:', merchantId);
+
+    // Get restaurant to validate
+    const { data: restaurant, error: fetchError } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('merchant_id', merchantId)
+      .single();
+
+    if (fetchError && fetchError.code === 'PGRST116') {
+      return res.status(404).json({ error: "Restaurant not found" });
+    }
+
+    if (fetchError) throw fetchError;
+
+    // Check for missing required fields
+    const missingFields = REQUIRED_FIELDS.filter(field => !restaurant[field]);
+
+    if (missingFields.length > 0) {
+      console.log('❌ Cannot publish - missing fields:', missingFields);
+      return res.status(400).json({
+        error: `Cannot publish restaurant. Missing required fields: ${missingFields.join(', ')}`,
+        missingFields
+      });
+    }
+
+    // Publish restaurant
+    const publishedAt = new Date().toISOString();
+    const { data: updatedRestaurant, error: updateError } = await supabaseAdmin
+      .from('restaurants')
+      .update({
+        is_published: true,
+        published_at: publishedAt
+      })
+      .eq('merchant_id', merchantId)
+      .select('*');
+
+    if (updateError) throw updateError;
+
+    console.log('✅ Restaurant published successfully');
+    res.status(200).json({
+      success: true,
+      message: "Restaurant published successfully and is now visible to customers!",
+      data: updatedRestaurant[0]
+    });
+  } catch (error) {
+    console.error('❌ Error publishing restaurant:', error.message);
+    res.status(500).json({ error: "Failed to publish restaurant: " + error.message });
+  }
+};
+
+/**
+ * @desc Unpublish merchant's restaurant (hide from customers)
+ * @route POST /api/merchant/restaurant/unpublish
+ * @access Private (merchant only)
+ */
+exports.unpublishRestaurant = async (req, res) => {
+  try {
+    const merchantId = req.user.id;
+
+    console.log('🔒 Unpublishing restaurant for merchant:', merchantId);
+
+    const { data: updatedRestaurant, error } = await supabaseAdmin
+      .from('restaurants')
+      .update({ is_published: false })
+      .eq('merchant_id', merchantId)
+      .select('*');
+
+    if (error) throw error;
+
+    console.log('✅ Restaurant unpublished successfully');
+    res.status(200).json({
+      success: true,
+      message: "Restaurant is now hidden from customers",
+      data: updatedRestaurant[0]
+    });
+  } catch (error) {
+    console.error('❌ Error unpublishing restaurant:', error.message);
+    res.status(500).json({ error: "Failed to unpublish restaurant: " + error.message });
+  }
+};
+
+/**
+ * @desc Get required fields for restaurant listing
+ * @route GET /api/merchant/restaurant/required-fields
+ * @access Public
+ */
+exports.getRequiredFields = async (req, res) => {
+  res.status(200).json({
+    requiredFields: REQUIRED_FIELDS,
+    count: REQUIRED_FIELDS.length
+  });
 };
 

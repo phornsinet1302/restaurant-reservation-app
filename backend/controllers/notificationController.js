@@ -1,5 +1,7 @@
 const supabase = require('../config/supabase');
-const { supabaseAdmin } = require('../config/supabase'); = async (req, res) => {
+const { supabaseAdmin } = require('../config/supabase');
+
+exports.getNotifications = async (req, res) => {
   try {
     const user_id = req.user.id; 
 

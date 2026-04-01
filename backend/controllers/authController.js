@@ -17,6 +17,30 @@ exports.registerUser = async (req, res) => {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
 
+    console.log('\n📝 REGISTRATION ATTEMPT:', email);
+
+    // ✅ CHECK IF EMAIL ALREADY EXISTS (NEW RULE: One email = One account)
+    console.log('🔍 Checking if email already exists...');
+    const { data: existingUsers, error: checkError } = await supabase
+      .from('users')
+      .select('id, email, role')
+      .eq('email', email);
+
+    if (checkError) {
+      console.error('❌ Check error:', checkError.message);
+      return res.status(400).json({ error: "Registration check failed: " + checkError.message });
+    }
+
+    if (existingUsers && existingUsers.length > 0) {
+      console.log('❌ Email already registered with role:', existingUsers[0].role);
+      return res.status(400).json({ 
+        error: `This email is already registered as a ${existingUsers[0].role} account. Please login instead.`,
+        existingRole: existingUsers[0].role
+      });
+    }
+
+    console.log('✅ Email is unique, proceeding with registration...');
+
     // 1. Hash password with bcrypt
     const bcrypt = require('bcrypt');
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -67,6 +91,8 @@ exports.registerUser = async (req, res) => {
       console.error("❌ PASSWORD STORE ERROR:", passwordError.message);
       return res.status(400).json({ error: "Failed to store password: " + passwordError.message });
     }
+
+    console.log('✅ User registered successfully - Role:', role);
 
     // 3. If restaurant role, also create restaurant entry
     if (role === 'restaurant' && restaurantProfile) {
@@ -134,25 +160,40 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    // 1. Fetch user from database
-    const { data: user, error: userError } = await supabase
+    console.log('\n🔐 LOGIN ATTEMPT:', email);
+
+    // 1. Fetch all users with this email
+    const { data: users, error: userError } = await supabase
       .from('users')
       .select('id, email, role, name, phone, date_of_birth, bio, password_hash')
-      .eq('email', email)
-      .single();
+      .eq('email', email);
 
-    if (userError || !user) {
+    if (userError || !users || users.length === 0) {
+      console.log('❌ No user found for email:', email);
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    // 2. Compare password with stored hash
+    console.log(`✅ Found ${users.length} user(s) with email:`, email);
+
+    // 2. Find a user that has a valid password hash
+    let user = null;
+    for (const u of users) {
+      if (u.password_hash) {
+        user = u;
+        console.log('✅ Found user with password hash - ID:', user.id);
+        break;
+      }
+    }
+
+    if (!user) {
+      console.warn('⚠️ No users with password hash found for:', email);
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // 3. Compare password with stored hash
     const bcrypt = require('bcrypt');
     
-    if (!user.password_hash) {
-      console.warn('⚠️ User has no password hash:', user.email);
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
+    console.log('🔑 Comparing password...');
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     
     if (!passwordMatch) {
@@ -162,7 +203,7 @@ exports.loginUser = async (req, res) => {
 
     console.log('✓ User found and password verified:', user.email);
 
-    // 3. Generate JWT token
+    // 4. Generate JWT token
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET || 'your-secret-key',
@@ -1178,16 +1219,21 @@ exports.resetPasswordWithCode = async (req, res) => {
       return res.status(400).json({ error: "Invalid reset code" });
     }
 
-    // Find user by email
-    const { data: userData, error: userError } = await supabase
+    // Find user by email - get all users with this email
+    const { data: users, error: userError } = await supabase
       .from('users')
-      .select('id, email')
-      .eq('email', email)
-      .single();
+      .select('id, email, password_hash')
+      .eq('email', email);
 
-    if (userError || !userData) {
+    if (userError || !users || users.length === 0) {
+      console.error('❌ User not found for email:', email);
       return res.status(404).json({ error: "User not found" });
     }
+
+    // If multiple users exist (duplicates), find one with password_hash first
+    let userData = users.find(u => u.password_hash) || users[0];
+    console.log('✅ User found:', userData.id, userData.email);
+    console.log(`📊 Total users with this email: ${users.length}, Using user:`, userData.id);
 
     // Hash new password
     const bcrypt = require('bcrypt');

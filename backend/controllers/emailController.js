@@ -86,25 +86,45 @@ exports.sendPasswordResetEmail = async (req, res) => {
   try {
     const { email } = req.body;
 
+    console.log('\n🔍 PASSWORD RESET REQUEST RECEIVED');
+    console.log('   Email:', email);
+
     if (!email) {
+      console.log('❌ No email provided');
       return res.status(400).json({ error: "Email is required" });
     }
 
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
+      console.log('❌ Invalid email format:', email);
       return res.status(400).json({ error: "Invalid email format" });
     }
 
+    console.log('✅ Email format valid');
+    console.log('📧 Checking if user exists in database...');
+
     // Check if user exists
     const supabase = require('../config/supabase');
-    const { data: user, error: userError } = await supabase
+    
+    console.log('🔎 Searching database for user with email:', email);
+    const { data: users, error: userError } = await supabase
       .from('users')
       .select('id, email')
-      .eq('email', email)
-      .single();
+      .eq('email', email);
 
-    if (userError || !user) {
+    console.log('   Query result - Users found:', users?.length || 0);
+    if (userError) {
+      console.log('   Query error:', userError.message);
+    }
+    if (users && users.length > 0) {
+      console.log('   User ID:', users[0].id);
+      console.log('   User Email:', users[0].email);
+    }
+
+    if (!users || users.length === 0) {
+      console.log('❌ No user found in database for email:', email);
+      console.log('   Available users in database need to be checked');
       // Don't reveal if email exists or not (security best practice)
       return res.status(200).json({ 
         message: "If an account exists with this email, a password reset link has been sent.",
@@ -112,6 +132,9 @@ exports.sendPasswordResetEmail = async (req, res) => {
         email: email
       });
     }
+
+    const user = users[0];
+    console.log('✅ User found:', user.id, user.email);
 
     // Generate a simple reset code (6 digits like verification)
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -123,7 +146,8 @@ exports.sendPasswordResetEmail = async (req, res) => {
     // Store reset code in memory (in production, use Redis or database)
     resetCodes.set(email, resetCodeData);
 
-    console.log('✅ Password reset code generated for', email, '- Code:', resetCode);
+    console.log('✅ Password reset code generated:', resetCode);
+    console.log('   Stored in memory with 1 hour expiry');
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -249,16 +273,18 @@ Restaurant Reservation App
     };
 
     console.log('📧 Sending password reset code to:', email);
-    console.log('📊 Reset Code Details:');
-    console.log('   Code:', resetCode);
-    console.log('   Length:', resetCode.length);
-    console.log('   Type:', typeof resetCode);
-    console.log('   Email To:', email);
+    console.log('📊 TRANSPORTER CONFIG:');
+    console.log('   Service: gmail');
+    console.log('   From:', process.env.EMAIL_USER);
+    console.log('   Auth User:', process.env.EMAIL_USER);
+    console.log('   Auth Pass:', process.env.EMAIL_PASS ? '***SET***' : '❌NOT SET');
     
     try {
+      console.log('📤 Calling transporter.sendMail()...');
       const info = await transporter.sendMail(mailOptions);
-      console.log('✅ Password reset email sent! Message ID:', info.messageId);
-      console.log('📌 Code sent in email:', resetCode);
+      console.log('✅ PASSWORD RESET EMAIL SENT SUCCESSFULLY!');
+      console.log('   Message ID:', info.messageId);
+      console.log('   Response:', info.response);
       
       res.status(200).json({ 
         message: "Password reset code sent to your email",
@@ -266,24 +292,28 @@ Restaurant Reservation App
         email: email,
         // Always show code in development (local environment)
         devCode: resetCode,
-        devMessage: "📌 Development Mode: Use this code to test password reset."
+        devMessage: "✅ Email sent! Check your inbox. Dev code shown for testing."
       });
     } catch (emailError) {
-      console.error('❌ Email sending failed:', emailError.message);
+      console.error('❌ EMAIL SENDING FAILED!');
+      console.error('   Error:', emailError.message);
+      console.error('   Error Code:', emailError.code);
+      console.error('   Stack:', emailError.stack);
       
       // In development, still send code even if email fails
-      console.log('📌 Development mode: Email failed but code stored. Use code:', resetCode);
+      console.log('📌 FALLBACK: Sending dev code due to email error');
       res.status(200).json({ 
-        message: "Password reset code generated (email service unavailable in dev)",
+        message: "Password reset code generated (email sending failed)",
         success: true,
         email: email,
         devCode: resetCode,
-        devMessage: "⚠️ Email service failed. Use this code for testing."
+        devMessage: "⚠️ Email failed but code is available. Error: " + emailError.message
       });
     }
   } catch (error) {
-    console.error('Email error:', error);
-    res.status(500).json({ error: "Failed to send password reset email." });
+    console.error('❌ PASSWORD RESET ERROR:', error.message);
+    console.error('   Stack:', error.stack);
+    res.status(500).json({ error: "Failed to process password reset." });
   }
 };
 
