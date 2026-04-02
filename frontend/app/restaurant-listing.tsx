@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+// import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'; // TEMPORARILY DISABLED FOR EXPO GO
+import * as Location from 'expo-location';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,9 +13,10 @@ import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { LinearGradient } from 'expo-linear-gradient';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 /* ─── Types ─── */
 type VenueType = 'Restaurant' | 'Pub' | 'Cafe' | 'Night club';
-type PriceRange = '$' | '$$' | '$$$' | '$$$$';
 
 /* ─── Time Picker Component ─── */
 const TimePicker = ({
@@ -99,22 +102,24 @@ export default function RestaurantListingScreen() {
   const [restaurantName, setRestaurantName] = useState('');
   const [cuisineLine, setCuisineLine] = useState('');
   const [description, setDescription] = useState('');
+  const [phone, setPhone] = useState('');
 
   // Venue type
   const venueTypes: VenueType[] = ['Restaurant', 'Pub', 'Cafe', 'Night club'];
   const [selectedVenueType, setSelectedVenueType] = useState<VenueType>('Restaurant');
 
-  // Price range
-  const priceRanges: PriceRange[] = ['$', '$$', '$$$', '$$$$'];
-  const [selectedPrice, setSelectedPrice] = useState<PriceRange>('$$');
-
   // Booking details
   const [address, setAddress] = useState('');
 
-  // Open until
+  // Opening until
   const [openHour, setOpenHour] = useState(10);
   const [openMinute, setOpenMinute] = useState(':00');
-  const [openPeriod, setOpenPeriod] = useState<'AM' | 'PM'>('PM');
+  const [openPeriod, setOpenPeriod] = useState<'AM' | 'PM'>('AM');
+
+  // Closing until
+  const [closeHour, setCloseHour] = useState(10);
+  const [closeMinute, setCloseMinute] = useState(':00');
+  const [closePeriod, setClosePeriod] = useState<'AM' | 'PM'>('PM');
 
   // Status
   const [isOpen, setIsOpen] = useState(true);
@@ -133,37 +138,93 @@ export default function RestaurantListingScreen() {
   // Cover image
   const [coverImage, setCoverImage] = useState<string | null>(null);
 
+  // Publishing
+  const [publishing, setPublishing] = useState(false);
+  const [token, setToken] = useState('');
+
+  // Location
+  const [latitude, setLatitude] = useState(11.5564); // Default: Phnom Penh
+  const [longitude, setLongitude] = useState(104.9282);
+  const [mapRegion, setMapRegion] = useState({
+    latitude: 11.5564,
+    longitude: 104.9282,
+    latitudeDelta: 0.05,
+    longitudeDelta: 0.05,
+  });
+  const [displayAddress, setDisplayAddress] = useState('');
+
   useEffect(() => {
     loadRestaurantData();
   }, []);
 
   const loadRestaurantData = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) return;
+      const storedToken = await AsyncStorage.getItem('token');
+      setToken(storedToken || '');
+      
+      if (!storedToken) return;
 
       const dashRes = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${storedToken}` },
       });
 
       const userStr = await AsyncStorage.getItem('user');
       const user = userStr ? JSON.parse(userStr) : null;
 
       if (user) {
-        // Try to load restaurant details
-        const restRes = await axios.get(`${API_CONFIG.BASE_URL}/api/restaurants`);
-        const myRestaurant = restRes.data?.find?.((r: any) => r.merchant_id === user.id);
+        // Try to load restaurant details from merchant endpoint
+        const restRes = await axios.get(
+          `${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`,
+          { headers: { Authorization: `Bearer ${storedToken}` } }
+        );
+        
+        const myRestaurant = restRes.data?.data;
         if (myRestaurant) {
           setRestaurantName(myRestaurant.name || '');
           setCuisineLine(myRestaurant.cuisine || myRestaurant.category || '');
           setDescription(myRestaurant.description || '');
           setAddress(myRestaurant.address || '');
+          setPhone(myRestaurant.phone || '');
           setSearchTags(myRestaurant.cuisine || '');
           if (myRestaurant.image_url) setCoverImage(myRestaurant.image_url);
+          
+          // Parse opening hours (e.g., "10:00am" → hour: 10, minute: :00, period: AM)
+          if (myRestaurant.opening_hours) {
+            const match = myRestaurant.opening_hours.match(/(\d+)(:?\d*)(am|pm)/i);
+            if (match) {
+              setOpenHour(parseInt(match[1]));
+              setOpenMinute(match[2] || ':00');
+              setOpenPeriod((match[3].toUpperCase() as 'AM' | 'PM'));
+            }
+          }
+          
+          // Parse closing hours
+          if (myRestaurant.closing_hours) {
+            const match = myRestaurant.closing_hours.match(/(\d+)(:?\d*)(am|pm)/i);
+            if (match) {
+              setCloseHour(parseInt(match[1]));
+              setCloseMinute(match[2] || ':00');
+              setClosePeriod((match[3].toUpperCase() as 'AM' | 'PM'));
+            }
+          }
+
+          // Load location coordinates
+          if (myRestaurant.latitude && myRestaurant.longitude) {
+            const lat = parseFloat(myRestaurant.latitude);
+            const lng = parseFloat(myRestaurant.longitude);
+            setLatitude(lat);
+            setLongitude(lng);
+            setMapRegion({
+              latitude: lat,
+              longitude: lng,
+              latitudeDelta: 0.05,
+              longitudeDelta: 0.05,
+            });
+          }
         }
       }
-    } catch {
-      // silent
+    } catch (error) {
+      console.log('Loading restaurant data...');
     } finally {
       setLoading(false);
     }
@@ -180,53 +241,215 @@ export default function RestaurantListingScreen() {
     setTimeSlots(prev => prev.filter(s => s !== slot));
   };
 
+  const getAddressFromCoordinates = async (lat: number, lng: number) => {
+    try {
+      const addresses = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      if (addresses.length > 0) {
+        const addr = addresses[0];
+        const formatted = `${addr.street || ''} ${addr.city || ''}, ${addr.region || ''}`.trim();
+        setDisplayAddress(formatted);
+      }
+    } catch (error) {
+      console.log('Geocode error:', error);
+    }
+  };
+
+  const handleMapPress = (e: any) => {
+    const { latitude: lat, longitude: lng } = e.nativeEvent.coordinate;
+    setLatitude(lat);
+    setLongitude(lng);
+    setMapRegion({
+      ...mapRegion,
+      latitude: lat,
+      longitude: lng,
+    });
+    getAddressFromCoordinates(lat, lng);
+  };
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission required');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const { latitude: lat, longitude: lng } = location.coords;
+      setLatitude(lat);
+      setLongitude(lng);
+      setMapRegion({
+        latitude: lat,
+        longitude: lng,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      });
+      await getAddressFromCoordinates(lat, lng);
+    } catch (error) {
+      Alert.alert('Error', 'Could not get current location');
+    }
+  };
+
   const handleSave = async () => {
+    // Validate all required fields
     if (!restaurantName.trim()) {
       Alert.alert('Error', 'Restaurant name is required');
+      return;
+    }
+    if (!description.trim()) {
+      Alert.alert('Error', 'Description is required');
+      return;
+    }
+    if (!address.trim()) {
+      Alert.alert('Error', 'Address is required');
+      return;
+    }
+    if (!phone.trim()) {
+      Alert.alert('Error', 'Phone number is required');
+      return;
+    }
+    if (!cuisineLine.trim()) {
+      Alert.alert('Error', 'Cuisine/Category is required');
       return;
     }
 
     setSaving(true);
     try {
-      const token = await AsyncStorage.getItem('token');
-      const userStr = await AsyncStorage.getItem('user');
-      const user = userStr ? JSON.parse(userStr) : null;
-
-      if (!token || !user) {
+      if (!token) {
         Alert.alert('Error', 'Please log in again');
         return;
       }
 
-      // Get restaurant ID
-      const restRes = await axios.get(`${API_CONFIG.BASE_URL}/api/restaurants`);
-      const myRestaurant = restRes.data?.find?.((r: any) => r.merchant_id === user.id);
+      const openingHours = formatTime(openHour, openMinute, openPeriod);
+      const closingHours = formatTime(closeHour, closeMinute, closePeriod);
 
-      if (myRestaurant) {
+      const restaurantData = {
+        name: restaurantName.trim(),
+        cuisine: cuisineLine.trim(),
+        description: description.trim(),
+        address: address.trim(),
+        category: selectedVenueType,
+        phone: phone.trim(),
+        opening_hours: openingHours,
+        closing_hours: closingHours,
+        latitude,
+        longitude,
+      };
+
+      try {
+        // Try to update existing restaurant
         await axios.put(
-          `${API_CONFIG.BASE_URL}/api/restaurants/${myRestaurant.id}`,
-          {
-            name: restaurantName.trim(),
-            cuisine: cuisineLine.trim(),
-            description: description.trim(),
-            address: address.trim(),
-            category: selectedVenueType,
-            price_range: selectedPrice,
-            status: isOpen ? 'open' : 'closed',
-            opening_hours: formatTime(openHour, openMinute, openPeriod),
-          },
+          `${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`,
+          restaurantData,
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        Alert.alert('Success', 'Listing saved successfully!');
+      } catch (updateError: any) {
+        // If restaurant doesn't exist, create it first
+        if (updateError?.response?.status === 404 && updateError?.response?.data?.error?.includes('not found')) {
+          console.log('Restaurant not found, creating new restaurant...');
+          await axios.post(
+            `${API_CONFIG.BASE_URL}/api/restaurants`,
+            restaurantData,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          Alert.alert('Success', 'Restaurant created and saved successfully!');
+        } else {
+          throw updateError;
+        }
       }
-
-      Alert.alert('Success', 'Listing updated successfully!', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
     } catch (error: any) {
       const msg = error?.response?.data?.error || 'Failed to save changes';
       Alert.alert('Error', msg);
     } finally {
       setSaving(false);
     }
+  };
+
+  const handlePublish = async () => {
+    // Validate all required fields before publishing
+    if (!restaurantName.trim() || !description.trim() || !address.trim() || 
+        !phone.trim() || !cuisineLine.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields before publishing');
+      return;
+    }
+
+    Alert.alert(
+      'Publish Restaurant',
+      'Make this restaurant visible to all customers for booking?',
+      [
+        { text: 'Cancel', onPress: () => {} },
+        {
+          text: 'Publish',
+          onPress: async () => {
+            setPublishing(true);
+            try {
+              if (!token) {
+                Alert.alert('Error', 'Please log in again');
+                return;
+              }
+
+              // Prepare restaurant data
+              const openingHours = formatTime(openHour, openMinute, openPeriod);
+              const closingHours = formatTime(closeHour, closeMinute, closePeriod);
+
+              const restaurantData = {
+                name: restaurantName.trim(),
+                cuisine: cuisineLine.trim(),
+                description: description.trim(),
+                address: address.trim(),
+                category: selectedVenueType,
+                phone: phone.trim(),
+                opening_hours: openingHours,
+                closing_hours: closingHours,
+                latitude,
+                longitude,
+              };
+
+              try {
+                // Try to update existing restaurant
+                await axios.put(
+                  `${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`,
+                  restaurantData,
+                  { headers: { Authorization: `Bearer ${token}` } }
+                );
+              } catch (updateError: any) {
+                // If restaurant doesn't exist, create it first
+                if (updateError?.response?.status === 404 && updateError?.response?.data?.error?.includes('not found')) {
+                  console.log('Restaurant not found, creating new restaurant...');
+                  await axios.post(
+                    `${API_CONFIG.BASE_URL}/api/restaurants`,
+                    restaurantData,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                } else {
+                  throw updateError;
+                }
+              }
+
+              // Then publish
+              await axios.post(
+                `${API_CONFIG.BASE_URL}/api/restaurants/merchant/publish`,
+                {},
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+
+              Alert.alert('Success', 'Your restaurant is now live for customer bookings!', [
+                { text: 'OK', onPress: () => router.back() }
+              ]);
+            } catch (error: any) {
+              const msg = error?.response?.data?.error || 'Failed to publish';
+              Alert.alert('Error', msg);
+            } finally {
+              setPublishing(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -361,21 +584,41 @@ export default function RestaurantListingScreen() {
             ))}
           </View>
 
-          {/* Price Range */}
-          <Text style={styles.label}>Price range</Text>
-          <View style={styles.chipRow}>
-            {priceRanges.map(p => (
-              <TouchableOpacity
-                key={p}
-                style={[styles.priceChip, selectedPrice === p && styles.priceChipActive]}
-                onPress={() => setSelectedPrice(p)}
-              >
-                <Text style={[styles.priceChipText, selectedPrice === p && styles.priceChipTextActive]}>
-                  {p}
-                </Text>
-              </TouchableOpacity>
-            ))}
+
+        </View>
+
+        {/* ─── Section: Location (Map Disabled for Expo Go) ─── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="map-outline" size={22} color={Colors.primary} />
+            <Text style={styles.sectionTitle}>Pin your location</Text>
           </View>
+
+          <Text style={styles.label}>Location coordinates (map coming in development build)</Text>
+          
+          <TouchableOpacity
+            style={[styles.timeChip, { width: '100%', marginRight: 0, marginVertical: 12 }]}
+            onPress={getCurrentLocation}
+          >
+            <Ionicons name="locate" size={20} color={Colors.primary} />
+            <Text style={[styles.timeChipText, { marginLeft: 8 }]}>Detect current location</Text>
+          </TouchableOpacity>
+
+          {displayAddress ? (
+            <View style={styles.addressBox}>
+              <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+              <Text style={styles.addressText}>{displayAddress}</Text>
+            </View>
+          ) : (
+            <View style={styles.addressBox}>
+              <Ionicons name="information-circle" size={18} color={Colors.gray} />
+              <Text style={styles.addressText}>Tap locate button to detect your restaurant location</Text>
+            </View>
+          )}
+
+          <Text style={styles.coordinates}>
+            Latitude: {latitude.toFixed(4)} | Longitude: {longitude.toFixed(4)}
+          </Text>
         </View>
 
         {/* ─── Section: Booking Details ─── */}
@@ -396,8 +639,18 @@ export default function RestaurantListingScreen() {
             textAlignVertical="top"
           />
 
-          {/* Open Until */}
-          <Text style={styles.label}>Open until</Text>
+          <Text style={styles.label}>Phone number</Text>
+          <TextInput
+            style={styles.input}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Your restaurant phone number"
+            placeholderTextColor={Colors.gray}
+            keyboardType="phone-pad"
+          />
+
+          {/* Opening Hours */}
+          <Text style={styles.label}>Opening hours</Text>
           <TimePicker
             selectedHour={openHour}
             selectedMinute={openMinute}
@@ -409,6 +662,22 @@ export default function RestaurantListingScreen() {
           <Text style={styles.selectedTime}>
             Selected: <Text style={styles.selectedTimeBold}>
               {formatTime(openHour, openMinute, openPeriod)}
+            </Text>
+          </Text>
+
+          {/* Closing Hours */}
+          <Text style={styles.label}>Closing hours</Text>
+          <TimePicker
+            selectedHour={closeHour}
+            selectedMinute={closeMinute}
+            selectedPeriod={closePeriod}
+            onHourChange={setCloseHour}
+            onMinuteChange={setCloseMinute}
+            onPeriodChange={setClosePeriod}
+          />
+          <Text style={styles.selectedTime}>
+            Selected: <Text style={styles.selectedTimeBold}>
+              {formatTime(closeHour, closeMinute, closePeriod)}
             </Text>
           </Text>
 
@@ -493,19 +762,34 @@ export default function RestaurantListingScreen() {
         </View>
       </ScrollView>
 
-      {/* ─── Save Button ─── */}
+      {/* ─── Action Buttons ─── */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={[styles.saveBtn, saving && { opacity: 0.6 }]}
+          style={[styles.saveBtn, (saving || publishing) && { opacity: 0.6 }]}
           onPress={handleSave}
-          disabled={saving}
+          disabled={saving || publishing}
         >
           {saving ? (
             <ActivityIndicator color={Colors.white} />
           ) : (
             <>
               <Ionicons name="save-outline" size={20} color={Colors.white} />
-              <Text style={styles.saveBtnText}>Save listing changes</Text>
+              <Text style={styles.saveBtnText}>Save changes</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.publishBtn, (saving || publishing) && { opacity: 0.6 }]}
+          onPress={handlePublish}
+          disabled={saving || publishing}
+        >
+          {publishing ? (
+            <ActivityIndicator color={Colors.white} />
+          ) : (
+            <>
+              <Ionicons name="rocket-outline" size={20} color={Colors.white} />
+              <Text style={styles.saveBtnText}>Publish for booking</Text>
             </>
           )}
         </TouchableOpacity>
@@ -653,21 +937,6 @@ const styles = StyleSheet.create({
   },
   chipTextActive: { color: Colors.white },
 
-  /* Price range chips */
-  priceChip: {
-    width: 64, height: 44, borderRadius: 24,
-    borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.background,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  priceChipActive: {
-    backgroundColor: Colors.primary, borderColor: Colors.primary,
-  },
-  priceChipText: {
-    fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 15, color: Colors.text,
-  },
-  priceChipTextActive: { color: Colors.white },
-
   /* Time picker */
   timeRow: { marginBottom: 10 },
   minuteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
@@ -740,14 +1009,51 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Medium', fontSize: 13, color: Colors.text,
   },
 
-  /* Save bar */
-  bottomBar: { paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12 },
+  /* Action bar */
+  bottomBar: { 
+    flexDirection: 'row', gap: 12,
+    paddingHorizontal: 20, paddingBottom: 36, paddingTop: 12 
+  },
   saveBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 10, backgroundColor: Colors.primary,
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: Colors.primary,
+    borderRadius: 16, paddingVertical: 18,
+  },
+  publishBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: Colors.success,
     borderRadius: 16, paddingVertical: 18,
   },
   saveBtnText: {
-    fontFamily: 'PlusJakartaSans-Bold', fontSize: 16, color: Colors.white,
+    fontFamily: 'PlusJakartaSans-Bold', fontSize: 14, color: Colors.white,
+  },
+
+  /* Location map */
+  mapContainer: {
+    height: 300, borderRadius: 12, overflow: 'hidden',
+    marginVertical: 12, borderWidth: 1, borderColor: Colors.border,
+  },
+  map: { width: '100%', height: '100%' },
+  currentLocationButton: {
+    position: 'absolute', bottom: 12, right: 12,
+    backgroundColor: Colors.white, borderRadius: 24,
+    width: 48, height: 48, justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25, shadowRadius: 3.84,
+    elevation: 5, borderWidth: 1, borderColor: Colors.border,
+  },
+  addressBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.white, padding: 12,
+    borderRadius: 8, marginVertical: 8,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  addressText: {
+    fontFamily: 'PlusJakartaSans-Regular', fontSize: 13,
+    color: Colors.text, flex: 1,
+  },
+  coordinates: {
+    fontFamily: 'PlusJakartaSans-Regular', fontSize: 11,
+    color: Colors.gray, marginTop: 8, textAlign: 'center',
   },
 });

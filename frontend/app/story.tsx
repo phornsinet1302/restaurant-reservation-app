@@ -1,94 +1,81 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import StoryViewer, { StoryGroup } from '@/components/StoryViewer';
+import { API_CONFIG } from '@/app/config/apiConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 
-/* ── Full story data for each restaurant ── */
-
-const STORY_GROUPS: StoryGroup[] = [
-  {
-    id: 's1',
-    name: 'Romeo Lane',
-    time: '8h ago',
-    distance: '0.3 miles',
-    avatar: require('@/assets/food/food-1.jpeg'),
-    slides: [
-      {
-        image: require('@/assets/food/food-1.jpeg'),
-        title: 'Counter seats just reopened',
-        description:
-          'We have just opened up our chef counter — 8 seats with a front-row view of the kitchen. Perfect for date night or solo dining.',
-      },
-      {
-        image: require('@/assets/food/Nilagang Baboy.jpeg'),
-        title: 'New winter tasting menu',
-        description:
-          'Our new 7-course seasonal menu has launched featuring locally sourced ingredients from farms across the countryside.',
-      },
-    ],
-  },
-  {
-    id: 's2',
-    name: 'Sakura Sushi House',
-    time: '8h ago',
-    distance: '1.2 miles',
-    avatar: require('@/assets/food/food-2.jpeg'),
-    slides: [
-      {
-        image: require('@/assets/food/food-2.jpeg'),
-        title: 'Omakase night every Friday',
-        description:
-          'Join us every Friday for a 12-piece omakase experience. Limited to 20 guests per evening — book early to secure your spot.',
-      },
-      {
-        image: require('@/assets/food/How to Cook Classic Filipino Sinigang – Step-by-Step Guide.jpeg'),
-        title: 'Happy hour sushi rolls',
-        description:
-          'Half-price on all signature rolls from 5 PM to 7 PM, Monday through Thursday. Pair with our new sake selection.',
-      },
-    ],
-  },
-  {
-    id: 's3',
-    name: 'SkyLounge Bar',
-    time: '10h ago',
-    distance: '0.8 miles',
-    avatar: require('@/assets/food/food-3.jpeg'),
-    slides: [
-      {
-        image: require('@/assets/food/food-3.jpeg'),
-        title: 'Rooftop terrace now open',
-        description:
-          'Our stunning rooftop terrace is officially open for the season. Enjoy craft cocktails with panoramic city views every evening.',
-      },
-    ],
-  },
-  {
-    id: 's4',
-    name: 'Pret A Manger',
-    time: '13h ago',
-    distance: '0.1 miles',
-    avatar: require('@/assets/food/food-4.jpeg'),
-    slides: [
-      {
-        image: require('@/assets/food/food-4.jpeg'),
-        title: 'New breakfast wraps available',
-        description:
-          'Start your morning right with our new range of freshly made breakfast wraps. Available from 7 AM every day.',
-      },
-    ],
-  },
-];
+const API_URL = API_CONFIG.BASE_URL;
 
 export default function StoryScreen() {
   const { groupIndex } = useLocalSearchParams<{ groupIndex: string }>();
   const router = useRouter();
+  const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadStories();
+  }, []);
+
+  const loadStories = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('authToken');
+      
+      // Fetch active stories from API
+      const response = await axios.get(`${API_URL}/api/stories/active`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
+
+      // Transform backend data to StoryGroup format
+      const groups: StoryGroup[] = (response.data || []).map((restaurant: any) => ({
+        id: `s_${restaurant.id}`,
+        name: restaurant.name,
+        time: formatTime(new Date(restaurant.stories[0]?.created_at)),
+        distance: '0 miles',
+        avatar: restaurant.image_url ? { uri: restaurant.image_url } : require('@/assets/food/food-1.jpeg'),
+        slides: restaurant.stories.map((story: any) => ({
+          image: story.image_url ? { uri: story.image_url } : require('@/assets/food/food-1.jpeg'),
+          title: story.title,
+          description: story.description || '',
+        })),
+      }));
+
+      setStoryGroups(groups);
+    } catch (error) {
+      console.error('Error loading stories:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTime = (date: Date) => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    if (minutes < 1) return 'just now';
+    if (hours === 0) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#FF6B6B" />
+      </View>
+    );
+  }
 
   const idx = parseInt(groupIndex ?? '0', 10);
 
   return (
     <StoryViewer
-      groups={STORY_GROUPS}
-      initialGroupIndex={idx}
+      groups={storyGroups.length > 0 ? storyGroups : []}
+      initialGroupIndex={Math.min(idx, storyGroups.length - 1)}
       onClose={() => router.back()}
     />
   );

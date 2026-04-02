@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -115,15 +116,47 @@ export default function RestaurantSignupScreen() {
       Alert.alert(
         'Application Submitted',
         'Your restaurant application has been submitted for review. We will contact you soon.',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }],
+        [{ text: 'OK', onPress: () => router.replace('/(merchant-tabs)') }],
       );
     } catch (error) {
+      let errorMessage = 'Submission failed. Please try again.';
+      
       if (axios.isAxiosError(error)) {
-        Alert.alert('Error', error.response?.data?.error || error.message);
+        const errorData = error.response?.data;
+        if (errorData?.error) {
+          errorMessage = errorData.error;
+        } else if (errorData?.message) {
+          errorMessage = errorData.message;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
       } else if (error instanceof Error) {
-        Alert.alert('Error', error.message);
+        errorMessage = error.message;
+      }
+      
+      // Check if this is a duplicate email error
+      if (errorMessage.includes('already registered')) {
+        console.log('🔄 Email already registered, showing login redirect option...');
+        Alert.alert(
+          'Email Already Registered',
+          `${errorMessage}\n\nWould you like to login with this email instead?`,
+          [
+            {
+              text: 'Cancel',
+              onPress: () => console.log('User cancelled'),
+            },
+            {
+              text: 'Go to Login',
+              onPress: async () => {
+                // Clear signup data and redirect to login
+                await AsyncStorage.removeItem('selectedRole');
+                router.replace('/login');
+              },
+            },
+          ]
+        );
       } else {
-        Alert.alert('Error', 'Submission failed. Please try again.');
+        Alert.alert('Error', errorMessage);
       }
     } finally {
       setLoading(false);

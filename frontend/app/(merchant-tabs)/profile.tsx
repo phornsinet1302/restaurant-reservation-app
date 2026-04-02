@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Alert, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
@@ -17,9 +17,11 @@ export default function MerchantProfileScreen() {
   const [restaurantName, setRestaurantName] = useState('');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadProfile();
+    }, [])
+  );
 
   const loadProfile = async () => {
     try {
@@ -30,10 +32,11 @@ export default function MerchantProfileScreen() {
         setUserEmail(user.email || '');
       }
 
-      const token = await AsyncStorage.getItem('token');
-      if (token) {
+      const storedToken = await AsyncStorage.getItem('token');
+      if (storedToken) {
+        setToken(storedToken);
         const dashRes = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${storedToken}` },
         });
         if (dashRes.data?.restaurant_name) setRestaurantName(dashRes.data.restaurant_name);
       }
@@ -42,6 +45,10 @@ export default function MerchantProfileScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditListing = () => {
+    router.push('/restaurant-listing' as any);
   };
 
   const handleLogout = () => {
@@ -103,12 +110,12 @@ export default function MerchantProfileScreen() {
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/restaurant-listing' as any)}>
+          <TouchableOpacity style={styles.quickCard} onPress={handleEditListing}>
             <View style={styles.quickIcon}>
               <Ionicons name="pencil-outline" size={24} color={Colors.text} />
             </View>
             <Text style={styles.quickLabel}>Edit listing</Text>
-            <Text style={styles.quickSub}>Name, photos & slots</Text>
+            <Text style={styles.quickSub}>Manage restaurant info</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.quickCard} onPress={() => router.push('/manage-stories' as any)}>
             <View style={styles.quickIcon}>
@@ -144,6 +151,7 @@ export default function MerchantProfileScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </ScrollView>
+
     </View>
   );
 }

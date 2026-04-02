@@ -284,12 +284,14 @@ export default function SignUpScreen() {
       } catch (error) {
         console.log('Signup error:', error);
         let errorMessage = 'Signup failed. Please try again.';
+        let existingRole = null;
         
         if (axios.isAxiosError(error)) {
           const errorData = error.response?.data;
           console.log('Error response data:', errorData);
           if (errorData?.error) {
             errorMessage = errorData.error;
+            existingRole = errorData?.existingRole;
           } else if (errorData?.message) {
             errorMessage = errorData.message;
           } else if (error.message) {
@@ -299,7 +301,30 @@ export default function SignUpScreen() {
           errorMessage = error.message;
         }
         
-        alert('Error: ' + errorMessage);
+        // Check if this is a duplicate email error
+        if (errorMessage.includes('already registered')) {
+          console.log('🔄 Email already registered, showing login redirect option...');
+          Alert.alert(
+            'Email Already Registered',
+            `${errorMessage}\n\nWould you like to login with this email instead?`,
+            [
+              {
+                text: 'Cancel',
+                onPress: () => console.log('User cancelled'),
+              },
+              {
+                text: 'Go to Login',
+                onPress: async () => {
+                  // Clear signup data and redirect to login
+                  await AsyncStorage.removeItem('selectedRole');
+                  router.replace('/login');
+                },
+              },
+            ]
+          );
+        } else {
+          alert('Error: ' + errorMessage);
+        }
       } finally {
         setLoading(false);
         // Clear the selected role after signup attempt

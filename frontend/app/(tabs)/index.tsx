@@ -20,19 +20,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
+import StoryRow from '@/components/StoryRow';
 
 const API_URL = API_CONFIG.BASE_URL;
 
 /* ── Data ── */
-
-type Story = {
-  id: string;
-  name: string;
-  time: string;
-  badge: number;
-  badgeColor: string;
-  image: ImageSourcePropType;
-};
 
 type Restaurant = {
   id: string;
@@ -43,81 +35,19 @@ type Restaurant = {
   image: ImageSourcePropType;
 };
 
-const STORIES: Story[] = [
-  {
-    id: 's1',
-    name: 'Romeo Lane',
-    time: '8h ago',
-    badge: 2,
-    badgeColor: '#4CAF50',
-    image: require('@/assets/food/food-1.jpeg'),
-  },
-  {
-    id: 's2',
-    name: 'Sakura Sushi…',
-    time: '8h ago',
-    badge: 2,
-    badgeColor: Colors.accent,
-    image: require('@/assets/food/food-2.jpeg'),
-  },
-  {
-    id: 's3',
-    name: 'SkyLounge …',
-    time: '10h ago',
-    badge: 1,
-    badgeColor: Colors.primary,
-    image: require('@/assets/food/food-3.jpeg'),
-  },
-  {
-    id: 's4',
-    name: 'Pret A Manger',
-    time: '13h ago',
-    badge: 1,
-    badgeColor: Colors.primary,
-    image: require('@/assets/food/food-4.jpeg'),
-  },
-];
-
 const CATEGORIES = [
   { id: 'c1', emoji: '🍽️', label: 'Restaurants' },
   { id: 'c2', emoji: '🍺', label: 'Pubs' },
   { id: 'c3', emoji: '🎉', label: 'Night clubs' },
 ];
 
-const RESTAURANTS: Restaurant[] = [
-  {
-    id: 'r1',
-    name: 'Romeo Lane',
-    hours: 'Open Until 11:00pm',
-    distance: '0.3 miles',
-    rating: '4.5',
-    image: require('@/assets/restaurant-1.jpg'),
-  },
-  {
-    id: 'r2',
-    name: 'SkyLounge Bar',
-    hours: 'Open Until 1:00am',
-    distance: '0.8 miles',
-    rating: '4.8',
-    image: require('@/assets/restaurant-2.jpg'),
-  },
-  {
-    id: 'r3',
-    name: 'Sakura Sushi House',
-    hours: 'Open Until 10:30pm',
-    distance: '1.2 miles',
-    rating: '4.7',
-    image: require('@/assets/restaurant-3.jpg'),
-  },
-  {
-    id: 'r4',
-    name: 'Pret A Manger',
-    hours: 'Open Until 9:00pm',
-    distance: '0.1 miles',
-    rating: '4.3',
-    image: require('@/assets/restaurant-4.jpg'),
-  },
-];
+// Fallback: Default restaurant images
+const DEFAULT_RESTAURANT_IMAGES: { [key: string]: ImageSourcePropType } = {
+  r1: require('@/assets/restaurant-1.jpg'),
+  r2: require('@/assets/restaurant-2.jpg'),
+  r3: require('@/assets/restaurant-3.jpg'),
+  r4: require('@/assets/restaurant-4.jpg'),
+};
 
 /* ── Component ── */
 
@@ -132,9 +62,12 @@ export default function HomeScreen() {
   const [greeting, setGreeting] = useState<string>('Good morning');
   const { isGuest } = useAuth();
   const [showGuestModal, setShowGuestModal] = useState(false);
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [restaurantsLoading, setRestaurantsLoading] = useState(true);
 
   useEffect(() => {
     loadUserData();
+    loadRestaurants();
     updateGreeting();
   }, []);
 
@@ -142,6 +75,7 @@ export default function HomeScreen() {
   useFocusEffect(
     React.useCallback(() => {
       loadUserData();
+      loadRestaurants();
     }, [])
   );
 
@@ -200,6 +134,34 @@ export default function HomeScreen() {
       setFavorites(favoriteIds);
     } catch (error) {
       console.warn('Failed to fetch favorites:', error);
+    }
+  };
+
+  const loadRestaurants = async () => {
+    try {
+      setRestaurantsLoading(true);
+      const response = await axios.get(`${API_URL}/api/restaurants`);
+      
+      // Transform API data to match Restaurant type
+      const apiRestaurants = response.data?.map((r: any, index: number) => ({
+        id: r.id || `r${index + 1}`,
+        name: r.name || 'Restaurant',
+        hours: r.opening_hours || 'Check hours',
+        distance: '0.5 miles', // TODO: Calculate from user location
+        rating: r.rating || '4.5',
+        image: DEFAULT_RESTAURANT_IMAGES[`r${(index % 4) + 1}`] || DEFAULT_RESTAURANT_IMAGES.r1,
+        description: r.description || '',
+        address: r.address || '',
+        category: r.category || '',
+        cuisine: r.cuisine || '',
+      })) || [];
+      
+      setRestaurants(apiRestaurants);
+    } catch (error) {
+      console.warn('Failed to load restaurants:', error);
+      setRestaurants([]); // Use empty array if API fails
+    } finally {
+      setRestaurantsLoading(false);
     }
   };
 
@@ -296,38 +258,7 @@ export default function HomeScreen() {
       </TouchableOpacity>
 
       {/* ── Latest Stories ── */}
-      <View style={styles.sectionHeaderCol}>
-        <Text style={styles.sectionTitle}>Latest stories</Text>
-        <Text style={styles.sectionSub}>Quick updates from restaurants near you</Text>
-      </View>
-
-      <FlatList
-        data={STORIES}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.storiesList}
-        renderItem={({ item, index }) => (
-          <TouchableOpacity
-            style={styles.storyItem}
-            onPress={() => router.push({ pathname: '../story', params: { groupIndex: String(index) } } as any)}
-          >
-            <View style={styles.storyImageWrapper}>
-              <Image source={item.image} style={styles.storyImage} />
-              <View style={[styles.storyBadge, { backgroundColor: item.badgeColor }]}>
-                <Text style={styles.storyBadgeText}>{item.badge}</Text>
-              </View>
-            </View>
-            <Text style={styles.storyName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <View style={styles.storyTimeRow}>
-              <Ionicons name="time-outline" size={11} color={Colors.gray} />
-              <Text style={styles.storyTime}>{item.time}</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-      />
+      <StoryRow />
 
       {/* ── Categories ── */}
       <View style={styles.categoriesRow}>
@@ -347,7 +278,13 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {RESTAURANTS.map((restaurant) => (
+      {restaurantsLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading restaurants...</Text>
+        </View>
+      ) : restaurants.length > 0 ? (
+        restaurants.map((restaurant) => (
         <TouchableOpacity
           key={restaurant.id}
           style={styles.restaurantCard}
@@ -412,7 +349,14 @@ export default function HomeScreen() {
             </View>
           </View>
         </TouchableOpacity>
-      ))}
+        ))
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="restaurant-outline" size={48} color={Colors.gray} />
+          <Text style={styles.emptyText}>No restaurants available</Text>
+          <Text style={styles.emptySubtext}>Check back later for new restaurants</Text>
+        </View>
+      )}
       </ScrollView>
 
       <GuestLoginModal
@@ -707,6 +651,33 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   metaText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 13,
+    color: Colors.gray,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 8,
+  },
+  emptyText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 16,
+    color: Colors.text,
+  },
+  emptySubtext: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
     color: Colors.gray,
