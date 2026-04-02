@@ -7,10 +7,12 @@ exports.getRestaurantStories = async (req, res) => {
     const { restaurantId } = req.params;
     const now = new Date().toISOString();
 
-    console.log(`📖 [getRestaurantStories] Fetching stories for restaurant: ${restaurantId}`);
+    console.log(`\n📖 [getRestaurantStories] API CALLED`);
+    console.log(`   Fetching stories for restaurant: ${restaurantId}`);
     console.log(`   Current time: ${now}`);
 
-    const { data, error } = await supabase
+    // Use supabaseAdmin to bypass RLS
+    const { data, error } = await supabaseAdmin
       .from('stories')
       .select('*')
       .eq('restaurant_id', restaurantId)
@@ -22,17 +24,21 @@ exports.getRestaurantStories = async (req, res) => {
       data.forEach((story, idx) => {
         const expiresAt = new Date(story.expires_at);
         const isExpired = expiresAt < new Date(now);
-        console.log(`   Story ${idx}: expires_at=${story.expires_at}, isExpired=${isExpired}`);
+        console.log(`   Story ${idx + 1}: id=${story.id}, expires_at=${story.expires_at}, isExpired=${isExpired}`);
       });
+    } else {
+      console.log(`   ⚠️ No active stories found for restaurant ${restaurantId}`);
     }
 
     if (error) {
       console.error('❌ Error fetching stories:', error);
       return res.status(400).json({ error: error.message });
     }
+    
+    console.log(`✅ Returning ${(data || []).length} stories`);
     res.status(200).json(data || []);
   } catch (error) {
-    console.error('Error fetching stories:', error);
+    console.error('❌ Error fetching stories:', error);
     res.status(500).json({ error: 'Failed to fetch stories' });
   }
 };
@@ -71,7 +77,7 @@ exports.getAllActiveStories = async (req, res) => {
     // First, get ALL stories to debug
     const { data: allStories, error: allStoriesError } = await supabase
       .from('stories')
-      .select('id, restaurant_id, image_url, title, description, created_at, expires_at');
+      .select('id, restaurant_id, image_url, video_url, title, description, created_at, expires_at');
     
     console.log(`📖 Total stories in DB: ${allStories?.length || 0}`);
     if (allStories && allStories.length > 0) {
@@ -91,7 +97,7 @@ exports.getAllActiveStories = async (req, res) => {
     
     const { data: stories, error: storiesError } = await supabase
       .from('stories')
-      .select('id, restaurant_id, image_url, title, description, created_at, expires_at')
+      .select('id, restaurant_id, image_url, video_url, title, description, created_at, expires_at')
       .in('restaurant_id', restaurantIds)
       .gt('expires_at', now);
 
@@ -115,6 +121,12 @@ exports.getAllActiveStories = async (req, res) => {
       });
 
     console.log(`📖 Returning ${result.length} restaurants with stories`);
+    result.forEach((r, idx) => {
+      console.log(`   Restaurant ${idx + 1}: "${r.name}" - ${r.stories.length} stories`);
+      r.stories.forEach((s, sIdx) => {
+        console.log(`      Story ${sIdx + 1}: "${s.title}" (expires in ${Math.round((new Date(s.expires_at) - new Date(now)) / (1000 * 60 * 60))}h)`);
+      });
+    });
     res.status(200).json(result);
   } catch (error) {
     console.error('❌ Error fetching all stories:', error);
@@ -152,10 +164,12 @@ exports.createStory = async (req, res) => {
 
     // Create the story
     const now = new Date();
+    const createdAt = now.toISOString(); // Explicit UTC timestamp
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24); // 24 hours from now
 
     console.log(`   Current time: ${now.toISOString()} (ms: ${now.getTime()})`);
+    console.log(`   Created at: ${createdAt}`);
     console.log(`   Expires at: ${expiresAt.toISOString()} (ms: ${expiresAt.getTime()})`);
     console.log(`   Expires in: 24h`);
 
@@ -165,8 +179,10 @@ exports.createStory = async (req, res) => {
         {
           restaurant_id: restaurantId,
           image_url: imageUrl,
+          video_url: videoUrl || null,
           title: title || '',
           description: description || '',
+          created_at: createdAt, // Explicit UTC timestamp
           expires_at: expiresAt.toISOString(),
         },
       ])
@@ -198,7 +214,7 @@ exports.deleteStory = async (req, res) => {
     // Get the story and verify ownership
     const { data: story, error: storyError } = await supabaseAdmin
       .from('stories')
-      .select('id, restaurant_id, restaurants(merchant_id)')
+      .select('id, restaurant_id, image_url, video_url, restaurants(merchant_id)')
       .eq('id', storyId)
       .single();
 
@@ -211,7 +227,34 @@ exports.deleteStory = async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized - you cannot delete this story' });
     }
 
-    // Delete the story
+    console.log(`📖 Deleting story: ${storyId}`);
+
+    // Delete storage files (image and video)
+    if (story.image_url && !story.image_url.startsWith('file://')) {
+      try {
+        const imagePath = story.image_url.split('/storage/v1/object/public/stories/')[1];
+        if (imagePath) {
+          console.log(`   Deleting image: ${imagePath}`);
+          await supabaseAdmin.storage.from('stories').remove([imagePath]);
+        }
+      } catch (err) {
+        console.warn(`   ⚠️ Failed to delete image file:`, err.message);
+      }
+    }
+
+    if (story.video_url && !story.video_url.startsWith('file://')) {
+      try {
+        const videoPath = story.video_url.split('/storage/v1/object/public/stories/')[1];
+        if (videoPath) {
+          console.log(`   Deleting video: ${videoPath}`);
+          await supabaseAdmin.storage.from('stories').remove([videoPath]);
+        }
+      } catch (err) {
+        console.warn(`   ⚠️ Failed to delete video file:`, err.message);
+      }
+    }
+
+    // Delete the story record from database
     const { error: deleteError } = await supabaseAdmin
       .from('stories')
       .delete()
@@ -221,7 +264,7 @@ exports.deleteStory = async (req, res) => {
       return res.status(400).json({ error: deleteError.message });
     }
 
-    console.log('✅ Story deleted:', storyId);
+    console.log('✅ Story and storage files deleted:', storyId);
     res.status(200).json({ success: true, message: 'Story deleted successfully' });
   } catch (error) {
     console.error('❌ Error deleting story:', error);

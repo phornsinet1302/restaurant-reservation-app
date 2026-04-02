@@ -5,6 +5,7 @@ exports.searchRestaurants = async (req, res) => {
   const { search, filter } = req.query;
   
   try {
+    let restaurants;
     // Search by name or address/location
     if (search) {
       const searchTerm = `%${search}%`;
@@ -16,17 +17,46 @@ exports.searchRestaurants = async (req, res) => {
         .or(`name.ilike.${searchTerm},address.ilike.${searchTerm}`);
       
       if (error) return res.status(400).json({ error: error.message });
-      return res.status(200).json(data);
+      restaurants = data;
+    } else {
+      // Get all published restaurants if no search
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('*')
+        .eq('is_published', true);
+        
+      if (error) return res.status(400).json({ error: error.message });
+      restaurants = data;
     }
-    
-    // Get all published restaurants if no search
-    const { data, error } = await supabase
-      .from('restaurants')
-      .select('*')
-      .eq('is_published', true);
-      
-    if (error) return res.status(400).json({ error: error.message });
-    res.status(200).json(data);
+
+    // Fetch active stories and menu items for each restaurant
+    const now = new Date().toISOString();
+    const restaurantsWithData = await Promise.all(
+      restaurants.map(async (restaurant) => {
+        const { data: stories } = await supabase
+          .from('stories')
+          .select('id, image_url, title, description, created_at, video_url')
+          .eq('restaurant_id', restaurant.id)
+          .gt('expires_at', now)
+          .order('created_at', { ascending: false })
+          .limit(3);
+
+        const { data: menuItems } = await supabase
+          .from('menu_items')
+          .select('id, name, category, price, image_url')
+          .eq('restaurant_id', restaurant.id)
+          .eq('is_available', true)
+          .limit(5);
+
+        return {
+          ...restaurant,
+          stories: stories || [],
+          menu_items: menuItems || []
+        };
+      })
+    );
+
+    res.status(200).json(restaurantsWithData);
   } catch (error) {
     console.error("Search Error:", error);
     res.status(500).json({ error: "Search failed" });
@@ -34,15 +64,46 @@ exports.searchRestaurants = async (req, res) => {
 };
 
 exports.getRestaurantDetails = async (req, res) => {
-  const { id } = req.params;
-  const { data, error } = await supabase
-    .from('restaurants')
-    .select('*, menu_items(*), tables(*)')
-    .eq('id', id)
-    .single();
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-  if (error) return res.status(404).json({ error: "Not found" });
-  res.status(200).json(data);
+    if (error) return res.status(404).json({ error: "Not found" });
+    
+    // Fetch active stories for this restaurant
+    const now = new Date().toISOString();
+    const { data: stories, error: storiesError } = await supabase
+      .from('stories')
+      .select('id, image_url, title, description, created_at, video_url')
+      .eq('restaurant_id', id)
+      .gt('expires_at', now)
+      .order('created_at', { ascending: false });
+
+    // Fetch menu items for this restaurant
+    const { data: menuItems, error: menuError } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('restaurant_id', id)
+      .eq('is_available', true)
+      .order('category', { ascending: true });
+
+    console.log(`📖 [getRestaurantDetails] Restaurant: ${id}`);
+    console.log(`   Stories found: ${stories?.length || 0}`);
+    console.log(`   Menu items found: ${menuItems?.length || 0}`);
+
+    res.status(200).json({
+      ...data,
+      stories: stories || [],
+      menu_items: menuItems || []
+    });
+  } catch (error) {
+    console.error("Error fetching restaurant details:", error);
+    res.status(500).json({ error: "Failed to fetch restaurant details" });
+  }
 };
 
 
@@ -155,18 +216,6 @@ exports.updateRestaurant = async (req, res) => {
 
   if (error) return res.status(400).json({ error: error.message });
   res.status(200).json({ message: "Updated successfully" });
-};
-
-
-exports.getRestaurantMenu = async (req, res) => {
-  const { id } = req.params; 
-  const { data, error } = await supabase
-    .from('menu_items')
-    .select('*')
-    .eq('restaurant_id', id);
-
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(200).json(data);
 };
 
 

@@ -12,11 +12,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 
 const POLLING_INTERVAL = 3000; // Poll every 3 seconds
-const MAX_WAIT_TIME = 300000; // 5 minutes max wait
+const MAX_WAIT_TIME = 60000; // 1 minute max wait (reduced from 5 minutes for testing)
 
 export default function BookingWaitingConfirmationScreen() {
   const params = useLocalSearchParams<{
@@ -72,26 +73,63 @@ export default function BookingWaitingConfirmationScreen() {
           return;
         }
 
+        // Get auth token
+        const token = await AsyncStorage.getItem('token');
+        if (!token) {
+          console.error('No auth token found');
+          return;
+        }
+
+        console.log('📋 Polling booking status:', bookingId);
+        
         const response = await axios.get(
-          `${API_CONFIG.BASE_URL}/api/reservations/${bookingId}`
+          `${API_CONFIG.BASE_URL}/api/reservations/${bookingId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            }
+          }
         );
 
         const status = response.data?.status || 'pending';
-        console.log('Booking status:', status);
+        console.log('✓ Booking status:', status);
         setBookingStatus(status);
 
         // If status changed from pending, stop polling and show result
         if (status === 'confirmed') {
           if (pollInterval) clearInterval(pollInterval);
           if (timeInterval) clearInterval(timeInterval);
+          
+          // Create notification for confirmed booking
+          try {
+            const token = await AsyncStorage.getItem('token');
+            await axios.post(
+              `${API_CONFIG.BASE_URL}/api/notifications/test-create`,
+              {
+                title: '✅ Booking Confirmed',
+                message: `Your reservation at ${params.name} on ${params.date} at ${params.time} has been confirmed!`,
+              },
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                }
+              }
+            );
+            console.log('✓ Notification created');
+          } catch (notificationError: any) {
+            console.error('Failed to create notification:', notificationError.message);
+          }
+          
           setTimeout(() => {
             Alert.alert(
               '✅ Booking Confirmed!',
               'Your reservation has been confirmed by the restaurant.',
               [
                 {
-                  text: 'View Booking',
-                  onPress: () => router.replace('/(tabs)/bookings'),
+                  text: 'Back Home',
+                  onPress: () => router.push('/'),
                 },
               ]
             );
@@ -99,6 +137,28 @@ export default function BookingWaitingConfirmationScreen() {
         } else if (status === 'rejected') {
           if (pollInterval) clearInterval(pollInterval);
           if (timeInterval) clearInterval(timeInterval);
+          
+          // Create notification for rejected booking
+          try {
+            const token = await AsyncStorage.getItem('token');
+            await axios.post(
+              `${API_CONFIG.BASE_URL}/api/notifications/test-create`,
+              {
+                title: '❌ Booking Rejected',
+                message: `Your reservation request at ${params.name} on ${params.date} could not be confirmed. Please try another date or time.`,
+              },
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                }
+              }
+            );
+            console.log('✓ Rejection notification created');
+          } catch (notificationError: any) {
+            console.error('Failed to create notification:', notificationError.message);
+          }
+          
           setTimeout(() => {
             Alert.alert(
               '❌ Booking Rejected',
@@ -112,8 +172,11 @@ export default function BookingWaitingConfirmationScreen() {
             );
           }, 500);
         }
-      } catch (error) {
-        console.error('Error polling booking status:', error);
+      } catch (error: any) {
+        console.error('Error polling booking status:', error.message);
+        if (error.response?.status === 401) {
+          console.error('Unauthorized - Token may be expired');
+        }
       }
     };
 
@@ -130,14 +193,42 @@ export default function BookingWaitingConfirmationScreen() {
       if (newElapsed > MAX_WAIT_TIME) {
         if (pollInterval) clearInterval(pollInterval);
         if (timeInterval) clearInterval(timeInterval);
+        
+        // Create notification for pending booking (timeout)
+        (async () => {
+          try {
+            const token = await AsyncStorage.getItem('token');
+            await axios.post(
+              `${API_CONFIG.BASE_URL}/api/notifications/test-create`,
+              {
+                title: '📋 Booking Received',
+                message: `Your reservation request at ${params.name} has been received. The restaurant will confirm shortly. Check your bookings list for updates.`,
+              },
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                }
+              }
+            );
+            console.log('✓ Timeout notification created');
+          } catch (notificationError: any) {
+            console.error('Failed to create notification:', notificationError.message);
+          }
+        })();
+        
         setTimeout(() => {
           Alert.alert(
-            '⏱️ Request Timeout',
-            'The restaurant has not responded. Please contact them directly.',
+            '✅ Booking Received',
+            'Your booking request has been received. The restaurant will confirm shortly. You can check your bookings list for updates.',
             [
               {
-                text: 'Go Back',
-                onPress: () => router.back(),
+                text: 'Back Home',
+                onPress: () => router.push('/'),
+              },
+              {
+                text: 'View Bookings',
+                onPress: () => router.replace('/(tabs)/bookings'),
               },
             ]
           );
@@ -281,6 +372,18 @@ export default function BookingWaitingConfirmationScreen() {
       >
         <Text style={styles.cancelBtnText}>Cancel Request</Text>
       </TouchableOpacity>
+
+      {/* Back Home button */}
+      <TouchableOpacity
+        style={styles.homeBtn}
+        onPress={() => {
+          // Stop polling by replacing the screen
+          router.push('/');
+        }}
+      >
+        <Ionicons name="home" size={20} color={Colors.primary} />
+        <Text style={styles.homeBtnText}>Back Home</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -420,5 +523,19 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 15,
     color: Colors.accent,
+  },
+  homeBtn: {
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: Colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  homeBtnText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 15,
+    color: '#FFF',
   },
 });

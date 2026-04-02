@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Dimensions,
+  Modal as RNModal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 // import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'; // TEMPORARILY DISABLED FOR EXPO GO
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -137,6 +139,20 @@ export default function RestaurantListingScreen() {
 
   // Cover image
   const [coverImage, setCoverImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showImagePreview, setShowImagePreview] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  // Menu photos
+  interface MenuPhoto {
+    id: string;
+    photo_url: string;
+    title: string;
+    display_order: number;
+  }
+  const [menuPhotos, setMenuPhotos] = useState<MenuPhoto[]>([]);
+  const [uploadingMenuPhoto, setUploadingMenuPhoto] = useState(false);
+  const [restaurantId, setRestaurantId] = useState<string>('');
 
   // Publishing
   const [publishing, setPublishing] = useState(false);
@@ -156,6 +172,253 @@ export default function RestaurantListingScreen() {
   useEffect(() => {
     loadRestaurantData();
   }, []);
+
+  const loadMenuPhotos = async (restId: string) => {
+    try {
+      if (!restId) {
+        console.warn('[loadMenuPhotos] No restaurant ID provided');
+        return;
+      }
+      const endpoint = `${API_CONFIG.BASE_URL}/api/menu-photos/${restId}`;
+      console.log(`[loadMenuPhotos] Fetching from: ${endpoint}`);
+      const res = await axios.get(endpoint);
+      setMenuPhotos(res.data.data || []);
+      console.log(`[loadMenuPhotos] Loaded ${res.data.data?.length || 0} photos`);
+    } catch (error: any) {
+      console.log('Loading menu photos error:', error.message);
+    }
+  };
+
+  const pickMenuPhoto = async (photoIndex: number) => {
+    try {
+      console.log(`[pickMenuPhoto] Opening image picker for photo slot ${photoIndex}`);
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      console.log(`[pickMenuPhoto] Picker result:`, {
+        canceled: result.canceled,
+        hasAssets: !!result.assets,
+        assetCount: result.assets?.length || 0,
+      });
+
+      if (result.canceled) {
+        console.log('[pickMenuPhoto] User cancelled image selection');
+        return;
+      }
+
+      if (!result.assets || result.assets.length === 0) {
+        Alert.alert('Error', 'No image was selected');
+        return;
+      }
+
+      const selectedImage = result.assets[0];
+      console.log(`[pickMenuPhoto] Selected image URI:`, selectedImage.uri);
+      
+      await uploadMenuPhoto(selectedImage.uri, photoIndex);
+    } catch (error: any) {
+      console.error('Image picker error:', error);
+      console.error('Error details:', {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+      });
+      Alert.alert('Error', `Failed to pick image: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  const uploadMenuPhoto = async (imageUri: string, displayOrder: number) => {
+    try {
+      if (!restaurantId || !token) {
+        Alert.alert('Error', 'Restaurant not found. Please refresh.');
+        return;
+      }
+
+      setUploadingMenuPhoto(true);
+      
+      console.log(`[uploadMenuPhoto] Starting upload for restaurant: ${restaurantId}`);
+      console.log(`[uploadMenuPhoto] Image URI: ${imageUri}`);
+      
+      const formData = new FormData();
+      formData.append('image', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: `menu-photo-${displayOrder}-${Date.now()}.jpg`,
+      } as any);
+      formData.append('title', `Menu Photo ${displayOrder}`);
+      formData.append('display_order', displayOrder.toString());
+
+      const endpoint = `${API_CONFIG.BASE_URL}/api/menu-photos/${restaurantId}`;
+      console.log(`[uploadMenuPhoto] Calling endpoint: ${endpoint}`);
+      console.log(`[uploadMenuPhoto] Token present: ${!!token}`);
+      
+      const uploadRes = await axios.post(
+        endpoint,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+
+      console.log(`[uploadMenuPhoto] Response:`, uploadRes.data);
+      
+      if (uploadRes.data?.data) {
+        await loadMenuPhotos(restaurantId);
+        Alert.alert('Success', 'Menu photo uploaded!');
+      } else if (uploadRes.data?.success) {
+        await loadMenuPhotos(restaurantId);
+        Alert.alert('Success', 'Menu photo uploaded!');
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      console.error('Upload error details:', {
+        message: error?.message,
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        data: error?.response?.data,
+      });
+      
+      // Handle specific error cases
+      if (error?.response?.status === 404) {
+        Alert.alert('Error', 'API endpoint not found. Make sure backend is running on port 3000.');
+      } else if (error?.response?.status === 401) {
+        Alert.alert('Error', 'Unauthorized. Please log in again.');
+      } else if (error?.response?.status === 403) {
+        Alert.alert('Error', 'This is not your restaurant.');
+      } else if (error?.response?.status === 400) {
+        const msg = error?.response?.data?.error || 'Invalid request';
+        Alert.alert('Error', msg);
+      } else if (error?.code === 'ECONNREFUSED') {
+        Alert.alert('Error', 'Cannot connect to backend. Is the server running on port 3000?');
+      } else {
+        const msg = error?.response?.data?.error || error?.message || 'Failed to upload photo';
+        Alert.alert('Error', msg);
+      }
+    } finally {
+      setUploadingMenuPhoto(false);
+    }
+  };
+
+  const deleteMenuPhoto = async (photoId: string) => {
+    Alert.alert(
+      'Delete Photo',
+      'Remove this menu photo?',
+      [
+        { text: 'Cancel', onPress: () => {} },
+        {
+          text: 'Delete',
+          onPress: async () => {
+            try {
+              if (!token) {
+                Alert.alert('Error', 'Not authenticated');
+                return;
+              }
+
+              await axios.delete(
+                `${API_CONFIG.BASE_URL}/api/menu-photos/${photoId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+              );
+
+              await loadMenuPhotos(restaurantId);
+              Alert.alert('Success', 'Photo removed');
+            } catch (error: any) {
+              const msg = error?.response?.data?.error || 'Failed to delete';
+              Alert.alert('Error', msg);
+            }
+          },
+          style: 'destructive',
+        },
+      ]
+    );
+  };
+
+  const pickCoverImage = async () => {
+    try {
+      console.log('[pickCoverImage] Launching image library...');
+      
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.8,
+      });
+
+      console.log('[pickCoverImage] Picker result:', {
+        canceled: result.canceled,
+        hasAssets: !!result.assets,
+        assetCount: result.assets?.length || 0,
+      });
+
+      if (result.canceled) {
+        console.log('[pickCoverImage] User cancelled image selection');
+        return;
+      }
+
+      if (!result.assets || result.assets.length === 0) {
+        Alert.alert('Error', 'No image was selected');
+        return;
+      }
+
+      const selectedImage = result.assets[0];
+      console.log('[pickCoverImage] Selected image URI:', selectedImage.uri);
+      
+      setPreviewImage(selectedImage.uri);
+      setShowImagePreview(true);
+    } catch (error: any) {
+      console.error('Image picker error:', error);
+      console.error('Error details:', {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+      });
+      Alert.alert('Error', `Failed to pick image: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  const uploadCoverImage = async (imageUri: string) => {
+    try {
+      setUploadingImage(true);
+      
+      const formData = new FormData();
+      formData.append('file', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: `cover-${Date.now()}.jpg`,
+      } as any);
+
+      const uploadRes = await axios.post(
+        `${API_CONFIG.BASE_URL}/api/media/upload-image`,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+
+      const imageUrl = uploadRes.data?.image_url;
+      if (imageUrl) {
+        setCoverImage(imageUrl);
+        setShowImagePreview(false);
+        Alert.alert('Success', 'Cover image updated! Tap "Publish" to save changes.');
+        return imageUrl;
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      Alert.alert('Error', 'Failed to upload image. Please try again.');
+      throw error;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
 
   const loadRestaurantData = async () => {
     try {
@@ -180,6 +443,8 @@ export default function RestaurantListingScreen() {
         
         const myRestaurant = restRes.data?.data;
         if (myRestaurant) {
+          setRestaurantId(myRestaurant.id);
+          console.log(`[loadRestaurantData] Loaded restaurant ID: ${myRestaurant.id}`);
           setRestaurantName(myRestaurant.name || '');
           setCuisineLine(myRestaurant.cuisine || myRestaurant.category || '');
           setDescription(myRestaurant.description || '');
@@ -187,6 +452,9 @@ export default function RestaurantListingScreen() {
           setPhone(myRestaurant.phone || '');
           setSearchTags(myRestaurant.cuisine || '');
           if (myRestaurant.image_url) setCoverImage(myRestaurant.image_url);
+          
+          // Load menu photos
+          await loadMenuPhotos(myRestaurant.id);
           
           // Parse opening hours (e.g., "10:00am" → hour: 10, minute: :00, period: AM)
           if (myRestaurant.opening_hours) {
@@ -407,6 +675,7 @@ export default function RestaurantListingScreen() {
                 closing_hours: closingHours,
                 latitude,
                 longitude,
+                image_url: coverImage || undefined,
               };
 
               try {
@@ -499,7 +768,16 @@ export default function RestaurantListingScreen() {
               <View style={styles.previewBadge}>
                 <Text style={styles.previewBadgeText}>CUSTOMER-FACING PROFILE</Text>
               </View>
-              <TouchableOpacity style={styles.editImageBtn}>
+              <TouchableOpacity 
+                style={styles.editImageBtn}
+                onPress={() => {
+                  if (!token) {
+                    Alert.alert('Error', 'Please log in first');
+                    return;
+                  }
+                  pickCoverImage();
+                }}
+              >
                 <Ionicons name="image-outline" size={20} color={Colors.white} />
               </TouchableOpacity>
               <Text style={styles.previewLabel}>PREVIEW</Text>
@@ -760,6 +1038,64 @@ export default function RestaurantListingScreen() {
             textAlignVertical="top"
           />
         </View>
+
+        {/* ─── Section: Menu Photos ─── */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="images-outline" size={22} color={Colors.primary} />
+            <Text style={styles.sectionTitle}>Menu photos (Top 3)</Text>
+          </View>
+
+          <Text style={styles.sublabel}>Upload up to 3 menu photos for customers to see</Text>
+
+          {/* Photo Grid */}
+          <View style={styles.photoGrid}>
+            {[1, 2, 3].map((photoNum) => {
+              const photo = menuPhotos.find(p => p.display_order === photoNum);
+              return (
+                <View key={photoNum} style={styles.photoCard}>
+                  {photo ? (
+                    <>
+                      <Image source={{ uri: photo.photo_url }} style={styles.photoImage} />
+                      <TouchableOpacity
+                        style={styles.photoDeleteBtn}
+                        onPress={() => deleteMenuPhoto(photo.id)}
+                      >
+                        <Ionicons name="trash" size={18} color={Colors.white} />
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <View style={styles.photoPlaceholder}>
+                      <Ionicons name="image-outline" size={36} color={Colors.gray} />
+                      <Text style={styles.photoPlaceholderText}>Photo {photoNum}</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.photoUploadBtn}
+                    onPress={() => {
+                      if (!restaurantId) {
+                        Alert.alert('Error', 'Restaurant data not loaded. Please refresh the screen.');
+                        return;
+                      }
+                      pickMenuPhoto(photoNum);
+                    }}
+                    disabled={uploadingMenuPhoto}
+                  >
+                    {uploadingMenuPhoto ? (
+                      <ActivityIndicator color={Colors.white} size="small" />
+                    ) : (
+                      <Ionicons name={photo ? 'pencil' : 'add'} size={20} color={Colors.white} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </View>
+
+          <Text style={styles.photoInfo}>
+            📸 Square images work best (1:1 ratio) • Max 10MB per photo
+          </Text>
+        </View>
       </ScrollView>
 
       {/* ─── Action Buttons ─── */}
@@ -794,6 +1130,90 @@ export default function RestaurantListingScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Image Preview Modal */}
+      <RNModal
+        visible={showImagePreview}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowImagePreview(false)}
+      >
+        <View style={styles.modalContainer}>
+          {/* Header */}
+          <View style={styles.modalHeader}>
+            <TouchableOpacity 
+              onPress={() => setShowImagePreview(false)}
+              style={styles.modalCloseBtn}
+            >
+              <Ionicons name="close" size={28} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Preview Cover Image</Text>
+            <View style={styles.modalHeaderSpacer} />
+          </View>
+
+          {/* Image Preview */}
+          <ScrollView 
+            contentContainerStyle={styles.previewScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {previewImage && (
+              <Image 
+                source={{ uri: previewImage }} 
+                style={styles.largePreviewImage}
+              />
+            )}
+            
+            {/* Preview Card */}
+            <View style={styles.previewCardModal}>
+              <LinearGradient
+                colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.7)']}
+                style={styles.previewGradientModal}
+              >
+                {previewImage && (
+                  <Image 
+                    source={{ uri: previewImage }} 
+                    style={styles.previewImageModal}
+                  />
+                )}
+                <View style={styles.previewOverlayModal}>
+                  <Text style={styles.previewLabel}>PREVIEW</Text>
+                  <Text style={styles.previewName}>{restaurantName || 'Your Restaurant'}</Text>
+                  <Text style={styles.previewAddress}>{address || 'Address'}</Text>
+                </View>
+              </LinearGradient>
+            </View>
+
+            <View style={styles.modalTextContainer}>
+              <Text style={styles.modalDescription}>
+                This is how your restaurant will appear to customers on the app.
+              </Text>
+            </View>
+          </ScrollView>
+
+          {/* Action Buttons */}
+          <View style={styles.modalButtonContainer}>
+            <TouchableOpacity 
+              style={[styles.modalBtn, styles.modalBtnCancel]}
+              onPress={() => setShowImagePreview(false)}
+              disabled={uploadingImage}
+            >
+              <Text style={styles.modalBtnTextCancel}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.modalBtn, styles.modalBtnSave]}
+              onPress={() => previewImage && uploadCoverImage(previewImage)}
+              disabled={uploadingImage || !previewImage}
+            >
+              {uploadingImage ? (
+                <ActivityIndicator color={Colors.white} />
+              ) : (
+                <Text style={styles.modalBtnText}>Save Cover Image</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </RNModal>
     </KeyboardAvoidingView>
   );
 }
@@ -1055,5 +1475,107 @@ const styles = StyleSheet.create({
   coordinates: {
     fontFamily: 'PlusJakartaSans-Regular', fontSize: 11,
     color: Colors.gray, marginTop: 8, textAlign: 'center',
+  },
+
+  /* Image Preview Modal */
+  modalContainer: {
+    flex: 1, backgroundColor: Colors.background, paddingTop: 60,
+  },
+  modalHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingBottom: 12,
+  },
+  modalCloseBtn: {
+    width: 40, height: 40, justifyContent: 'center', alignItems: 'center',
+  },
+  modalHeaderSpacer: { width: 40 },
+  modalTitle: {
+    fontFamily: 'PlusJakartaSans-Bold', fontSize: 18, color: Colors.text,
+  },
+  previewScrollContent: { paddingHorizontal: 20, paddingVertical: 16 },
+  largePreviewImage: {
+    width: '100%', height: 200, borderRadius: 16, marginBottom: 20,
+  },
+  previewCardModal: {
+    backgroundColor: Colors.white, borderRadius: 16,
+    overflow: 'hidden', marginBottom: 20, height: 200,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  previewGradientModal: { flex: 1 },
+  previewImageModal: {
+    position: 'absolute', width: '100%', height: '100%',
+  },
+  previewOverlayModal: {
+    flex: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingBottom: 16,
+  },
+  modalTextContainer: {
+    backgroundColor: Colors.white, borderRadius: 12,
+    padding: 16, marginBottom: 20,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  modalDescription: {
+    fontFamily: 'PlusJakartaSans-Regular', fontSize: 13,
+    color: Colors.gray, lineHeight: 19,
+  },
+  modalButtonContainer: {
+    flexDirection: 'row', gap: 12, paddingHorizontal: 20,
+    paddingVertical: 16, paddingBottom: 32,
+  },
+  modalBtn: {
+    flex: 1, paddingVertical: 14, borderRadius: 12,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  modalBtnCancel: {
+    backgroundColor: Colors.background, borderWidth: 1, borderColor: Colors.border,
+  },
+  modalBtnSave: {
+    backgroundColor: Colors.primary,
+  },
+  modalBtnTextCancel: {
+    fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 14, color: Colors.text,
+  },
+  modalBtnText: {
+    fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 14, color: Colors.white,
+  },
+
+  /* Menu Photos */
+  photoGrid: {
+    flexDirection: 'row', gap: 12, marginBottom: 16, marginTop: 16,
+  },
+  photoCard: {
+    flex: 1, aspectRatio: 1, borderRadius: 14,
+    overflow: 'hidden', backgroundColor: Colors.background,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  photoImage: {
+    width: '100%', height: '100%',
+  },
+  photoPlaceholder: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  photoPlaceholderText: {
+    fontFamily: 'PlusJakartaSans-Regular', fontSize: 11,
+    color: Colors.gray, marginTop: 6,
+  },
+  photoUploadBtn: {
+    position: 'absolute', bottom: 8, right: 8,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: Colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25, shadowRadius: 3, elevation: 5,
+  },
+  photoDeleteBtn: {
+    position: 'absolute', top: 8, right: 8,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25, shadowRadius: 3, elevation: 5,
+  },
+  photoInfo: {
+    fontFamily: 'PlusJakartaSans-Regular', fontSize: 12,
+    color: Colors.gray, marginTop: 8,
   },
 });

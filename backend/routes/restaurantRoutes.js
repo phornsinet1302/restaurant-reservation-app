@@ -3,24 +3,7 @@ const router = express.Router();
 const { protect } = require('../middleware/authMiddleware');
 const restaurantController = require('../controllers/restaurantController');
 
-// --- PUBLIC ROUTES (Customer & Guest Mode) ---
-
-// 1. Search/List Restaurants
-router.get('/', restaurantController.searchRestaurants);
-
-// 2. Get Specific Restaurant Details
-router.get('/:id', restaurantController.getRestaurantDetails);
-
-// 3. Get Required Fields for Restaurant Listing
-router.get('/info/required-fields', restaurantController.getRequiredFields);
-
-// --- PROTECTED ROUTES (Merchant Only) ---
-
-// 4. Create and Update Restaurant Profile
-router.post('/', protect, restaurantController.createRestaurant);
-router.put('/:id', protect, restaurantController.updateRestaurant);
-
-// --- MERCHANT RESTAURANT LISTING MANAGEMENT ---
+// --- MERCHANT RESTAURANT LISTING MANAGEMENT (SPECIFIC ROUTES FIRST) ---
 
 // 5. Get Merchant's Restaurant Listing
 router.get('/merchant/my-restaurant', protect, restaurantController.getMerchantRestaurant);
@@ -36,5 +19,22 @@ router.post('/merchant/publish', protect, restaurantController.publishRestaurant
 
 // 9. Unpublish Restaurant
 router.post('/merchant/unpublish', protect, restaurantController.unpublishRestaurant);
+
+// --- PUBLIC ROUTES (Customer & Guest Mode) ---
+
+// 1. Search/List Restaurants
+router.get('/', restaurantController.searchRestaurants);
+
+// 2. Get Specific Restaurant Details (GENERIC ROUTE LAST)
+router.get('/:id', restaurantController.getRestaurantDetails);
+
+// 3. Get Required Fields for Restaurant Listing
+router.get('/info/required-fields', restaurantController.getRequiredFields);
+
+// --- PROTECTED ROUTES (Merchant Only) ---
+
+// 4. Create and Update Restaurant Profile
+router.post('/', protect, restaurantController.createRestaurant);
+router.put('/:id', protect, restaurantController.updateRestaurant);
 
 module.exports = router;

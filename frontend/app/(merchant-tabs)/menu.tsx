@@ -34,42 +34,81 @@ export default function MerchantMenuScreen() {
   const loadData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      if (!token) return;
-
-      // Get merchant dashboard to find restaurant
-      const dashRes = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (dashRes.data?.restaurant_name) setRestaurantName(dashRes.data.restaurant_name);
-
-      // Get restaurant ID from user's restaurants
-      const restRes = await axios.get(`${API_CONFIG.BASE_URL}/api/restaurants`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const userStr = await AsyncStorage.getItem('user');
-      const user = userStr ? JSON.parse(userStr) : null;
-      const myRestaurant = restRes.data?.find?.((r: any) => r.merchant_id === user?.id);
-      if (myRestaurant) {
-        setRestaurantId(myRestaurant.id);
-        setRestaurantName(myRestaurant.name);
-
-        // Get menu items for this restaurant
-        const menuRes = await axios.get(
-          `${API_CONFIG.BASE_URL}/api/menu?restaurant_id=${myRestaurant.id}`
-        );
-        setMenuItems(menuRes.data || []);
+      if (!token) {
+        console.warn('⚠️ No token found');
+        return;
       }
-    } catch {
-      // Use empty state
+
+      console.log('📋 [loadData] Loading merchant menu...');
+
+      // Get merchant's restaurant directly
+      const restRes = await axios.get(
+        `${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (!restRes.data?.data?.id) {
+        console.error('❌ No restaurant found for merchant');
+        setMenuItems([]);
+        setLoading(false);
+        return;
+      }
+
+      const restaurant = restRes.data.data;
+      console.log('✅ Restaurant found:', restaurant.id, restaurant.name);
+      setRestaurantId(restaurant.id);
+      setRestaurantName(restaurant.name);
+
+      // Get menu items for this restaurant
+      console.log('🍽️  Fetching menu items for restaurant:', restaurant.id);
+      const menuRes = await axios.get(
+        `${API_CONFIG.BASE_URL}/api/menu?restaurant_id=${restaurant.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      console.log('📊 [loadData] Full response:', menuRes);
+      console.log('📊 [loadData] Response data:', menuRes.data);
+      console.log('📊 [loadData] Response data type:', typeof menuRes.data);
+      console.log('📊 [loadData] Is array?', Array.isArray(menuRes.data));
+      console.log('📊 [loadData] Response keys:', Object.keys(menuRes.data || {}));
+
+      // Handle multiple possible response formats
+      let items = [];
+      if (Array.isArray(menuRes.data)) {
+        items = menuRes.data;
+      } else if (menuRes.data?.data && Array.isArray(menuRes.data.data)) {
+        items = menuRes.data.data;
+      } else if (menuRes.data?.items && Array.isArray(menuRes.data.items)) {
+        items = menuRes.data.items;
+      } else {
+        console.warn('⚠️  Unable to extract items from response. Response:', menuRes.data);
+        items = [];
+      }
+      
+      console.log(`✅ Found ${items.length} menu items:`, items);
+      setMenuItems(items);
+    } catch (error: any) {
+      console.error('❌ Error loading menu:', error.message);
+      console.error('   Status:', error.response?.status);
+      console.error('   Data:', error.response?.data);
+      console.error('   Full error:', error);
+      setMenuItems([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+  useFocusEffect(useCallback(() => {
+    console.log('👀 [useFocusEffect] Menu screen focused - loading data...');
+    loadData();
+  }, [loadData]));
 
-  const onRefresh = () => { setRefreshing(true); loadData(); };
+  const onRefresh = () => {
+    console.log('🔄 [onRefresh] Refreshing menu...');
+    setRefreshing(true);
+    loadData();
+  };
 
   const handleDelete = (item: MenuItem) => {
     Alert.alert('Delete Item', `Are you sure you want to delete "${item.name}"?`, [

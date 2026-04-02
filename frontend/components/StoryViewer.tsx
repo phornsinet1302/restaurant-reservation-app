@@ -11,6 +11,7 @@ import {
   ImageSourcePropType,
   StatusBar,
 } from 'react-native';
+import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 
@@ -21,6 +22,7 @@ const STORY_DURATION = 15_000; // 15 seconds per story
 
 export type StorySlide = {
   image: ImageSourcePropType;
+  video?: string; // Optional video URL
   title: string;
   description: string;
 };
@@ -38,6 +40,7 @@ interface StoryViewerProps {
   groups: StoryGroup[];
   initialGroupIndex: number;
   onClose: () => void;
+  onStoryDeleted?: () => void; // Callback when story is deleted
 }
 
 /* ── Component ── */
@@ -46,18 +49,67 @@ export default function StoryViewer({
   groups,
   initialGroupIndex,
   onClose,
+  onStoryDeleted,
 }: StoryViewerProps) {
   const [groupIdx, setGroupIdx] = useState(initialGroupIndex);
   const [slideIdx, setSlideIdx] = useState(0);
+  const [videoError, setVideoError] = useState<boolean>(false);
   const progress = useRef(new Animated.Value(0)).current;
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const prevGroupCountRef = useRef(groups.length);
+  const prevSlideCountRef = useRef(groups[initialGroupIndex]?.slides.length || 0);
 
-  const group = groups[groupIdx];
-  const slide = group.slides[slideIdx];
+  // Detect if current group/story was deleted
+  useEffect(() => {
+    // Check if total groups changed
+    if (groups.length < prevGroupCountRef.current) {
+      console.warn('⚠️ Stories were deleted! Recalculating indices...');
+      const newGroupIdx = Math.min(groupIdx, Math.max(0, groups.length - 1));
+      if (newGroupIdx !== groupIdx) {
+        console.log(`   Moving from group ${groupIdx} to ${newGroupIdx}`);
+        setGroupIdx(newGroupIdx);
+        setSlideIdx(0);
+      }
+      prevGroupCountRef.current = groups.length;
+      onStoryDeleted?.();
+    }
+
+    // Check if current group's slides changed
+    const currentGroup = groups[groupIdx];
+    if (currentGroup && currentGroup.slides.length < prevSlideCountRef.current) {
+      console.warn(`⚠️ Story was deleted from current group! (${prevSlideCountRef.current} → ${currentGroup.slides.length})`);
+      const newSlideIdx = Math.min(slideIdx, Math.max(0, currentGroup.slides.length - 1));
+      if (newSlideIdx !== slideIdx) {
+        console.log(`   Moving from slide ${slideIdx} to ${newSlideIdx}`);
+        setSlideIdx(newSlideIdx);
+      }
+      prevSlideCountRef.current = currentGroup.slides.length;
+    }
+  }, [groups, groupIdx, slideIdx, onStoryDeleted]);
+
+  // Validate indices
+  const validGroupIdx = Math.min(groupIdx, Math.max(0, groups.length - 1));
+  const group = groups[validGroupIdx];
+  
+  // Safety check: if no groups or current group has no slides, close
+  if (!groups || groups.length === 0 || !group || !group.slides || group.slides.length === 0) {
+    console.warn('⚠️ No valid stories to display - closing story viewer');
+    onClose();
+    return null;
+  }
+
+  const validSlideIdx = Math.min(slideIdx, Math.max(0, group.slides.length - 1));
+  const slide = group.slides[validSlideIdx];
   const totalSlides = group.slides.length;
 
   /* Start / restart the timer bar */
   const startTimer = useCallback(() => {
+    // Validate slide before starting timer
+    if (!slide || !slide.image) {
+      console.warn('⚠️ Invalid slide, skipping timer');
+      return;
+    }
+    
     progress.setValue(0);
     animRef.current?.stop();
     const anim = Animated.timing(progress, {
@@ -73,27 +125,45 @@ export default function StoryViewer({
 
   useEffect(() => {
     startTimer();
+    setVideoError(false); // Reset video error when slide changes
     return () => animRef.current?.stop();
   }, [startTimer]);
 
   /* Navigation */
   const goNext = useCallback(() => {
+    // Check if current group still has slides
+    if (!group || !group.slides || group.slides.length === 0) {
+      console.warn('⚠️ Current group has no slides - closing');
+      onClose();
+      return;
+    }
+
     if (slideIdx < totalSlides - 1) {
       setSlideIdx((prev) => prev + 1);
     } else if (groupIdx < groups.length - 1) {
-      setGroupIdx((prev) => prev + 1);
-      setSlideIdx(0);
+      const nextGroupIdx = groupIdx + 1;
+      if (groups[nextGroupIdx] && groups[nextGroupIdx].slides && groups[nextGroupIdx].slides.length > 0) {
+        setGroupIdx(nextGroupIdx);
+        setSlideIdx(0);
+      } else {
+        console.warn('⚠️ Next group has no slides - skipping');
+        onClose();
+      }
     } else {
+      console.log('✅ Finished all stories');
       onClose();
     }
-  }, [slideIdx, totalSlides, groupIdx, groups.length, onClose]);
+  }, [slideIdx, totalSlides, groupIdx, groups.length, onClose, group]);
 
   const goPrev = useCallback(() => {
     if (slideIdx > 0) {
       setSlideIdx((prev) => prev - 1);
     } else if (groupIdx > 0) {
-      setGroupIdx((prev) => prev - 1);
-      setSlideIdx(groups[groupIdx - 1].slides.length - 1);
+      const prevGroupIdx = groupIdx - 1;
+      if (groups[prevGroupIdx] && groups[prevGroupIdx].slides && groups[prevGroupIdx].slides.length > 0) {
+        setGroupIdx(prevGroupIdx);
+        setSlideIdx(groups[prevGroupIdx].slides.length - 1);
+      }
     }
   }, [slideIdx, groupIdx, groups]);
 
@@ -101,8 +171,25 @@ export default function StoryViewer({
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Background image */}
-      <Image source={slide.image} style={styles.bgImage} resizeMode="cover" />
+      {/* Background - Image or Video */}
+      {slide.video && !videoError && !slide.video.startsWith('file://') ? (
+        <Video
+          source={{ uri: slide.video }}
+          style={styles.bgImage}
+          resizeMode="cover"
+          isLooping
+          shouldPlay
+          useNativeControls={false}
+          onError={(error) => {
+            console.warn('🎥 Video playback error:', error);
+            setVideoError(true);
+          }}
+          progressUpdateIntervalMillis={500}
+          rate={1.0}
+        />
+      ) : (
+        <Image source={slide.image} style={styles.bgImage} resizeMode="cover" />
+      )}
 
       {/* Dark overlay */}
       <View style={styles.overlay} />

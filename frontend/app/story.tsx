@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useState, useEffect, useRef } from 'react';
+import { ActivityIndicator, View, Alert } from 'react-native';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import StoryViewer, { StoryGroup } from '@/components/StoryViewer';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,20 +13,70 @@ export default function StoryScreen() {
   const router = useRouter();
   const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const lastCountRef = useRef(0);
 
+  // Initial load
   useEffect(() => {
     loadStories();
   }, []);
 
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('👁️ Story screen focused, refreshing stories');
+      loadStories();
+    }, [])
+  );
+
   const loadStories = async () => {
     try {
-      setLoading(true);
       const token = await AsyncStorage.getItem('authToken');
       
       // Fetch active stories from API
       const response = await axios.get(`${API_URL}/api/stories/active`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       });
+
+      const count = (response.data || []).length;
+      
+      // Only log if count changed (not on every refresh)
+      if (count !== lastCountRef.current) {
+        console.log('📖 ============ STORIES LOADED ============');
+        console.log(`📖 Loaded ${count} restaurant(s) with stories`);
+        
+        if (count < lastCountRef.current) {
+          console.log(`🗑️ STORIES DELETED: ${lastCountRef.current} → ${count}`);
+        }
+        
+        if (!response.data || response.data.length === 0) {
+          console.log('⚠️ No stories available - possible deletion');
+          // Close viewer if all stories deleted
+          setTimeout(() => {
+            router.back();
+          }, 500);
+          return;
+        } else {
+          // Log detailed info about loaded stories
+          (response.data || []).forEach((restaurant: any, idx: number) => {
+            console.log(`   📱 Restaurant ${idx + 1}: "${restaurant.name}"`);
+            console.log(`       └─ ${restaurant.stories?.length || 0} story(stories)`);
+            if (restaurant.stories) {
+              restaurant.stories.forEach((story: any, sIdx: number) => {
+                const type = story.video_url ? '🎥' : '🖼️';
+                console.log(`          ${type} Story ${sIdx + 1}: "${story.title || 'Untitled'}"`);
+              });
+            }
+          });
+        }
+        console.log('📖 =====================================');
+        lastCountRef.current = count;
+      }
+      
+      if (!response.data || response.data.length === 0) {
+        // Close the viewer if there are no more stories
+        router.back();
+        return;
+      }
 
       // Transform backend data to StoryGroup format
       const groups: StoryGroup[] = (response.data || []).map((restaurant: any) => ({
@@ -37,14 +87,15 @@ export default function StoryScreen() {
         avatar: restaurant.image_url ? { uri: restaurant.image_url } : require('@/assets/food/food-1.jpeg'),
         slides: restaurant.stories.map((story: any) => ({
           image: story.image_url ? { uri: story.image_url } : require('@/assets/food/food-1.jpeg'),
-          title: story.title,
+          video: story.video_url ? story.video_url : undefined, // Include video if available
+          title: story.title || 'Story',
           description: story.description || '',
         })),
       }));
 
       setStoryGroups(groups);
     } catch (error) {
-      console.error('Error loading stories:', error);
+      console.error('❌ Error loading stories:', error);
     } finally {
       setLoading(false);
     }
@@ -72,11 +123,16 @@ export default function StoryScreen() {
 
   const idx = parseInt(groupIndex ?? '0', 10);
 
+  const handleStoryDeleted = () => {
+    console.log('📖 Story was deleted - UI updated to reflect changes');
+  };
+
   return (
     <StoryViewer
       groups={storyGroups.length > 0 ? storyGroups : []}
       initialGroupIndex={Math.min(idx, storyGroups.length - 1)}
       onClose={() => router.back()}
+      onStoryDeleted={handleStoryDeleted}
     />
   );
 }

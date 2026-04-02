@@ -52,7 +52,10 @@ type MenuItem = {
   name: string;
   category: string;
   price: number;
-  image: ImageSourcePropType;
+  image_url?: string | null;
+  description?: string;
+  is_available?: boolean;
+  restaurant_id: string;
 };
 
 const MENU_ITEMS: MenuItem[] = [
@@ -123,6 +126,10 @@ export default function RestaurantDetailScreen() {
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [token, setToken] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuLoading, setMenuLoading] = useState(false);
+  const [menuPhotos, setMenuPhotos] = useState<any[]>([]);
+  const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
   const { isGuest } = useAuth();
   const [showGuestModal, setShowGuestModal] = useState(false);
   // const [restaurantLocation, setRestaurantLocation] = useState(null); // Disabled
@@ -138,13 +145,18 @@ export default function RestaurantDetailScreen() {
   const hours = params.hours || 'Open Until 3:00pm';
   const distance = params.distance || '0.2 miles';
 
-  const heroImage = RESTAURANT_IMAGES[name] || require('@/assets/restaurant-4.jpg');
+  // Use uploaded cover image if available, otherwise fall back to static map
+  const heroImage = heroImageUrl 
+    ? { uri: heroImageUrl }
+    : RESTAURANT_IMAGES[name] || require('@/assets/restaurant-4.jpg');
   const closingTime = hours.replace('Open Until ', '');
 
   useEffect(() => {
     loadUserDataAndCheckFavorite();
+    fetchMenuItems();
+    fetchMenuPhotos();
     // fetchRestaurantLocation(); // Disabled - maps not available
-  }, []);
+  }, [restaurantId]);
 
   const loadUserDataAndCheckFavorite = async () => {
     try {
@@ -190,6 +202,76 @@ export default function RestaurantDetailScreen() {
     }
   };
 
+  const fetchMenuItems = async () => {
+    try {
+      if (!restaurantId || restaurantId.length === 0) {
+        console.warn('⚠️ [fetchMenuItems] No restaurantId available');
+        return;
+      }
+      
+      setMenuLoading(true);
+      const url = `${API_URL}/api/restaurants/${restaurantId}`;
+      console.log('🍽️ [fetchMenuItems] Fetching from:', url);
+      
+      const response = await axios.get(url);
+      console.log('📊 [fetchMenuItems] Response:', response.data);
+      
+      // Extract and display cover image
+      if (response.data?.image_url) {
+        console.log('🖼️ [fetchMenuItems] Found cover image:', response.data.image_url);
+        setHeroImageUrl(response.data.image_url);
+      }
+
+      if (response.data?.menu_items) {
+        console.log(`✅ Found ${response.data.menu_items.length} menu items:`, response.data.menu_items);
+        setMenuItems(response.data.menu_items);
+      } else if (response.data?.data?.menu_items) {
+        console.log(`✅ Found ${response.data.data.menu_items.length} menu items (nested)`, response.data.data.menu_items);
+        setMenuItems(response.data.data.menu_items);
+      } else {
+        console.log('⚠️ No menu_items in response. Response keys:', Object.keys(response.data));
+        console.log('Full response:', JSON.stringify(response.data, null, 2));
+        setMenuItems([]);
+      }
+    } catch (error: any) {
+      console.error('❌ [fetchMenuItems] Error:', error.message);
+      console.error('   Response data:', error.response?.data);
+      console.error('   Status:', error.response?.status);
+      setMenuItems([]);
+    } finally {
+      setMenuLoading(false);
+    }
+  };
+
+  const fetchMenuPhotos = async () => {
+    try {
+      if (!restaurantId || restaurantId.length === 0) {
+        console.warn('⚠️ [fetchMenuPhotos] No restaurantId available');
+        return;
+      }
+      
+      const url = `${API_URL}/api/menu-photos/${restaurantId}`;
+      console.log('📸 [fetchMenuPhotos] Fetching from:', url);
+      
+      const response = await axios.get(url);
+      console.log('📊 [fetchMenuPhotos] Response:', response.data);
+      
+      if (response.data?.data) {
+        console.log(`✅ Found ${response.data.data.length} menu photos`);
+        setMenuPhotos(response.data.data);
+      } else if (Array.isArray(response.data)) {
+        console.log(`✅ Found ${response.data.length} menu photos (array)`);
+        setMenuPhotos(response.data);
+      } else {
+        console.log('⚠️ No menu photos found');
+        setMenuPhotos([]);
+      }
+    } catch (error: any) {
+      console.log('📸 [fetchMenuPhotos] No menu photos available:', error.message);
+      setMenuPhotos([]);
+    }
+  };
+
   const handleToggleFavorite = async () => {
     if (!token) {
       Alert.alert('Error', 'You must be logged in to favorite restaurants');
@@ -229,14 +311,46 @@ export default function RestaurantDetailScreen() {
     }
   };
 
-  const openGoogleMaps = () => {
-    const query = encodeURIComponent(address);
-    const url = Platform.select({
-      ios: `maps://maps.apple.com/?q=${query}`,
-      android: `geo:0,0?q=${query}`,
-      default: `https://www.google.com/maps/search/?api=1&query=${query}`,
-    });
-    if (url) Linking.openURL(url);
+  const openGoogleMaps = async () => {
+    try {
+      const query = encodeURIComponent(address || 'Location');
+      
+      const urls = Platform.select({
+        ios: [
+          `maps://maps.apple.com/?q=${query}`,
+          `https://maps.apple.com/?q=${query}`,
+        ],
+        android: [
+          `geo:0,0?q=${query}`,
+          `https://www.google.com/maps/search/?api=1&query=${query}`,
+        ],
+        default: [
+          `https://www.google.com/maps/search/?api=1&query=${query}`,
+        ],
+      }) || [];
+
+      let opened = false;
+      for (const url of urls) {
+        try {
+          const canOpen = await Linking.canOpenURL(url);
+          if (canOpen) {
+            await Linking.openURL(url);
+            opened = true;
+            break;
+          }
+        } catch (err) {
+          console.warn(`Could not open URL: ${url}`);
+          continue;
+        }
+      }
+
+      if (!opened) {
+        Alert.alert('Error', 'Unable to open maps. Please try again later.');
+      }
+    } catch (error) {
+      console.error('Error opening maps:', error);
+      Alert.alert('Error', 'Could not open maps');
+    }
   };
 
   return (
@@ -317,9 +431,19 @@ export default function RestaurantDetailScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.photosRow}
           >
-            {FOOD_PHOTOS.map((photo, i) => (
-              <Image key={i} source={photo} style={styles.photoThumb} />
-            ))}
+            {menuPhotos.length > 0 ? (
+              menuPhotos.map((photo) => (
+                <Image 
+                  key={photo.id} 
+                  source={{ uri: photo.photo_url }} 
+                  style={styles.photoThumb} 
+                />
+              ))
+            ) : (
+              FOOD_PHOTOS.map((photo, i) => (
+                <Image key={i} source={photo} style={styles.photoThumb} />
+              ))
+            )}
           </ScrollView>
         </View>
 
@@ -429,16 +553,38 @@ export default function RestaurantDetailScreen() {
         {/* ── Menu ── */}
         <View style={styles.menuCard}>
           <Text style={styles.menuCardTitle}>Menu</Text>
-          {MENU_ITEMS.map((item) => (
-            <View key={item.id} style={styles.menuItem}>
-              <Image source={item.image} style={styles.menuItemImage} />
-              <View style={styles.menuItemInfo}>
-                <Text style={styles.menuItemName}>{item.name}</Text>
-                <Text style={styles.menuItemCategory}>{item.category}</Text>
-              </View>
-              <Text style={styles.menuItemPrice}>${item.price}</Text>
+          {menuLoading ? (
+            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={{ marginTop: 8, fontFamily: 'PlusJakartaSans-Regular', color: Colors.gray }}>
+                Loading menu...
+              </Text>
             </View>
-          ))}
+          ) : menuItems.length > 0 ? (
+            menuItems.map((item) => (
+              <View key={item.id} style={styles.menuItem}>
+                {item.image_url ? (
+                  <Image source={{ uri: item.image_url }} style={styles.menuItemImage} />
+                ) : (
+                  <View style={[styles.menuItemImage, { backgroundColor: '#F0EFDF', justifyContent: 'center', alignItems: 'center' }]}>
+                    <Ionicons name="image-outline" size={20} color={Colors.gray} />
+                  </View>
+                )}
+                <View style={styles.menuItemInfo}>
+                  <Text style={styles.menuItemName}>{item.name}</Text>
+                  <Text style={styles.menuItemCategory}>{item.category}</Text>
+                </View>
+                <Text style={styles.menuItemPrice}>${Number(item.price).toFixed(2)}</Text>
+              </View>
+            ))
+          ) : (
+            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+              <Ionicons name="restaurant-outline" size={24} color={Colors.gray} />
+              <Text style={{ marginTop: 8, fontFamily: 'PlusJakartaSans-Regular', color: Colors.gray }}>
+                No menu items yet
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Bottom spacing */}
