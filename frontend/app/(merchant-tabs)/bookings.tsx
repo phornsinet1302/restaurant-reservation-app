@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, Alert, Modal, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useFocusEffect } from '@react-navigation/native';
 
 type TabKey = 'upcoming' | 'completed' | 'cancelled';
 
@@ -17,7 +18,7 @@ interface Reservation {
   customer_id: string;
   reservation_date: string;
   reservation_time: string;
-  guest_count: number;
+  party_size: number;
   table_id: string;
   table_number?: number;
   status: string;
@@ -26,6 +27,10 @@ interface Reservation {
   customer_name?: string;
   customer_email?: string;
   restaurant_name?: string;
+  special_request?: string;
+  tables?: {
+    table_number: string;
+  };
 }
 
 export default function MerchantBookingsScreen() {
@@ -35,36 +40,136 @@ export default function MerchantBookingsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
 
+  // Modal states for actions
+  const [modalVisible, setModalVisible] = useState(false);
+  const [actionType, setActionType] = useState<'confirm' | 'reject' | 'cancel' | 'arrived' | 'completed'>('reject');
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [reason, setReason] = useState('');
+  const [actioning, setActioning] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        console.log('No token found');
+        return;
+      }
 
-      const res = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/reservations`, {
+      console.log('🔄 Loading bookings...');
+      const res = await axios.get(`${API_CONFIG.BASE_URL}/api/reservations/merchant/pending-reservations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      
+      console.log('✅ Bookings loaded:', res.data);
       setReservations(res.data || []);
 
-      // Also get restaurant name
-      const dashRes = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (dashRes.data?.restaurant_name) setRestaurantName(dashRes.data.restaurant_name);
-    } catch {
-      // empty
+      // Restaurant name is already shown in card - no need to fetch separately
+      // The booking cards display the restaurant name from state
+    } catch (error: any) {
+      console.error('❌ Error loading bookings:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+      Alert.alert('Error', 'Failed to load bookings. Please check the backend server.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
+
   const onRefresh = () => { setRefreshing(true); loadData(); };
+
+  const handleAction = (type: 'confirm' | 'reject' | 'cancel' | 'arrived' | 'completed', reservation: Reservation) => {
+    setActionType(type);
+    setSelectedReservation(reservation);
+    setReason('');
+    setModalVisible(true);
+  };
+
+  const confirmAction = async () => {
+    if (!selectedReservation) return;
+    
+    if ((actionType === 'reject' || actionType === 'cancel') && !reason.trim()) {
+      Alert.alert('Error', `Please provide a reason for ${actionType}ing this booking`);
+      return;
+    }
+
+    setActioning(true);
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        Alert.alert('Error', 'No auth token found');
+        return;
+      }
+
+      let endpoint = '';
+      let payload: any = {};
+      let newStatus = '';
+
+      if (actionType === 'confirm') {
+        endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/confirm`;
+        newStatus = 'confirmed';
+      } else if (actionType === 'reject') {
+        endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/reject`;
+        payload = { reason: reason.trim() };
+        newStatus = 'rejected';
+      } else if (actionType === 'cancel') {
+        endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/cancel`;
+        payload = { reason: reason.trim() };
+        newStatus = 'cancelled';
+      } else if (actionType === 'arrived') {
+        endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/mark-arrived`;
+        newStatus = 'arrived';
+      } else if (actionType === 'completed') {
+        endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/mark-completed`;
+        newStatus = 'completed';
+      }
+
+      const response = await axios.patch(endpoint, payload, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      console.log(`✅ ${actionType} successful:`, response.data);
+      
+      // Update local state immediately for instant UI feedback
+      setReservations(prevReservations =>
+        prevReservations.map(r => 
+          r.id === selectedReservation.id 
+            ? { ...r, status: newStatus as any }
+            : r
+        )
+      );
+      
+      Alert.alert('Success', `Booking ${actionType}ed successfully`);
+      setModalVisible(false);
+      
+      // Refresh data in background after a short delay
+      setTimeout(() => {
+        loadData();
+      }, 500);
+    } catch (error: any) {
+      console.error(`❌ Error ${actionType}ing booking:`);
+      console.error('  Error message:', error.message);
+      console.error('  Status:', error.response?.status);
+      console.error('  Error data:', error.response?.data);
+      Alert.alert('Error', error.response?.data?.error || `Failed to ${actionType} booking`);
+    } finally {
+      setActioning(false);
+    }
+  };
 
   const now = new Date();
   const upcoming = reservations.filter(r => {
     const resDate = new Date(`${r.reservation_date}T${r.reservation_time || '00:00'}`);
-    return (r.status === 'pending' || r.status === 'confirmed') && resDate >= now;
+    return (r.status === 'pending' || r.status === 'confirmed' || r.status === 'arrived') && resDate >= now;
   });
   const completed = reservations.filter(r => r.status === 'completed');
   const cancelled = reservations.filter(r => r.status === 'cancelled' || r.status === 'rejected');
@@ -77,7 +182,7 @@ export default function MerchantBookingsScreen() {
 
   const formatDate = (date: string) => {
     if (!date) return '';
-    return date; // Already in YYYY-MM-DD format
+    return date;
   };
 
   const formatTime = (time: string) => {
@@ -93,6 +198,7 @@ export default function MerchantBookingsScreen() {
     if (status === 'completed') return { label: 'Completed', color: '#2BA15C', bg: '#E8F8EF' };
     if (status === 'cancelled' || status === 'rejected') return { label: 'Cancelled', color: '#E74C3C', bg: '#FDEDEC' };
     if (status === 'confirmed') return { label: 'Confirmed', color: '#2BA15C', bg: '#E8F8EF' };
+    if (status === 'arrived') return { label: 'Arrived', color: '#2196F3', bg: '#E3F2FD' };
     return { label: 'Pending', color: '#E88B00', bg: '#FFF3E0' };
   };
 
@@ -103,6 +209,9 @@ export default function MerchantBookingsScreen() {
   const renderReservationCard = (item: Reservation) => {
     const badge = getStatusBadge(item.status);
     const ref = item.reference_code || generateRef(item.id);
+    const isPending = item.status === 'pending';
+    const isConfirmed = item.status === 'confirmed';
+    const isArrived = item.status === 'arrived';
 
     return (
       <View key={item.id} style={styles.card}>
@@ -123,7 +232,7 @@ export default function MerchantBookingsScreen() {
           </View>
           <View style={styles.detailItem}>
             <Ionicons name="people-outline" size={14} color={Colors.gray} />
-            <Text style={styles.detailText}>{item.guest_count} guests</Text>
+            <Text style={styles.detailText}>{item.party_size} guests</Text>
           </View>
         </View>
         <View style={styles.cardDetails}>
@@ -131,7 +240,7 @@ export default function MerchantBookingsScreen() {
             <Text style={styles.detailText}>{formatTime(item.reservation_time)}</Text>
           </View>
           <View style={styles.detailItem}>
-            <Text style={styles.detailText}>Table {item.table_number || '—'}</Text>
+            <Text style={styles.detailText}>Table {item.table_number || item.tables?.table_number || '—'}</Text>
           </View>
         </View>
 
@@ -144,6 +253,63 @@ export default function MerchantBookingsScreen() {
         {item.notes ? (
           <Text style={styles.note}>Note: {item.notes}</Text>
         ) : null}
+
+        {item.special_request ? (
+          <Text style={styles.note}>Special Request: {item.special_request}</Text>
+        ) : null}
+
+        {/* Action Buttons for Pending Bookings */}
+        {isPending && (
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.confirmBtn]}
+              onPress={() => handleAction('confirm', item)}
+            >
+              <Ionicons name="checkmark-circle" size={16} color="white" />
+              <Text style={styles.actionBtnText}>Confirm</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.rejectBtn]}
+              onPress={() => handleAction('reject', item)}
+            >
+              <Ionicons name="close-circle" size={16} color="white" />
+              <Text style={styles.actionBtnText}>Reject</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.cancelBtn]}
+              onPress={() => handleAction('cancel', item)}
+            >
+              <Ionicons name="trash" size={16} color="white" />
+              <Text style={styles.actionBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Action Buttons for Confirmed Bookings */}
+        {isConfirmed && (
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.arrivedBtn]}
+              onPress={() => handleAction('arrived', item)}
+            >
+              <Ionicons name="person-add" size={16} color="white" />
+              <Text style={styles.actionBtnText}>Mark Arrived</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Action Buttons for Arrived Bookings */}
+        {isArrived && (
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.completedBtn]}
+              onPress={() => handleAction('completed', item)}
+            >
+              <Ionicons name="checkmark-done" size={16} color="white" />
+              <Text style={styles.actionBtnText}>Complete</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
@@ -162,7 +328,7 @@ export default function MerchantBookingsScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Reservations</Text>
+        <Text style={styles.title}>Bookings</Text>
         <Text style={styles.subtitle}>Manage your reservations</Text>
       </View>
 
@@ -195,13 +361,113 @@ export default function MerchantBookingsScreen() {
         {currentItems.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="calendar-outline" size={56} color={Colors.border} />
-            <Text style={styles.emptyTitle}>No {activeTab} reservations</Text>
-            <Text style={styles.emptySubtitle}>Your {activeTab} reservations will appear here</Text>
+            <Text style={styles.emptyTitle}>No {activeTab} bookings</Text>
+            <Text style={styles.emptySubtitle}>Your {activeTab} bookings will appear here</Text>
           </View>
         ) : (
           currentItems.map(renderReservationCard)
         )}
       </ScrollView>
+
+      {/* Action Modal */}
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {actionType === 'confirm' ? 'Confirm Booking' :
+                 actionType === 'reject' ? 'Reject Booking' :
+                 actionType === 'cancel' ? 'Cancel Booking' :
+                 actionType === 'arrived' ? 'Customer Arrived' :
+                 'Complete Booking'}
+              </Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              {selectedReservation && (
+                <>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalLabel}>Customer</Text>
+                    <Text style={styles.modalValue}>{selectedReservation.customer_name}</Text>
+                  </View>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalLabel}>Email</Text>
+                    <Text style={styles.modalValue}>{selectedReservation.customer_email}</Text>
+                  </View>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalLabel}>Date & Time</Text>
+                    <Text style={styles.modalValue}>
+                      {formatDate(selectedReservation.reservation_date)} at {formatTime(selectedReservation.reservation_time)}
+                    </Text>
+                  </View>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalLabel}>Party Size</Text>
+                    <Text style={styles.modalValue}>{selectedReservation.party_size} guests</Text>
+                  </View>
+
+                  {(actionType === 'reject' || actionType === 'cancel') && (
+                    <View style={styles.reasonSection}>
+                      <Text style={styles.modalLabel}>
+                        {actionType === 'reject' ? 'Rejection Reason' : 'Cancellation Reason'} *
+                      </Text>
+                      <TextInput
+                        style={styles.reasonInput}
+                        placeholder={`Enter ${actionType} reason...`}
+                        value={reason}
+                        onChangeText={setReason}
+                        multiline
+                        numberOfLines={4}
+                        textAlignVertical="top"
+                      />
+                    </View>
+                  )}
+                </>
+              )}
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.closeButton]}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.closeButtonText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  actionType === 'confirm' ? styles.confirmButton :
+                  actionType === 'reject' ? styles.rejectButton :
+                  actionType === 'cancel' ? styles.cancelButton :
+                  actionType === 'arrived' ? styles.arrivedButton :
+                  styles.completedButton
+                ]}
+                onPress={confirmAction}
+                disabled={actioning}
+              >
+                {actioning ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.actionModalText}>
+                    {actionType === 'confirm' ? 'Confirm' :
+                     actionType === 'reject' ? 'Reject' :
+                     actionType === 'cancel' ? 'Cancel' :
+                     actionType === 'arrived' ? 'Mark Arrived' :
+                     'Complete Booking'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -256,5 +522,142 @@ const styles = StyleSheet.create({
   note: {
     fontFamily: 'PlusJakartaSans-Regular', fontSize: 13, color: Colors.primary,
     fontStyle: 'italic', marginTop: 4,
+  },
+  actionContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  confirmBtn: {
+    backgroundColor: '#4CAF50',
+  },
+  rejectBtn: {
+    backgroundColor: '#F44336',
+  },
+  cancelBtn: {
+    backgroundColor: '#9E9E9E',
+  },
+  actionBtnText: {
+    color: 'white',
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    paddingTop: 15,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  modalTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 18,
+    color: Colors.text,
+  },
+  modalBody: {
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+  },
+  modalSection: {
+    marginBottom: 20,
+  },
+  modalLabel: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 12,
+    color: Colors.gray,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  modalValue: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 15,
+    color: Colors.text,
+  },
+  reasonSection: {
+    marginBottom: 20,
+  },
+  reasonInput: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    padding: 12,
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.text,
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButton: {
+    backgroundColor: Colors.border,
+  },
+  closeButtonText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 15,
+    color: Colors.text,
+  },
+  confirmButton: {
+    backgroundColor: '#4CAF50',
+  },
+  rejectButton: {
+    backgroundColor: '#F44336',
+  },
+  cancelButton: {
+    backgroundColor: '#9E9E9E',
+  },
+  arrivedBtn: {
+    backgroundColor: '#2196F3',
+  },
+  completedBtn: {
+    backgroundColor: '#2BA15C',
+  },
+  arrivedButton: {
+    backgroundColor: '#2196F3',
+  },
+  completedButton: {
+    backgroundColor: '#2BA15C',
+  },
+  actionModalText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 15,
+    color: 'white',
   },
 });

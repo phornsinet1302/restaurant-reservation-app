@@ -1,23 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Animated,
-  ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
-import { API_CONFIG } from '@/app/config/apiConfig';
-
-const POLLING_INTERVAL = 3000; // Poll every 3 seconds
-const MAX_WAIT_TIME = 60000; // 1 minute max wait (reduced from 5 minutes for testing)
 
 export default function BookingWaitingConfirmationScreen() {
   const params = useLocalSearchParams<{
@@ -34,220 +25,13 @@ export default function BookingWaitingConfirmationScreen() {
   }>();
   const router = useRouter();
 
-  const [bookingStatus, setBookingStatus] = useState('pending');
-  const [loading, setLoading] = useState(true);
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const pulseAnim = new Animated.Value(0);
-  const bookingId = params.bookingId || '';
-
-  // Animate pulse effect
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [pulseAnim]);
-
-  // Polling mechanism to check booking status
-  useEffect(() => {
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    let timeInterval: ReturnType<typeof setInterval> | null = null;
-    let startTime = Date.now();
-
-    const pollBookingStatus = async () => {
-      try {
-        if (!bookingId) {
-          console.log('No booking ID provided');
-          return;
-        }
-
-        // Get auth token
-        const token = await AsyncStorage.getItem('token');
-        if (!token) {
-          console.error('No auth token found');
-          return;
-        }
-
-        console.log('📋 Polling booking status:', bookingId);
-        
-        const response = await axios.get(
-          `${API_CONFIG.BASE_URL}/api/reservations/${bookingId}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            }
-          }
-        );
-
-        const status = response.data?.status || 'pending';
-        console.log('✓ Booking status:', status);
-        setBookingStatus(status);
-
-        // If status changed from pending, stop polling and show result
-        if (status === 'confirmed') {
-          if (pollInterval) clearInterval(pollInterval);
-          if (timeInterval) clearInterval(timeInterval);
-          
-          // Create notification for confirmed booking
-          try {
-            const token = await AsyncStorage.getItem('token');
-            await axios.post(
-              `${API_CONFIG.BASE_URL}/api/notifications/test-create`,
-              {
-                title: '✅ Booking Confirmed',
-                message: `Your reservation at ${params.name} on ${params.date} at ${params.time} has been confirmed!`,
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                }
-              }
-            );
-            console.log('✓ Notification created');
-          } catch (notificationError: any) {
-            console.error('Failed to create notification:', notificationError.message);
-          }
-          
-          setTimeout(() => {
-            Alert.alert(
-              '✅ Booking Confirmed!',
-              'Your reservation has been confirmed by the restaurant.',
-              [
-                {
-                  text: 'Back Home',
-                  onPress: () => router.push('/'),
-                },
-              ]
-            );
-          }, 500);
-        } else if (status === 'rejected') {
-          if (pollInterval) clearInterval(pollInterval);
-          if (timeInterval) clearInterval(timeInterval);
-          
-          // Create notification for rejected booking
-          try {
-            const token = await AsyncStorage.getItem('token');
-            await axios.post(
-              `${API_CONFIG.BASE_URL}/api/notifications/test-create`,
-              {
-                title: '❌ Booking Rejected',
-                message: `Your reservation request at ${params.name} on ${params.date} could not be confirmed. Please try another date or time.`,
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                }
-              }
-            );
-            console.log('✓ Rejection notification created');
-          } catch (notificationError: any) {
-            console.error('Failed to create notification:', notificationError.message);
-          }
-          
-          setTimeout(() => {
-            Alert.alert(
-              '❌ Booking Rejected',
-              'Unfortunately, your reservation could not be confirmed. Please try another date or time.',
-              [
-                {
-                  text: 'Try Again',
-                  onPress: () => router.back(),
-                },
-              ]
-            );
-          }, 500);
-        }
-      } catch (error: any) {
-        console.error('Error polling booking status:', error.message);
-        if (error.response?.status === 401) {
-          console.error('Unauthorized - Token may be expired');
-        }
-      }
-    };
-
-    // Start polling
-    pollBookingStatus(); // Check immediately
-    pollInterval = setInterval(pollBookingStatus, POLLING_INTERVAL);
-
-    // Track elapsed time
-    timeInterval = setInterval(() => {
-      const newElapsed = Date.now() - startTime;
-      setElapsedTime(newElapsed);
-
-      // Stop polling after max wait time
-      if (newElapsed > MAX_WAIT_TIME) {
-        if (pollInterval) clearInterval(pollInterval);
-        if (timeInterval) clearInterval(timeInterval);
-        
-        // Create notification for pending booking (timeout)
-        (async () => {
-          try {
-            const token = await AsyncStorage.getItem('token');
-            await axios.post(
-              `${API_CONFIG.BASE_URL}/api/notifications/test-create`,
-              {
-                title: '📋 Booking Received',
-                message: `Your reservation request at ${params.name} has been received. The restaurant will confirm shortly. Check your bookings list for updates.`,
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                }
-              }
-            );
-            console.log('✓ Timeout notification created');
-          } catch (notificationError: any) {
-            console.error('Failed to create notification:', notificationError.message);
-          }
-        })();
-        
-        setTimeout(() => {
-          Alert.alert(
-            '✅ Booking Received',
-            'Your booking request has been received. The restaurant will confirm shortly. You can check your bookings list for updates.',
-            [
-              {
-                text: 'Back Home',
-                onPress: () => router.push('/'),
-              },
-              {
-                text: 'View Bookings',
-                onPress: () => router.replace('/(tabs)/bookings'),
-              },
-            ]
-          );
-        }, 500);
-      }
-    }, 100);
-
-    setLoading(false);
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-      if (timeInterval) clearInterval(timeInterval);
-    };
-  }, [bookingId, router]);
-
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+  const formatTime = (time: string) => {
+    if (!time) return '';
+    const [h, m] = time.split(':');
+    const hour = parseInt(h);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const h12 = hour % 12 || 12;
+    return `${h12}:${m} ${ampm}`;
   };
 
   return (
@@ -255,92 +39,73 @@ export default function BookingWaitingConfirmationScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
     >
-      {/* Animated waiting indicator */}
-      <View style={styles.loaderContainer}>
-        <Animated.View
-          style={[
-            styles.pulseCircle,
-            {
-              opacity: pulseAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.4, 1],
-              }),
-              transform: [
-                {
-                  scale: pulseAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 1.2],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Ionicons name="hourglass-outline" size={64} color={Colors.primary} />
-        </Animated.View>
+      {/* Success checkmark icon */}
+      <View style={styles.successContainer}>
+        <View style={styles.successCircle}>
+          <Ionicons name="checkmark" size={56} color="#2BA15C" />
+        </View>
       </View>
 
-      {/* Main message */}
-      <Text style={styles.title}>Waiting for Confirmation</Text>
+      {/* Thank you message */}
+      <Text style={styles.title}>Thank You for Your Booking!</Text>
       <Text style={styles.subtitle}>
-        Your booking has been sent to the restaurant. Please wait for confirmation.
+        Your reservation request has been submitted to the restaurant. You can view it in your Bookings.
       </Text>
 
-      {/* Booking details card */}
-      <View style={styles.card}>
-        <View style={styles.detailRow}>
-          <View style={styles.detailIcon}>
-            <Ionicons name="pricetag-outline" size={18} color={Colors.primary} />
-          </View>
-          <View style={styles.detailContent}>
-            <Text style={styles.detailLabel}>Reference</Text>
-            <Text style={styles.detailValue}>{params.ref}</Text>
-          </View>
+      {/* Receipt Card */}
+      <View style={styles.receiptCard}>
+        {/* Header */}
+        <View style={styles.receiptHeader}>
+          <Text style={styles.receiptTitle}>Booking Receipt</Text>
+          <Text style={styles.referenceCode}>{params.ref}</Text>
         </View>
 
-        <View style={styles.divider} />
+        <View style={styles.receiptDivider} />
 
-        <View style={styles.detailRow}>
-          <View style={styles.detailIcon}>
-            <Ionicons name="location-outline" size={18} color={Colors.primary} />
-          </View>
-          <View style={styles.detailContent}>
-            <Text style={styles.detailLabel}>Restaurant</Text>
-            <Text style={styles.detailValue}>{params.name}</Text>
-          </View>
+        {/* Restaurant */}
+        <View style={styles.receiptRow}>
+          <Text style={styles.receiptLabel}>Restaurant</Text>
+          <Text style={styles.receiptValue}>{params.name}</Text>
         </View>
 
-        <View style={styles.divider} />
-
-        <View style={styles.detailRow}>
-          <View style={styles.detailIcon}>
-            <Ionicons name="calendar-outline" size={18} color={Colors.primary} />
-          </View>
-          <View style={styles.detailContent}>
-            <Text style={styles.detailLabel}>Date & Time</Text>
-            <Text style={styles.detailValue}>{params.date} at {params.time}</Text>
-          </View>
+        {/* Date & Time */}
+        <View style={styles.receiptRow}>
+          <Text style={styles.receiptLabel}>Date & Time</Text>
+          <Text style={styles.receiptValue}>
+            {params.date} at {formatTime(params.time)}
+          </Text>
         </View>
 
-        <View style={styles.divider} />
-
-        <View style={styles.detailRow}>
-          <View style={styles.detailIcon}>
-            <Ionicons name="people-outline" size={18} color={Colors.primary} />
-          </View>
-          <View style={styles.detailContent}>
-            <Text style={styles.detailLabel}>Party Size</Text>
-            <Text style={styles.detailValue}>{params.guests} Guest(s)</Text>
-          </View>
+        {/* Party Size */}
+        <View style={styles.receiptRow}>
+          <Text style={styles.receiptLabel}>Number of Guests</Text>
+          <Text style={styles.receiptValue}>{params.guests} guest(s)</Text>
         </View>
-      </View>
 
-      {/* Waiting status info */}
-      <View style={styles.statusCard}>
-        <View style={styles.statusContent}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.statusText}>Waiting for Restaurant Response</Text>
-          <Text style={styles.elapsedTime}>Elapsed: {formatTime(elapsedTime)}</Text>
+        {/* Table */}
+        <View style={styles.receiptRow}>
+          <Text style={styles.receiptLabel}>Preferred Table</Text>
+          <Text style={styles.receiptValue}>Table {params.table}</Text>
+        </View>
+
+        {/* Customer Name */}
+        <View style={styles.receiptRow}>
+          <Text style={styles.receiptLabel}>Booking Name</Text>
+          <Text style={styles.receiptValue}>{params.bookingName}</Text>
+        </View>
+
+        {/* Customer Email */}
+        <View style={styles.receiptRow}>
+          <Text style={styles.receiptLabel}>Email</Text>
+          <Text style={styles.receiptValue}>{params.bookingEmail}</Text>
+        </View>
+
+        <View style={styles.receiptDivider} />
+
+        {/* Status */}
+        <View style={styles.statusBox}>
+          <Ionicons name="time" size={16} color={Colors.primary} />
+          <Text style={styles.statusText}>Awaiting Confirmation</Text>
         </View>
       </View>
 
@@ -348,38 +113,22 @@ export default function BookingWaitingConfirmationScreen() {
       <View style={styles.infoBox}>
         <Ionicons name="information-circle" size={20} color="#2BA15C" />
         <Text style={styles.infoText}>
-          You will receive a notification once the restaurant confirms or rejects your booking.
+          The restaurant will review your booking and send you a confirmation or alternative options.
         </Text>
       </View>
 
-      {/* Cancel button */}
+      {/* Action Buttons */}
       <TouchableOpacity
-        style={styles.cancelBtn}
-        onPress={() => {
-          Alert.alert(
-            'Cancel Request',
-            'Are you sure you want to cancel this booking request?',
-            [
-              { text: 'Keep Waiting', style: 'cancel' },
-              {
-                text: 'Cancel Request',
-                style: 'destructive',
-                onPress: () => router.back(),
-              },
-            ]
-          );
-        }}
+        style={styles.viewBookingsBtn}
+        onPress={() => router.push('/(tabs)/bookings')}
       >
-        <Text style={styles.cancelBtnText}>Cancel Request</Text>
+        <Ionicons name="calendar" size={20} color="white" />
+        <Text style={styles.viewBookingsBtnText}>View in Bookings</Text>
       </TouchableOpacity>
 
-      {/* Back Home button */}
       <TouchableOpacity
         style={styles.homeBtn}
-        onPress={() => {
-          // Stop polling by replacing the screen
-          router.push('/');
-        }}
+        onPress={() => router.push('/(tabs)')}
       >
         <Ionicons name="home" size={20} color={Colors.primary} />
         <Text style={styles.homeBtnText}>Back Home</Text>
@@ -395,23 +144,25 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 40,
     paddingBottom: 40,
   },
-  loaderContainer: {
+  successContainer: {
     width: '100%',
-    height: 180,
+    height: 140,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
-  pulseCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: `${Colors.primary}10`,
+  successCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#E8F8EF',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#2BA15C',
   },
   title: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -425,81 +176,75 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.gray,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
     lineHeight: 20,
   },
-  card: {
-    backgroundColor: Colors.cream,
+  receiptCard: {
+    backgroundColor: Colors.white,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  receiptHeader: {
     marginBottom: 16,
   },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingVertical: 8,
+  receiptTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 16,
+    color: Colors.text,
+    marginBottom: 4,
   },
-  detailIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: `${Colors.primary}10`,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 2,
+  referenceCode: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 14,
+    color: Colors.primary,
   },
-  detailContent: {
-    flex: 1,
+  receiptDivider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 12,
   },
-  detailLabel: {
+  receiptRow: {
+    marginBottom: 12,
+  },
+  receiptLabel: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 12,
     color: Colors.gray,
-    marginBottom: 2,
+    marginBottom: 4,
   },
-  detailValue: {
+  receiptValue: {
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 14,
     color: Colors.text,
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.border,
-    marginVertical: 8,
-  },
-  statusCard: {
-    backgroundColor: `${Colors.primary}10`,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    padding: 24,
-    marginBottom: 16,
-  },
-  statusContent: {
-    justifyContent: 'center',
+  statusBox: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: `${Colors.primary}10`,
+    borderRadius: 8,
   },
   statusText: {
     fontFamily: 'PlusJakartaSans-SemiBold',
-    fontSize: 16,
-    color: Colors.text,
-  },
-  elapsedTime: {
-    fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 12,
-    color: Colors.gray,
-    marginTop: 4,
+    fontSize: 13,
+    color: Colors.primary,
   },
   infoBox: {
     backgroundColor: '#F0F8F4',
     borderRadius: 12,
     borderLeftWidth: 4,
     borderLeftColor: '#2BA15C',
-    padding: 12,
+    padding: 14,
     flexDirection: 'row',
     gap: 12,
     marginBottom: 16,
@@ -511,23 +256,26 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
-  cancelBtn: {
+  viewBookingsBtn: {
     height: 50,
     borderRadius: 14,
-    borderWidth: 2,
-    borderColor: Colors.accent,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
   },
-  cancelBtnText: {
+  viewBookingsBtnText: {
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 15,
-    color: Colors.accent,
+    color: 'white',
   },
   homeBtn: {
     height: 50,
     borderRadius: 14,
-    backgroundColor: Colors.primary,
+    borderWidth: 2,
+    borderColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     flexDirection: 'row',
@@ -536,6 +284,6 @@ const styles = StyleSheet.create({
   homeBtnText: {
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 15,
-    color: '#FFF',
+    color: Colors.primary,
   },
 });
