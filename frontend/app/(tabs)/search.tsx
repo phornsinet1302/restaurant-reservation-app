@@ -256,12 +256,16 @@ export default function SearchScreen() {
         >
           {/* Placeholder Image */}
           <View style={styles.cardImageWrapper}>
-            <View style={styles.placeholderImage}>
-              <Ionicons name="restaurant" size={48} color={Colors.gray} />
-            </View>
+            {r.image_url ? (
+              <Image source={{ uri: r.image_url }} style={styles.cardImage} />
+            ) : (
+              <View style={styles.placeholderImage}>
+                <Ionicons name="restaurant" size={48} color={Colors.gray} />
+              </View>
+            )}
             <View style={styles.ratingBadge}>
               <Ionicons name="star" size={13} color="#FFFBF0" />
-              <Text style={styles.ratingText}>4.5</Text>
+              <Text style={styles.ratingText}>{r.rating || '4.5'}</Text>
             </View>
           </View>
 

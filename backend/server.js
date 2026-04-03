@@ -17,6 +17,7 @@ const merchantRoutes = require('./routes/merchantRoutes');
 const favoritesRoutes = require('./routes/favoritesRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const storiesRoutes = require('./routes/storiesRoutes');
+const menuPhotosRoutes = require('./routes/menuPhotosRoutes');
 const app = express();
 const { Server } = require('socket.io');
 
@@ -310,6 +311,87 @@ app.post("/debug/create-test-stories-with-video", async (req, res) => {
   }
 });
 
+// DEBUG ENDPOINT: Directly test creating a story (bypass merchant routes)
+app.post("/debug/create-story-direct/:restaurantId", async (req, res) => {
+  try {
+    const { restaurantId } = req.params;
+    const { title, description, imageUrl } = req.body;
+
+    console.log('📖 [DEBUG] Creating story directly:');
+    console.log('   restaurant_id:', restaurantId);
+    console.log('   title:', title);
+
+    // Verify restaurant exists
+    const { data: restaurant, error: restErr } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, name, is_published')
+      .eq('id', restaurantId)
+      .single();
+
+    if (restErr || !restaurant) {
+      console.error('❌ Restaurant not found:', restErr?.message);
+      return res.status(404).json({ error: 'Restaurant not found', details: restErr });
+    }
+
+    console.log('✅ Restaurant found:', restaurant.name, 'Published:', restaurant.is_published);
+
+    // Create story
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('stories')
+      .insert([
+        {
+          restaurant_id: restaurantId,
+          image_url: imageUrl || 'https://images.unsplash.com/photo-1504674900967-c8fbb19521f9?w=500',
+          title: title || 'Test Story',
+          description: description || 'This is a test story',
+          expires_at: expiresAt,
+        },
+      ])
+      .select();
+
+    if (error) {
+      console.error('❌ Error creating story:', error);
+      return res.status(400).json({ error: error.message, details: error });
+    }
+
+    console.log('✅ Story created successfully:', data[0]?.id);
+    res.status(201).json({
+      success: true,
+      message: 'Story created for debugging',
+      data: data[0],
+    });
+  } catch (error) {
+    console.error('❌ Unexpected error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DEBUG ENDPOINT: List all stories in the database
+app.get("/debug/all-stories", async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('stories')
+      .select('id, restaurant_id, title, description, created_at, expires_at')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error fetching stories:', error);
+      return res. status(400).json({ error: error.message });
+    }
+
+    console.log(`📖 Found ${data?.length || 0} total stories in DB`);
+    res.status(200).json({
+      total: data?.length || 0,
+      stories: data || [],
+      current_time: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.use('/api/auth', authRoutes); 
 app.use('/api/restaurants', restaurantRoutes);
 app.use('/api/tables', tableRoutes);
@@ -321,6 +403,7 @@ app.use('/api/merchant', merchantRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/location', locationRoutes);
 app.use('/api/stories', storiesRoutes);
+app.use('/api/menu-photos', menuPhotosRoutes);
 
 
 // --- NEW: SOCKET.IO SETUP ---

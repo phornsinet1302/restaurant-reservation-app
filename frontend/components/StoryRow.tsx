@@ -53,29 +53,29 @@ export default function StoryRow() {
   const loadRecentStories = async () => {
     try {
       setLoading(true);
-      console.log('📖 Fetching stories from:', `${API_URL}/api/stories/active`);
+      console.log('📖 Refreshing stories from customer view...');
+      
+      // Use the active stories endpoint to get fresh data
       const response = await axios.get(`${API_URL}/api/stories/active`);
       
-      console.log('📖 ============ API RESPONSE ============');
-      console.log('📖 Status:', response.status);
-      console.log('📖 Data:', response.data);
-      console.log('📖 Data length:', response.data?.length || 0);
+      console.log('📖 Active stories response:', {
+        restaurantCount: response.data?.length || 0,
+        timestamp: new Date().toISOString(),
+      });
       
       if (response.data && response.data.length > 0) {
         response.data.forEach((restaurant: any, idx: number) => {
-          console.log(`📖 Restaurant ${idx}:`, {
-            id: restaurant.id,
-            name: restaurant.name,
-            storiesCount: restaurant.stories?.length || 0,
-            stories: restaurant.stories,
-          });
+          console.log(`   Restaurant ${idx + 1}: "${restaurant.name}" - ${restaurant.stories?.length || 0} stories`);
         });
-      } else {
-        console.log('📖 No restaurants with stories returned');
       }
       
-      console.log('📖 ======================================');
-      setRestaurants(response.data || []);
+      // Filter to only restaurants with stories
+      const restaurantsWithStories = (response.data || []).filter(
+        (r: any) => r.stories && r.stories.length > 0
+      );
+      
+      console.log(`📖 Found ${restaurantsWithStories.length} restaurants with active stories`);
+      setRestaurants(restaurantsWithStories);
     } catch (error: any) {
       console.error('❌ Error loading stories:', error.response?.data || error.message);
       console.error('❌ Status:', error.response?.status);

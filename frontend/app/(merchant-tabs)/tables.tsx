@@ -79,9 +79,15 @@ export default function MerchantTablesScreen() {
             await axios.delete(`${API_CONFIG.BASE_URL}/api/tables/${table.id}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
+            
+            // Remove from UI immediately
             setTables(prev => prev.filter(t => t.id !== table.id));
-          } catch {
-            Alert.alert('Error', 'Failed to delete table');
+            
+            // Show success
+            Alert.alert('Deleted', `Table ${table.table_number} has been removed`);
+          } catch (err: any) {
+            console.error('Error deleting table:', err.response?.data || err.message);
+            Alert.alert('Error', err.response?.data?.error || 'Failed to delete table');
           }
         },
       },
@@ -93,21 +99,103 @@ export default function MerchantTablesScreen() {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
+
+    // Validate table number
+    const tableNum = parseInt(newTableNumber);
+    if (isNaN(tableNum) || tableNum <= 0) {
+      Alert.alert('Invalid Table Number', 'Table number must be a positive number (e.g., 1, 2, 3)');
+      return;
+    }
+
+    // Validate capacity
+    const cap = parseInt(newCapacity);
+    if (isNaN(cap) || cap <= 0) {
+      Alert.alert('Invalid Capacity', 'Capacity must be a positive number (e.g., 2, 4, 6)');
+      return;
+    }
+
+    // Check if table number already exists locally
+    const tableExists = tables.some(t => t.table_number === tableNum);
+    if (tableExists) {
+      Alert.alert('Duplicate Table Number', `Table ${tableNum} already exists. Each table must have a unique number.`);
+      return;
+    }
+
     try {
       const token = await AsyncStorage.getItem('token');
       const res = await axios.post(`${API_CONFIG.BASE_URL}/api/tables`,
-        { restaurant_id: restaurantId, table_number: parseInt(newTableNumber), capacity: parseInt(newCapacity) },
+        { restaurant_id: restaurantId, table_number: tableNum, capacity: cap },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      
       if (res.data) {
         const created = Array.isArray(res.data) ? res.data[0] : res.data;
+        
+        // Add to local state immediately
         setTables(prev => [...prev, created]);
+        
+        // Reset form
+        setShowAddModal(false);
+        setNewTableNumber('');
+        setNewCapacity('');
+        
+        // Show success message
+        Alert.alert('Success', `Table ${created.table_number} (${created.capacity} seats) has been added and is now live for customers!`);
+        
+        // Refresh from server to ensure sync
+        setTimeout(() => loadData(), 500);
       }
-      setShowAddModal(false);
-      setNewTableNumber('');
-      setNewCapacity('');
-    } catch {
-      Alert.alert('Error', 'Failed to add table');
+    } catch (err: any) {
+      console.log('📌 [handleAddTable] Error caught:');
+      console.log('   Status:', err.response?.status);
+      console.log('   Data:', err.response?.data);
+      
+      // Handle 409 Conflict - Duplicate Table
+      if (err.response?.status === 409) {
+        console.log('   → Duplicate table detected');
+        Alert.alert(
+          'Table Number Already Exists',
+          `Table ${newTableNumber} already exists for this restaurant. Please use a different table number (e.g., ${tableNum + 1})`,
+          [{ text: 'OK', onPress: () => console.log('Alert dismissed') }]
+        );
+        return;
+      }
+      
+      // Handle 400 Bad Request
+      if (err.response?.status === 400) {
+        console.log('   → Invalid input');
+        Alert.alert('Invalid Input', err.response.data?.error || 'Please check your inputs');
+        return;
+      }
+      
+      // Handle 401 Unauthorized
+      if (err.response?.status === 401) {
+        console.log('   → Not authorized');
+        Alert.alert('Not Authorized', 'Please log in again');
+        return;
+      }
+      
+      // Handle 403 Forbidden
+      if (err.response?.status === 403) {
+        console.log('   → Forbidden');
+        Alert.alert('Permission Denied', err.response.data?.error || 'You cannot manage tables for this restaurant');
+        return;
+      }
+      
+      // Handle other errors
+      if (err.response?.data?.error) {
+        console.log('   → API error:', err.response.data.error);
+        Alert.alert('Error', err.response.data.error);
+        return;
+      }
+      
+      if (err.message) {
+        console.log('   → Exception:', err.message);
+        Alert.alert('Error', err.message);
+        return;
+      }
+      
+      Alert.alert('Error', 'Failed to add table. Please try again.');
     }
   };
 

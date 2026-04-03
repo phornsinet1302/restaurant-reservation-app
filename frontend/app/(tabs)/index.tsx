@@ -33,6 +33,7 @@ type Restaurant = {
   distance: string;
   rating: string;
   image: ImageSourcePropType;
+  image_url?: string;
 };
 
 const CATEGORIES = [
@@ -149,12 +150,20 @@ export default function HomeScreen() {
         hours: r.opening_hours || 'Check hours',
         distance: '0.5 miles', // TODO: Calculate from user location
         rating: r.rating || '4.5',
+        // Use uploaded cover image if available, otherwise fall back to default
         image: DEFAULT_RESTAURANT_IMAGES[`r${(index % 4) + 1}`] || DEFAULT_RESTAURANT_IMAGES.r1,
+        image_url: r.image_url || null,
         description: r.description || '',
         address: r.address || '',
         category: r.category || '',
         cuisine: r.cuisine || '',
       })) || [];
+      
+      console.log('📱 [HomeScreen] Loaded restaurants:', apiRestaurants.map((r: any) => ({ 
+        id: r.id, 
+        name: r.name, 
+        hasCustomImage: !!r.image_url 
+      })));
       
       setRestaurants(apiRestaurants);
     } catch (error) {
@@ -307,7 +316,11 @@ export default function HomeScreen() {
         >
           {/* Image with rating badge */}
           <View style={styles.restaurantImageWrapper}>
-            <Image source={restaurant.image} style={styles.restaurantImage} />
+            {restaurant.image_url ? (
+              <Image source={{ uri: restaurant.image_url }} style={styles.restaurantImage} />
+            ) : (
+              <Image source={restaurant.image} style={styles.restaurantImage} />
+            )}
             <View style={styles.ratingBadge}>
               <Ionicons name="star" size={13} color="#FFFBF0" />
               <Text style={styles.ratingText}>{restaurant.rating}</Text>

@@ -131,10 +131,10 @@ export default function ModifyBookingScreen() {
         setLoading(true);
         setError('');
         
-        console.log('Fetching tables for restaurant:', restaurantId);
+        console.log('📋 Fetching tables for restaurant:', restaurantId);
         
         if (!restaurantId) {
-          console.warn('No restaurantId provided');
+          console.warn('⚠️ No restaurantId provided');
           // Use mock tables if no restaurant ID
           const mockTables = [
             { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
@@ -153,33 +153,44 @@ export default function ModifyBookingScreen() {
           `${API_URL}/api/tables?restaurant_id=${restaurantId}`
         );
         
-        console.log('Tables response:', response.data);
+        console.log('📊 Tables API response:', response.data);
         
-        const tablesData = response.data || [];
+        const allTables = response.data || [];
+        console.log(`   Total tables from API: ${allTables.length}`);
         
-        if (tablesData.length === 0) {
-          // Use mock tables if no tables found in database
-          const mockTables = [
-            { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
-            { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
-            { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
-            { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
-            { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
-          ];
-          setTables(mockTables);
-          setSelectedTableId(mockTables[0].id);
-        } else {
-          setTables(tablesData);
-          // Select first available table by default
-          const availableTable = tablesData.find((t: any) => t.status === 'available');
-          if (availableTable) {
-            setSelectedTableId(availableTable.id);
+        // Filter only available tables for customers
+        const availableTables = allTables.filter((t: any) => t.status === 'available');
+        console.log(`   Available tables: ${availableTables.length}`);
+        
+        if (availableTables.length === 0) {
+          if (allTables.length === 0) {
+            console.warn('⚠️ No tables found for this restaurant');
+            // Use mock tables if no tables found in database
+            const mockTables = [
+              { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
+              { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
+              { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
+              { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
+              { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
+            ];
+            setTables(mockTables);
+            setSelectedTableId(mockTables[0].id);
           } else {
-            setSelectedTableId(tablesData[0].id);
+            console.warn('⚠️ No available tables at the moment');
+            setError('Sorry, no tables are available right now. Please try again later.');
+            setTables(allTables); // Show all tables but disable booking
           }
+        } else {
+          setTables(availableTables);
+          // Select first available table by default
+          setSelectedTableId(availableTables[0].id);
+          console.log(`✅ Selected table: ${availableTables[0].table_number}`);
         }
       } catch (err: any) {
-        // Silently use mock tables as fallback - API may not be available or restaurantId may be invalid
+        console.error('❌ Error fetching tables:', err.message);
+        console.error('   Response:', err.response?.data);
+        
+        // Silently use mock tables as fallback
         const mockTables = [
           { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
           { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
@@ -189,7 +200,7 @@ export default function ModifyBookingScreen() {
         ];
         setTables(mockTables);
         setSelectedTableId(mockTables[0].id);
-        console.log('Using mock tables (API unavailable or invalid restaurant)');
+        console.log('⚠️ Using fallback mock tables');
       } finally {
         setLoading(false);
       }
@@ -219,20 +230,74 @@ export default function ModifyBookingScreen() {
     return { table: 3, seats: 8 };
   }, [guests]);
 
+  // Email validation helper
+  const isValidEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
   const handleSave = async () => {
-    // Validation
+    // ===== COMPREHENSIVE VALIDATION =====
+    console.log('🔍 Starting booking validation...');
+    
+    // 1. Validate Name
     if (!bookingName.trim()) {
-      Alert.alert('Required', 'Please enter your name');
+      Alert.alert('Name Required', 'Please enter your full name for the booking');
       return;
     }
+    if (bookingName.trim().length < 2) {
+      Alert.alert('Invalid Name', 'Name must be at least 2 characters long');
+      return;
+    }
+    console.log('✓ Name valid:', bookingName.trim());
+
+    // 2. Validate Email
     if (!bookingEmail.trim()) {
-      Alert.alert('Required', 'Please enter your email');
+      Alert.alert('Email Required', 'Please enter your email address');
       return;
     }
+    if (!isValidEmail(bookingEmail.trim())) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address (e.g., user@example.com)');
+      return;
+    }
+    console.log('✓ Email valid:', bookingEmail.trim());
+
+    // 3. Validate Guests
+    if (guests < 1 || guests > 20) {
+      Alert.alert('Invalid Party Size', 'Please select between 1 and 20 guests');
+      return;
+    }
+    console.log('✓ Party size valid:', guests);
+
+    // 4. Validate Date
+    if (!selectedDate) {
+      Alert.alert('Date Required', 'Please select a date for your reservation');
+      return;
+    }
+    console.log('✓ Date valid:', selectedDate.toDateString());
+
+    // 5. Validate Time
+    if (!selectedTime) {
+      Alert.alert('Time Required', 'Please select a time for your reservation');
+      return;
+    }
+    console.log('✓ Time valid:', selectedTime);
+
+    // 6. Validate Table Selection
     if (!selectedTableId) {
-      Alert.alert('Required', 'Please select a table');
+      Alert.alert('Table Required', 'Please select a table from the available options');
       return;
     }
+    console.log('✓ Table selected:', selectedTableId);
+
+    // 7. Validate Restaurant ID
+    if (!restaurantId || !restaurantId.trim()) {
+      Alert.alert('Restaurant Error', 'Restaurant information is missing. Please go back and try again');
+      return;
+    }
+    console.log('✓ Restaurant ID valid:', restaurantId);
+
+    console.log('✅ All validations passed!');
 
     try {
       setSubmitting(true);
@@ -240,12 +305,7 @@ export default function ModifyBookingScreen() {
       // Get auth token with detailed logging
       console.log('=== BOOKING REQUEST START ===');
       const token = await AsyncStorage.getItem('token');
-      console.log('Token retrieved from storage:', token ? `✓ ${token.length} chars` : '❌ NULL');
-      
-      if (token) {
-        console.log('Token first 30 chars:', token.substring(0, 30) + '...');
-        console.log('Token last 10 chars:', '...' + token.substring(token.length - 10));
-      }
+      console.log('✓ Token retrieved from storage:', token ? `${token.length} chars` : '❌ NULL');
       
       if (!token) {
         Alert.alert(
@@ -267,12 +327,27 @@ export default function ModifyBookingScreen() {
       const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
       const timeStr = convertTimeToHHMM(selectedTime);
 
-      console.log('Booking payload:', {
-        restaurantId,
-        tableId: selectedTableId,
-        date: dateStr,
-        time: timeStr,
-        guests,
+      // Build complete booking payload
+      const bookingPayload = {
+        restaurant_id: restaurantId.trim(),
+        table_id: selectedTableId,
+        reservation_date: dateStr,
+        reservation_time: timeStr,
+        party_size: guests,
+        special_request: specialRequests.trim(),
+        customer_name: bookingName.trim(),
+        customer_email: bookingEmail.trim(),
+      };
+
+      console.log('📦 Booking payload:', {
+        restaurant_id: bookingPayload.restaurant_id,
+        table_id: bookingPayload.table_id,
+        reservation_date: bookingPayload.reservation_date,
+        reservation_time: bookingPayload.reservation_time,
+        party_size: bookingPayload.party_size,
+        customer_name: bookingPayload.customer_name,
+        customer_email: bookingPayload.customer_email,
+        special_request: bookingPayload.special_request || '(none)',
       });
 
       // Make the API request
@@ -281,29 +356,19 @@ export default function ModifyBookingScreen() {
         'Content-Type': 'application/json',
       };
       
-      console.log('Request headers:', {
-        Authorization: `Bearer [TOKEN-${token.length}-CHARS]`,
-        'Content-Type': 'application/json',
-      });
-      
-      console.log('API URL:', `${API_URL}/api/reservations`);
+      console.log('Request URL:', `${API_URL}/api/reservations`);
+      console.log('Request method: POST');
 
       const response = await axios.post(
         `${API_URL}/api/reservations`,
-        {
-          restaurant_id: restaurantId,
-          table_id: selectedTableId,
-          reservation_date: dateStr,
-          reservation_time: timeStr,
-          party_size: guests,
-          special_request: specialRequests,
-        },
+        bookingPayload,
         { headers }
       );
 
-      console.log('✓ Booking successful:', response.data);
+      console.log('✅ Booking successful!');
+      console.log('Response:', response.data);
 
-      const booking = response.data[0] || response.data;
+      const booking = Array.isArray(response.data) ? response.data[0] : response.data;
 
       // Navigate to confirmation
       router.push({
@@ -317,8 +382,8 @@ export default function ModifyBookingScreen() {
           time: selectedTime,
           guests: String(guests),
           table: selectedTableId,
-          bookingName,
-          bookingEmail,
+          bookingName: bookingName.trim(),
+          bookingEmail: bookingEmail.trim(),
           address: params.address || '',
           specialRequests,
         },
@@ -331,7 +396,6 @@ export default function ModifyBookingScreen() {
       console.error('Status text:', err.response?.statusText);
       console.error('Response data:', err.response?.data);
       console.error('Request URL:', err.config?.url);
-      console.error('Request headers:', err.config?.headers);
       
       let errorMsg = 'Booking failed. Please try again.';
       

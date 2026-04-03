@@ -15,6 +15,7 @@ type Availability = 'available' | 'sold_out' | 'time_based';
 
 export default function AddMenuItemScreen() {
   const router = useRouter();
+  const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('');
@@ -22,6 +23,43 @@ export default function AddMenuItemScreen() {
   const [availability, setAvailability] = useState<Availability>('available');
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    loadRestaurantId();
+  }, []);
+
+  const loadRestaurantId = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        console.warn('⚠️ [loadRestaurantId] No token found');
+        return;
+      }
+
+      console.log('🍽️ [loadRestaurantId] Fetching restaurant for merchant...');
+      const url = `${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`;
+      console.log('   URL:', url);
+      
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log('📊 [loadRestaurantId] Response:', response.data);
+
+      if (response.data?.data?.id) {
+        console.log('✅ Restaurant found:', response.data.data.id);
+        setRestaurantId(response.data.data.id);
+      } else {
+        console.error('❌ No restaurant ID in response:', response.data);
+        Alert.alert('Error', 'Could not find your restaurant. Please create one first.');
+      }
+    } catch (error: any) {
+      console.error('❌ [loadRestaurantId] Error:', error.message);
+      console.error('   Status:', error.response?.status);
+      console.error('   Data:', error.response?.data);
+      Alert.alert('Error', 'Failed to load your restaurant');
+    }
+  };
 
   const adjustPrice = (delta: number) => {
     const current = parseFloat(price) || 0;
@@ -57,32 +95,72 @@ export default function AddMenuItemScreen() {
       Alert.alert('Error', 'Please enter a valid price');
       return;
     }
+    if (!restaurantId) {
+      Alert.alert('Error', 'Restaurant not found. Please try again.');
+      return;
+    }
 
     setSubmitting(true);
     try {
       const token = await AsyncStorage.getItem('token');
 
+      let imageUrl: string | null = null;
+
+      // Upload image to backend if one was selected
+      if (imageUri) {
+        console.log('📸 [handleSubmit] Uploading image...');
+        
+        const formData = new FormData();
+        formData.append('file', {
+          uri: imageUri,
+          type: 'image/jpeg',
+          name: `menu-${Date.now()}.jpg`,
+        } as any);
+
+        try {
+          const uploadRes = await axios.post(
+            `${API_CONFIG.BASE_URL}/api/media/upload-image`,
+            formData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'multipart/form-data',
+              },
+            }
+          );
+
+          imageUrl = uploadRes.data?.image_url;
+          console.log('✅ Image uploaded:', imageUrl);
+        } catch (uploadError: any) {
+          console.warn('⚠️ Image upload failed, continuing without image:', uploadError.message);
+          // Continue without image
+        }
+      }
+
       const payload: any = {
+        restaurant_id: restaurantId,
         name: name.trim(),
         description: description.trim(),
         category: category.trim() || 'Main',
         price: parseFloat(price),
+        image_url: imageUrl,
         is_available: availability !== 'sold_out',
         is_time_based: availability === 'time_based',
       };
 
-      if (imageUri) {
-        payload.image_url = imageUri;
-      }
+      console.log('📤 [handleSubmit] Submitting menu item:', payload);
 
-      await axios.post(`${API_CONFIG.BASE_URL}/api/menu`, payload, {
+      const response = await axios.post(`${API_CONFIG.BASE_URL}/api/menu`, payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
+
+      console.log('✅ [handleSubmit] Success:', response.data);
 
       Alert.alert('Success', 'Menu item added successfully!', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
+      console.error('❌ [handleSubmit] Error:', error.response?.data || error.message);
       const msg = error?.response?.data?.error || 'Failed to add menu item';
       Alert.alert('Error', msg);
     } finally {
