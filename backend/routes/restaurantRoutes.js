@@ -20,6 +20,12 @@ router.post('/merchant/publish', protect, restaurantController.publishRestaurant
 // 9. Unpublish Restaurant
 router.post('/merchant/unpublish', protect, restaurantController.unpublishRestaurant);
 
+// DEBUG: Check all restaurants' image URLs
+router.get('/debug/images', restaurantController.debugRestaurantImages);
+
+// ADMIN: Set restaurant image URL (for testing/fixing)
+router.post('/admin/set-image-url', restaurantController.setRestaurantImageUrl);
+
 // --- PUBLIC ROUTES (Customer & Guest Mode) ---
 
 // 1. Search/List Restaurants

@@ -20,6 +20,7 @@ router.patch('/merchant/:id/mark-completed', reservationController.merchantMarkC
 router.patch('/:id/mark-arrived', reservationController.customerMarkArrived);
 router.patch('/:id/mark-completed', reservationController.customerMarkCompleted);
 router.patch('/:id/status', reservationController.updateReservationStatus);
+router.patch('/:id/update', reservationController.updateReservationDetails);
 router.post('/:id/check-in', reservationController.checkIn);
 router.post('/:id/machine-confirm', reservationController.simulateMachineConfirmation);
 

@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useFocusEffect } from '@react-navigation/native';
+import { useReservationSocket } from '@/hooks/useReservationSocket';
 
 type TabKey = 'upcoming' | 'completed' | 'cancelled';
 
@@ -39,6 +40,7 @@ export default function MerchantBookingsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
+  const [restaurantId, setRestaurantId] = useState<string | undefined>(undefined);
 
   // Modal states for actions
   const [modalVisible, setModalVisible] = useState(false);
@@ -63,6 +65,13 @@ export default function MerchantBookingsScreen() {
       console.log('✅ Bookings loaded:', res.data);
       setReservations(res.data || []);
 
+      // Extract restaurant ID from first reservation (all reservations are from same restaurant)
+      if (res.data && res.data.length > 0) {
+        const restId = res.data[0].restaurant_id;
+        setRestaurantId(restId);
+        console.log('🏪 Restaurant ID set:', restId);
+      }
+
       // Restaurant name is already shown in card - no need to fetch separately
       // The booking cards display the restaurant name from state
     } catch (error: any) {
@@ -75,6 +84,32 @@ export default function MerchantBookingsScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  // Handle real-time reservation updates from WebSocket (must be after loadData)
+  const handleReservationUpdate = useCallback((update: any) => {
+    console.log('📢 Reservation update received:', update);
+    
+    // Show a notification
+    let message = '';
+    if (update.action === 'confirmed') message = '✅ Booking confirmed';
+    else if (update.action === 'rejected') message = '❌ Booking rejected';
+    else if (update.action === 'cancelled' || update.action === 'cancelled_by_customer') message = '🚫 Booking cancelled';
+    else if (update.action === 'arrived') message = '🚗 Guest arrived';
+    else if (update.action === 'completed') message = '✅ Booking completed';
+    else if (update.action === 'modified') message = '✏️ Booking modified by customer';
+    
+    if (message) {
+      console.log('📢', message);
+    }
+    
+    // Refresh the bookings list to show updated status (slight delay to let backend update)
+    setTimeout(() => {
+      loadData();
+    }, 500);
+  }, [loadData]);
+
+  // WebSocket hook
+  useReservationSocket(restaurantId, handleReservationUpdate);
 
   useFocusEffect(
     useCallback(() => {
