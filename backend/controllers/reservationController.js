@@ -295,3 +295,545 @@ exports.simulateMachineConfirmation = async (req, res) => {
     res.status(500).json({ error: "Failed to process machine confirmation: " + err.message });
   }
 };
+
+// ===== MERCHANT ENDPOINTS =====
+
+// 8. GET MERCHANT'S PENDING RESERVATIONS (GET)
+exports.getMerchantPendingReservations = async (req, res) => {
+  try {
+    const merchantId = req.user.id;
+
+    console.log('📋 [getMerchantPendingReservations] Merchant ID:', merchantId);
+
+    // Get merchant's restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id')
+      .eq('merchant_id', merchantId)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found for merchant');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    const restaurantId = restaurantData.id;
+
+    // Get all reservations for this restaurant
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .select('*, tables(table_number)')
+      .eq('restaurant_id', restaurantId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.log('❌ Query error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.log(`✅ Found ${data.length} reservations`);
+    res.status(200).json(data);
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to fetch reservations: " + err.message });
+  }
+};
+
+// 9. MERCHANT CONFIRMS RESERVATION (PATCH)
+// When confirmed, the table is locked (set to occupied)
+exports.merchantConfirmReservation = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const merchantId = req.user.id;
+
+    console.log('✅ [merchantConfirmReservation] Reservation ID:', reservationId, 'Merchant ID:', merchantId);
+
+    // Get reservation first (with table_id)
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status, table_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Check if merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== merchantId) {
+      console.log('❌ Unauthorized - merchant does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to confirm this reservation' });
+    }
+
+    // Update reservation status to confirmed
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'confirmed',
+        merchant_confirmed_at: new Date().toISOString()
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Lock the table by setting status to occupied
+    if (reservationData.table_id) {
+      console.log('   🔒 Locking table:', reservationData.table_id);
+      const { error: tableError } = await supabaseAdmin
+        .from('tables')
+        .update({ status: 'occupied' })
+        .eq('id', reservationData.table_id);
+
+      if (tableError) {
+        console.log('   ⚠️  Warning: Table could not be locked:', tableError.message);
+        // Don't fail the whole request if table update fails
+      } else {
+        console.log('   ✅ Table locked successfully');
+      }
+    }
+
+    console.log('✅ Reservation confirmed successfully');
+    res.status(200).json({ message: 'Reservation confirmed', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to confirm reservation: " + err.message });
+  }
+};
+
+// 10. MERCHANT REJECTS RESERVATION (PATCH)
+exports.merchantRejectReservation = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const { reason } = req.body;
+    const merchantId = req.user.id;
+
+    console.log('❌ [merchantRejectReservation] Reservation ID:', reservationId, 'Reason:', reason);
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    // Get reservation first
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Check if merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== merchantId) {
+      console.log('❌ Unauthorized - merchant does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to reject this reservation' });
+    }
+
+    // Update reservation status to rejected
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'rejected',
+        rejection_reason: reason.trim(),
+        merchant_rejected_at: new Date().toISOString()
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.log('✅ Reservation rejected successfully');
+    res.status(200).json({ message: 'Reservation rejected', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to reject reservation: " + err.message });
+  }
+};
+
+// 11. MERCHANT CANCELS RESERVATION (PATCH)
+exports.merchantCancelReservation = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const { reason } = req.body;
+    const merchantId = req.user.id;
+
+    console.log('🚫 [merchantCancelReservation] Reservation ID:', reservationId, 'Reason:', reason);
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Cancellation reason is required' });
+    }
+
+    // Get reservation first
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Check if merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== merchantId) {
+      console.log('❌ Unauthorized - merchant does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to cancel this reservation' });
+    }
+
+    // Update reservation status to cancelled
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'cancelled',
+        cancellation_reason: reason.trim()
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.log('✅ Reservation cancelled successfully');
+    res.status(200).json({ message: 'Reservation cancelled', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to cancel reservation: " + err.message });
+  }
+};
+
+// 12. MERCHANT MARKS GUEST ARRIVED (PATCH)
+// Called by merchant when guest arrives at restaurant
+exports.customerMarkArrived = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const userId = req.user.id;
+
+    console.log('🚗 [markArrived] Reservation ID:', reservationId, 'User ID:', userId);
+
+    // Get reservation with restaurant info
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status, table_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Verify merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== userId) {
+      console.log('❌ Unauthorized - user does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to update this reservation' });
+    }
+
+    if (reservationData.status !== 'confirmed') {
+      console.log('❌ Reservation must be confirmed before marking as arrived');
+      return res.status(400).json({ error: 'Reservation must be confirmed first' });
+    }
+
+    // Update reservation status to arrived
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'arrived'
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.log('✅ Reservation marked as arrived');
+    res.status(200).json({ message: 'Reservation marked as arrived', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to mark reservation as arrived: " + err.message });
+  }
+};
+
+// 13. MERCHANT MARKS GUEST COMPLETED (PATCH)
+// When this is called, the table becomes available again
+exports.customerMarkCompleted = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const userId = req.user.id;
+
+    console.log('✅ [markCompleted] Reservation ID:', reservationId, 'User ID:', userId);
+
+    // Get reservation with restaurant info
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status, table_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Verify merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== userId) {
+      console.log('❌ Unauthorized - user does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to update this reservation' });
+    }
+
+    if (reservationData.status !== 'arrived') {
+      console.log('❌ Reservation must be marked as arrived before completing');
+      return res.status(400).json({ error: 'Reservation must be marked as arrived first' });
+    }
+
+    // Update reservation status to completed
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'completed'
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Release the table back to available status
+    if (reservationData.table_id) {
+      console.log('   🔓 Releasing table:', reservationData.table_id);
+      const { error: tableError } = await supabaseAdmin
+        .from('tables')
+        .update({ status: 'available' })
+        .eq('id', reservationData.table_id);
+
+      if (tableError) {
+        console.log('   ⚠️  Warning: Table status could not be updated:', tableError.message);
+        // Don't fail the request if table update fails
+      } else {
+        console.log('   ✅ Table released to available');
+      }
+    }
+
+    console.log('✅ Reservation completed successfully');
+    res.status(200).json({ message: 'Reservation completed', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to mark reservation as completed: " + err.message });
+  }
+};
+
+// 14. MERCHANT MARKS GUEST AS ARRIVED (PATCH)
+exports.merchantMarkArrived = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const merchantId = req.user.id;
+
+    console.log('🚗 [merchantMarkArrived] Reservation ID:', reservationId, 'Merchant ID:', merchantId);
+
+    // Get reservation first
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status, table_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Check if merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== merchantId) {
+      console.log('❌ Unauthorized - merchant does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to mark this reservation as arrived' });
+    }
+
+    if (reservationData.status !== 'confirmed') {
+      console.log('❌ Reservation must be confirmed before marking as arrived');
+      return res.status(400).json({ error: 'Reservation must be confirmed first' });
+    }
+
+    // Update reservation status to arrived
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'arrived'
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.log('✅ Reservation marked as arrived');
+    res.status(200).json({ message: 'Reservation marked as arrived', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to mark reservation as arrived: " + err.message });
+  }
+};
+
+// 15. MERCHANT MARKS GUEST AS COMPLETED (PATCH)
+// When this is called, the table becomes available again
+exports.merchantMarkCompleted = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const merchantId = req.user.id;
+
+    console.log('✅ [merchantMarkCompleted] Reservation ID:', reservationId, 'Merchant ID:', merchantId);
+
+    // Get reservation first
+    const { data: reservationData, error: reservationError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, status, table_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationError || !reservationData) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Check if merchant owns the restaurant
+    const { data: restaurantData, error: restaurantError } = await supabaseAdmin
+      .from('restaurants')
+      .select('id, merchant_id')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+
+    if (restaurantError || !restaurantData) {
+      console.log('❌ Restaurant not found');
+      return res.status(404).json({ error: 'Restaurant not found' });
+    }
+
+    if (restaurantData.merchant_id !== merchantId) {
+      console.log('❌ Unauthorized - merchant does not own this restaurant');
+      return res.status(403).json({ error: 'You do not have permission to mark this reservation as completed' });
+    }
+
+    if (reservationData.status !== 'arrived') {
+      console.log('❌ Reservation must be marked as arrived before completing');
+      return res.status(400).json({ error: 'Reservation must be marked as arrived first' });
+    }
+
+    // Update reservation status to completed
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        status: 'completed'
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) {
+      console.log('❌ Database error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Release the table back to available status
+    if (reservationData.table_id) {
+      console.log('   🔓 Releasing table:', reservationData.table_id);
+      const { error: tableError } = await supabaseAdmin
+        .from('tables')
+        .update({ status: 'available' })
+        .eq('id', reservationData.table_id);
+
+      if (tableError) {
+        console.log('   ⚠️  Warning: Table status could not be updated:', tableError.message);
+        // Don't fail the request if table update fails
+      } else {
+        console.log('   ✅ Table released to available');
+      }
+    }
+
+    console.log('✅ Reservation completed successfully');
+    res.status(200).json({ message: 'Reservation completed', data: data[0] });
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: "Failed to mark reservation as completed: " + err.message });
+  }
+};
