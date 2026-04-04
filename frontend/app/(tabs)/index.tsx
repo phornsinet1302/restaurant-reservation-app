@@ -21,6 +21,7 @@ import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
 import StoryRow from '@/components/StoryRow';
+import * as Location from 'expo-location';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -34,6 +35,8 @@ type Restaurant = {
   rating: string;
   image: ImageSourcePropType;
   image_url?: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 const CATEGORIES = [
@@ -48,6 +51,36 @@ const DEFAULT_RESTAURANT_IMAGES: { [key: string]: ImageSourcePropType } = {
   r2: require('@/assets/restaurant-2.jpg'),
   r3: require('@/assets/restaurant-3.jpg'),
   r4: require('@/assets/restaurant-4.jpg'),
+};
+
+/* ── Helper Functions ── */
+
+// Calculate distance between two coordinates using Haversine formula (returns km)
+const calculateDistance = (
+  userLat: number,
+  userLon: number,
+  restLat: number,
+  restLon: number
+): number => {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (restLat - userLat) * (Math.PI / 180);
+  const dLon = (restLon - userLon) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(userLat * (Math.PI / 180)) *
+      Math.cos(restLat * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// Format distance for display
+const formatDistance = (distanceKm: number): string => {
+  if (distanceKm < 1) {
+    return `${(distanceKm * 1000).toFixed(0)}m`;
+  }
+  return `${distanceKm.toFixed(1)}km`;
 };
 
 /* ── Component ── */
@@ -65,9 +98,15 @@ export default function HomeScreen() {
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
+  
+  // Location tracking
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [userLocationAddress, setUserLocationAddress] = useState<string>('Phnom Penh');
 
   useEffect(() => {
     loadUserData();
+    requestLocationPermission();
     loadRestaurants();
     updateGreeting();
   }, []);
@@ -76,9 +115,70 @@ export default function HomeScreen() {
   useFocusEffect(
     React.useCallback(() => {
       loadUserData();
+      requestLocationPermission();
       loadRestaurants();
     }, [])
   );
+
+  // Request location permission and get current location
+  const requestLocationPermission = async () => {
+    try {
+      console.log('📍 Requesting location permission...');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status === 'granted') {
+        console.log('✅ Location permission granted');
+        await getCurrentLocation();
+      } else {
+        console.warn('⚠️ Location permission denied');
+        setLocationError('Location permission denied. Using default location.');
+        // Use default location (Phnom Penh, Cambodia)
+        setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      }
+    } catch (error) {
+      console.error('❌ Error requesting location permission:', error);
+      setLocationError('Could not get location');
+      // Use default location as fallback
+      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+    }
+  };
+
+  // Get user's current location
+  const getCurrentLocation = async () => {
+    try {
+      console.log('📍 Getting current location...');
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      
+      const { latitude, longitude } = location.coords;
+      console.log(`✅ Current location: ${latitude}, ${longitude}`);
+      setUserLocation({ latitude, longitude });
+      
+      // Get address from coordinates using reverse geocoding
+      try {
+        const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (addresses && addresses.length > 0) {
+          const address = addresses[0];
+          const cityName = address.district || address.city || address.region || 'Your Location';
+          setUserLocationAddress(cityName);
+          console.log(`📍 Location address: ${cityName}`);
+        }
+      } catch (geoError) {
+        console.warn('⚠️ Could not get location address:', geoError);
+        setUserLocationAddress('Your Location');
+      }
+      
+      // Store location for later use
+      await AsyncStorage.setItem('userLocation', JSON.stringify({ latitude, longitude }));
+    } catch (error) {
+      console.error('❌ Error getting location:', error);
+      setLocationError('Could not get your location');
+      // Use default location as fallback
+      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      setUserLocationAddress('Phnom Penh');
+    }
+  };
 
   // Determine greeting based on current time
   const updateGreeting = () => {
@@ -91,6 +191,14 @@ export default function HomeScreen() {
       setGreeting('Good evening');
     }
   };
+
+  // Reload restaurants when user location changes
+  useEffect(() => {
+    if (userLocation) {
+      console.log('📍 User location updated, recalculating distances...');
+      loadRestaurants();
+    }
+  }, [userLocation]);
 
   const loadUserData = async () => {
     try {
@@ -143,32 +251,61 @@ export default function HomeScreen() {
       setRestaurantsLoading(true);
       const response = await axios.get(`${API_URL}/api/restaurants`);
       
-      // Transform API data to match Restaurant type
-      const apiRestaurants = response.data?.map((r: any, index: number) => ({
-        id: r.id || `r${index + 1}`,
-        name: r.name || 'Restaurant',
-        hours: r.opening_hours || 'Check hours',
-        distance: '0.5 miles', // TODO: Calculate from user location
-        rating: r.rating || '4.5',
-        // Use uploaded cover image if available, otherwise fall back to default
-        image: DEFAULT_RESTAURANT_IMAGES[`r${(index % 4) + 1}`] || DEFAULT_RESTAURANT_IMAGES.r1,
-        image_url: r.image_url || null,
-        description: r.description || '',
-        address: r.address || '',
-        category: r.category || '',
-        cuisine: r.cuisine || '',
-      })) || [];
+      // Get user location from state or storage
+      let currentLocation = userLocation;
+      if (!currentLocation) {
+        const storedLocation = await AsyncStorage.getItem('userLocation');
+        if (storedLocation) {
+          currentLocation = JSON.parse(storedLocation);
+        } else {
+          // Default to Phnom Penh if no location available
+          currentLocation = { latitude: 11.5564, longitude: 104.9282 };
+        }
+      }
       
-      console.log('📱 [HomeScreen] Loaded restaurants:', apiRestaurants.map((r: any) => ({ 
+      // Transform API data to match Restaurant type
+      const apiRestaurants = response.data?.map((r: any, index: number) => {
+        let distance = 'Unknown';
+        
+        // Calculate distance if restaurant has coordinates
+        if (r.latitude && r.longitude && currentLocation) {
+          const distanceKm = calculateDistance(
+            currentLocation.latitude,
+            currentLocation.longitude,
+            r.latitude,
+            r.longitude
+          );
+          distance = formatDistance(distanceKm);
+        }
+        
+        return {
+          id: r.id || `r${index + 1}`,
+          name: r.name || 'Restaurant',
+          hours: r.opening_hours || 'Check hours',
+          distance: distance,
+          rating: r.rating || '4.5',
+          latitude: r.latitude || null,
+          longitude: r.longitude || null,
+          // Use uploaded cover image if available, otherwise fall back to default
+          image: DEFAULT_RESTAURANT_IMAGES[`r${(index % 4) + 1}`] || DEFAULT_RESTAURANT_IMAGES.r1,
+          image_url: r.image_url || null,
+          description: r.description || '',
+          address: r.address || '',
+          category: r.category || '',
+          cuisine: r.cuisine || '',
+        };
+      }) || [];
+      
+      console.log('📱 [HomeScreen] Loaded restaurants with distances:', apiRestaurants.map((r: any) => ({ 
         id: r.id, 
-        name: r.name, 
-        hasCustomImage: !!r.image_url 
+        name: r.name,
+        distance: r.distance,
       })));
       
       setRestaurants(apiRestaurants);
     } catch (error) {
       console.warn('Failed to load restaurants:', error);
-      setRestaurants([]); // Use empty array if API fails
+      setRestaurants([]);
     } finally {
       setRestaurantsLoading(false);
     }
@@ -240,8 +377,11 @@ export default function HomeScreen() {
             <Text style={styles.subGreeting}>
               Welcome, {isGuest ? 'Guest' : userName}
             </Text>
-            {!isGuest && userEmail && (
-              <Text style={styles.userEmail}>{userEmail}</Text>
+            {!isGuest && userLocationAddress && (
+              <View style={styles.locationRow}>
+                <Ionicons name="location-outline" size={14} color={Colors.gray} />
+                <Text style={styles.userEmail}>{userLocationAddress}</Text>
+              </View>
             )}
           </View>
         </View>
@@ -443,6 +583,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.gray,
     marginTop: 2,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
   },
   bellButton: {
     width: 44,

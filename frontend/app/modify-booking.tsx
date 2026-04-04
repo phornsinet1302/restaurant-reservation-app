@@ -50,6 +50,24 @@ function formatDateHeader(d: Date) {
   return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
+// Convert time from 12-hour format (e.g., "7:30pm") to 24-hour HH:MM format (e.g., "19:30")
+function convertTo24HourFormat(time12: string): string {
+  const match = time12.match(/^(\d{1,2}):?(\d{2})?(am|pm)$/i);
+  if (!match) return time12; // Return unchanged if format doesn't match
+  
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2] || '00';
+  const meridiem = match[3].toLowerCase();
+  
+  if (meridiem === 'pm' && hours !== 12) {
+    hours += 12;
+  } else if (meridiem === 'am' && hours === 12) {
+    hours = 0;
+  }
+  
+  return `${String(hours).padStart(2, '0')}:${minutes}`;
+}
+
 function suggestTable(guests: number) {
   if (guests <= 2) return { table: 5, seats: 2 };
   if (guests <= 4) return { table: 12, seats: 4 };
@@ -70,7 +88,7 @@ export default function ModifyBookingScreen() {
 
   /* State */
   const baseDate = new Date();
-  const quickDates = useMemo(() => getUpcomingDates(new Date(), 4), []);
+  const quickDates = useMemo(() => getUpcomingDates(new Date(), 30), []);
 
   const [selectedDate, setSelectedDate] = useState(baseDate);
   const [selectedTime, setSelectedTime] = useState('7:30pm');
@@ -80,9 +98,12 @@ export default function ModifyBookingScreen() {
   const [bookingName, setBookingName] = useState('');
   const [bookingEmail, setBookingEmail] = useState('');
   const [tables, setTables] = useState<any[]>([]);
+  const [allTablesFromAPI, setAllTablesFromAPI] = useState<any[]>([]); // Store original tables
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
 
   const reservationId = params.id?.trim() || '';
   const restaurantId = params.restaurantId?.trim() || '';
@@ -144,8 +165,8 @@ export default function ModifyBookingScreen() {
             { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
             { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
           ];
+          setAllTablesFromAPI(mockTables);
           setTables(mockTables);
-          setSelectedTableId(mockTables[0].id);
           setLoading(false);
           return;
         }
@@ -159,33 +180,22 @@ export default function ModifyBookingScreen() {
         const allTables = response.data || [];
         console.log(`   Total tables from API: ${allTables.length}`);
         
-        // Filter only available tables for customers
-        const availableTables = allTables.filter((t: any) => t.status === 'available');
-        console.log(`   Available tables: ${availableTables.length}`);
-        
-        if (availableTables.length === 0) {
-          if (allTables.length === 0) {
-            console.warn('⚠️ No tables found for this restaurant');
-            // Use mock tables if no tables found in database
-            const mockTables = [
-              { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
-              { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
-              { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
-              { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
-              { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
-            ];
-            setTables(mockTables);
-            setSelectedTableId(mockTables[0].id);
-          } else {
-            console.warn('⚠️ No available tables at the moment');
-            setError('Sorry, no tables are available right now. Please try again later.');
-            setTables(allTables); // Show all tables but disable booking
-          }
+        // Store all tables - filtering by guest count will happen in separate useEffect
+        if (allTables.length === 0) {
+          console.warn('⚠️ No tables found for this restaurant');
+          // Use mock tables if no tables found in database
+          const mockTables = [
+            { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
+            { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
+            { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
+            { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
+            { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
+          ];
+          setAllTablesFromAPI(mockTables);
+          setTables(mockTables); // Initial state before filtering
         } else {
-          setTables(availableTables);
-          // Select first available table by default
-          setSelectedTableId(availableTables[0].id);
-          console.log(`✅ Selected table: ${availableTables[0].table_number}`);
+          setAllTablesFromAPI(allTables);
+          // Will be filtered by second useEffect based on guest count
         }
       } catch (err: any) {
         console.error('❌ Error fetching tables:', err.message);
@@ -199,8 +209,8 @@ export default function ModifyBookingScreen() {
           { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
           { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
         ];
+        setAllTablesFromAPI(mockTables);
         setTables(mockTables);
-        setSelectedTableId(mockTables[0].id);
         console.log('⚠️ Using fallback mock tables');
       } finally {
         setLoading(false);
@@ -219,10 +229,44 @@ export default function ModifyBookingScreen() {
         { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
       ];
       setTables(mockTables);
+      setAllTablesFromAPI(mockTables);
       setSelectedTableId(mockTables[0].id);
       setLoading(false);
     }
   }, [restaurantId]);
+
+  // Filter tables based on guest count (without re-fetching from API)
+  useEffect(() => {
+    if (allTablesFromAPI.length === 0) return;
+    
+    const availableTables = allTablesFromAPI.filter((t: any) => t.status === 'available' && t.capacity >= guests);
+    
+    if (availableTables.length > 0) {
+      setTables(availableTables);
+      // Keep previously selected table if it still meets capacity
+      if (selectedTableId) {
+        const stillValid = availableTables.find((t: any) => t.id === selectedTableId);
+        if (!stillValid) {
+          setSelectedTableId(availableTables[0].id);
+        }
+      } else {
+        setSelectedTableId(availableTables[0].id);
+      }
+      setError('');
+    } else {
+      // No tables with sufficient capacity
+      const tablesWithCapacity = allTablesFromAPI.filter((t: any) => t.capacity >= guests);
+      if (tablesWithCapacity.length > 0) {
+        setTables(tablesWithCapacity);
+        setSelectedTableId(null);
+        setError('Sorry, no available tables with enough capacity right now. Please try another time.');
+      } else {
+        setTables(allTablesFromAPI);
+        setSelectedTableId(null);
+        setError(`Sorry, no tables available for ${guests} guests. Please try another time or adjust your party size.`);
+      }
+    }
+  }, [guests, allTablesFromAPI]);
 
   const suggestion = useMemo(() => {
     if (guests <= 2) return { table: 5, seats: 2 };
@@ -237,7 +281,7 @@ export default function ModifyBookingScreen() {
     return emailRegex.test(email);
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     // ===== COMPREHENSIVE VALIDATION =====
     console.log('🔍 Starting booking validation...');
     console.log('📝 Params received:', { restaurantId, reservationId, name: restaurantName });
@@ -310,175 +354,46 @@ export default function ModifyBookingScreen() {
     console.log('✅ All frontend validations passed!');
     console.log('📋 Operation:', isUpdating ? 'UPDATE existing booking' : 'CREATE new booking');
 
-    try {
-      setSubmitting(true);
-      
-      // Get auth token with detailed logging
-      console.log('=== BOOKING REQUEST START ===');
-      const token = await AsyncStorage.getItem('token');
-      console.log('✓ Token retrieved from storage:', token ? `${token.length} chars` : '❌ NULL');
-      
-      if (!token) {
-        Alert.alert(
-          'Login Required', 
-          'No auth token found. Please log in again.',
-          [
-            {
-              text: 'Go to Login',
-              onPress: () => router.push('/login'),
-            },
-            { text: 'Cancel', style: 'cancel' },
-          ]
-        );
-        setSubmitting(false);
-        return;
-      }
+    // Format date and time
+    const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    const timeStr = convertTimeToHHMM(selectedTime);
+    const time24hr = convertTo24HourFormat(selectedTime);
 
-      // Format date and time
-      const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-      const timeStr = convertTimeToHHMM(selectedTime);
+    console.log('✅ All validations passed! Navigating to booking confirmation...');
+    
+    // Get selected table object for table number
+    const selectedTable = tables.find(t => t.id === selectedTableId);
+    const tableNumber = selectedTable?.table_number || selectedTable?.id || selectedTableId;
+    
+    const bookingRef = 'REF-' + Date.now();
 
-      const headers = {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      };
+    console.log('📊 Navigation Params:', {
+      restaurantId,
+      tableId: selectedTableId,
+      time12hr: selectedTime,
+      time24hr,
+    });
 
-      let response;
-      let successMessage;
-
-      if (isUpdating) {
-        // Update existing reservation
-        const updatePayload = {
-          table_id: selectedTableId,
-          reservation_date: dateStr,
-          reservation_time: timeStr,
-          party_size: guests,
-          special_request: specialRequests.trim(),
-        };
-
-        console.log('📦 Update payload:', {
-          reservation_id: reservationId,
-          ...updatePayload,
-        });
-        
-        console.log('Request URL:', `${API_URL}/api/reservations/${reservationId}/update`);
-        console.log('Request method: PATCH');
-
-        response = await axios.patch(
-          `${API_URL}/api/reservations/${reservationId}/update`,
-          updatePayload,
-          { headers }
-        );
-        successMessage = 'Your booking has been updated successfully';
-        
-        console.log('✅ Booking updated successfully!');
-      } else {
-        // Create new reservation
-        const createPayload = {
-          restaurant_id: restaurantId,
-          table_id: selectedTableId,
-          reservation_date: dateStr,
-          reservation_time: timeStr,
-          party_size: guests,
-          special_request: specialRequests.trim(),
-          customer_name: bookingName.trim(),
-          customer_email: bookingEmail.trim(),
-        };
-
-        console.log('📦 CREATE PAYLOAD:', JSON.stringify(createPayload, null, 2));
-        console.log('Request URL:', `${API_URL}/api/reservations`);
-        console.log('Request method: POST');
-
-        response = await axios.post(
-          `${API_URL}/api/reservations`,
-          createPayload,
-          { headers }
-        );
-        successMessage = 'Your booking has been created successfully';
-        
-        console.log('✅ Booking created successfully!');
-      }
-
-      console.log('Response:', response.data);
-      console.log('Response type:', typeof response.data);
-      console.log('Is array?', Array.isArray(response.data));
-
-      const booking = Array.isArray(response.data) ? response.data[0] : response.data;
-      console.log('Booking object:', booking);
-      
-      const bookingRef = booking?.id || booking?.reservation_id || 'REF-' + Date.now();
-      console.log('Booking reference:', bookingRef);
-      
-      Alert.alert('Success', successMessage, [
-        {
-          text: 'View Booking',
-          onPress: () => {
-            if (isUpdating) {
-              router.push('/(tabs)/bookings');
-            } else {
-              // Get selected table object to get the actual table number
-              const selectedTable = tables.find(t => t.id === selectedTableId);
-              const tableNumber = selectedTable?.table_number || selectedTable?.id || selectedTableId;
-              
-              // Navigate to confirmation screen for new bookings
-              router.push({
-                pathname: '/booking-confirmation',
-                params: {
-                  bookingId: bookingRef,
-                  id: bookingRef,
-                  name: restaurantName,
-                  ref: bookingRef,
-                  date: dateStr,
-                  time: selectedTime,  // Use readable format (e.g., "7:30pm")
-                  guests: String(guests),
-                  table: String(tableNumber),
-                  bookingName,
-                  bookingEmail,
-                  address: params.address || '',
-                  specialRequests: specialRequests.trim(),
-                },
-              } as any);
-            }
-          },
-        },
-      ]);
-    } catch (err: any) {
-      console.error('=== BOOKING ERROR ===');
-      console.error('Error type:', err.constructor.name);
-      console.error('Error message:', err.message);
-      console.error('Status code:', err.response?.status);
-      console.error('Status text:', err.response?.statusText);
-      console.error('Response data:', err.response?.data);
-      console.error('Request URL:', err.config?.url);
-      
-      let errorMsg = 'Booking failed. Please try again.';
-      
-      if (err.response?.status === 401) {
-        errorMsg = 'Session expired. Please login again.';
-      } else if (err.response?.status === 400) {
-        errorMsg = err.response.data?.error || 'Invalid booking details';
-      } else if (err.response?.status === 500) {
-        errorMsg = 'Server error. Please try again later.';
-      } else if (err.message === 'Network Error') {
-        errorMsg = 'Network error. Check your connection and that the backend is running.';
-      } else if (err.response?.data?.error) {
-        errorMsg = err.response.data.error;
-      }
-      
-      Alert.alert('Booking Failed', errorMsg, [
-        {
-          text: 'Login Again',
-          onPress: () => router.push('/login'),
-        },
-        {
-          text: 'Dismiss',
-          style: 'cancel',
-        },
-      ]);
-    } finally {
-      setSubmitting(false);
-      console.log('=== BOOKING REQUEST END ===');
-    }
+    // Navigate to confirmation screen - booking will be created when user confirms
+    router.push({
+      pathname: '/booking-confirmation',
+      params: {
+        bookingId: bookingRef,
+        id: bookingRef,
+        name: restaurantName,
+        ref: bookingRef,
+        date: dateStr,
+        time: time24hr,
+        guests: String(guests),
+        table: String(tableNumber),
+        restaurantId,
+        tableId: selectedTableId,
+        bookingName,
+        bookingEmail,
+        address: params.address || '',
+        specialRequests: specialRequests.trim(),
+      },
+    } as any);
   };
 
   // Helper: Convert "7:30pm" to "19:30"
@@ -522,7 +437,7 @@ export default function ModifyBookingScreen() {
           <Text style={styles.restaurantName}>{restaurantName}</Text>
           {params.address ? (
             <View style={styles.addressRow}>
-              <Ionicons name="location-outline" size={14} color="rgba(255,255,255,0.7)" />
+              <Ionicons name="location-outline" size={14} color={Colors.text} />
               <Text style={styles.addressText}>{params.address}</Text>
             </View>
           ) : null}
@@ -545,7 +460,7 @@ export default function ModifyBookingScreen() {
 
           <View style={styles.dateHeaderRow}>
             <Text style={styles.dateTitle}>{formatDateHeader(selectedDate)}</Text>
-            <TouchableOpacity style={styles.calendarBtn}>
+            <TouchableOpacity style={styles.calendarBtn} onPress={() => setShowCalendarModal(true)}>
               <Ionicons name="calendar" size={18} color={Colors.primary} />
               <Ionicons name="chevron-down" size={14} color={Colors.gray} />
             </TouchableOpacity>
@@ -755,8 +670,109 @@ export default function ModifyBookingScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* ── Calendar Modal ── */}
+      {showCalendarModal && (
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCalendarModal(false)}
+        >
+          <TouchableOpacity 
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            style={styles.modalContent}
+          >
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => {
+                const newMonth = new Date(calendarMonth);
+                newMonth.setMonth(newMonth.getMonth() - 1);
+                setCalendarMonth(newMonth);
+              }}>
+                <Ionicons name="chevron-back" size={24} color={Colors.primary} />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>
+                {MONTHS[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
+              </Text>
+              <TouchableOpacity onPress={() => {
+                const newMonth = new Date(calendarMonth);
+                newMonth.setMonth(newMonth.getMonth() + 1);
+                setCalendarMonth(newMonth);
+              }}>
+                <Ionicons name="chevron-forward" size={24} color={Colors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.weekDaysRow}>
+              {DAYS.map((day) => (
+                <Text key={day} style={styles.weekDay}>{day}</Text>
+              ))}
+            </View>
+
+            <View style={styles.calendarGrid}>
+              {getCalendarDays(calendarMonth).map((day, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[
+                    styles.calendarDay,
+                    !day && styles.calendarDayEmpty,
+                    day && new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day).toDateString() === selectedDate.toDateString() ? styles.calendarDaySelected : null,
+                    day && new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day) < new Date() ? styles.calendarDayPast : null,
+                  ]}
+                  onPress={() => {
+                    if (day) {
+                      const newDate = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day);
+                      setSelectedDate(newDate);
+                      setShowCalendarModal(false);
+                    }
+                  }}
+                  disabled={!day || new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day) < new Date()}
+                >
+                  {day ? (
+                    <Text style={[
+                      styles.calendarDayText,
+                      day && new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), day).toDateString() === selectedDate.toDateString() ? { color: '#FFF' } : {}
+                    ]}>
+                      {day}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity 
+              style={styles.modalClose}
+              onPress={() => setShowCalendarModal(false)}
+            >
+              <Text style={styles.modalCloseText}>Done</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      )}
     </View>
   );
+};
+
+// Helper function to get calendar days for a month
+function getCalendarDays(date: Date): (number | null)[] {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  
+  const days: (number | null)[] = [];
+  
+  // Empty cells for days before month starts
+  for (let i = 0; i < firstDay; i++) {
+    days.push(null);
+  }
+  
+  // Days of the month
+  for (let i = 1; i <= daysInMonth; i++) {
+    days.push(i);
+  }
+  
+  return days;
 }
 
 /* ── Styles ── */
@@ -788,7 +804,7 @@ const styles = StyleSheet.create({
 
   /* Restaurant card */
   restaurantCard: {
-    backgroundColor: Colors.text,
+    backgroundColor: Colors.primary,
     borderRadius: 16,
     padding: 18,
     marginBottom: 20,
@@ -796,13 +812,13 @@ const styles = StyleSheet.create({
   restaurantName: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 18,
-    color: '#FFF',
+    color: Colors.text,
     marginBottom: 4,
   },
   restaurantTags: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
+    color: Colors.text,
     marginBottom: 6,
   },
   addressRow: {
@@ -813,7 +829,7 @@ const styles = StyleSheet.create({
   addressText: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
+    color: Colors.text,
   },
 
   /* Legend */
@@ -1070,13 +1086,14 @@ const styles = StyleSheet.create({
 
   /* Table selection */
   tablesGrid: {
+    display: 'flex',
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+    marginBottom: 16,
   },
   tableCard: {
-    flex: 1,
-    minWidth: '45%',
+    width: '47%',
     borderWidth: 2,
     borderColor: Colors.border,
     borderRadius: 14,
@@ -1084,6 +1101,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFF',
+    minHeight: 120,
   },
   tableCardSelected: {
     borderColor: Colors.primary,
@@ -1133,5 +1151,99 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 14,
     color: '#E74C3C',
+  },
+
+  /* Calendar Modal */
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: '#FFF',
+    borderRadius: 20,
+    padding: 20,
+    width: '85%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  modalTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 18,
+    color: Colors.text,
+    textAlign: 'center',
+    flex: 1,
+  },
+  modalClose: {
+    marginTop: 20,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 16,
+    color: Colors.primary,
+  },
+  weekDaysRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  weekDay: {
+    width: '14.28%',
+    textAlign: 'center',
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 12,
+    color: Colors.gray,
+    paddingVertical: 8,
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  calendarDay: {
+    width: '14.28%',
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    marginVertical: 4,
+  },
+  calendarDayEmpty: {
+    backgroundColor: 'transparent',
+  },
+  calendarDaySelected: {
+    backgroundColor: Colors.primary,
+  },
+  calendarDayPast: {
+    opacity: 0.4,
+  },
+  calendarDayText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 14,
+    color: Colors.text,
   },
 });

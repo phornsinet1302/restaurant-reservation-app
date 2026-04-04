@@ -17,6 +17,7 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import DatePickerInput from '@/components/DatePickerInput';
 
 const STEPS = [
   { label: 'Account', progress: 0.17 },
@@ -250,10 +251,12 @@ export default function RestaurantSignupScreen() {
       <View style={styles.row}>
         <View style={styles.halfField}>
           <Text style={styles.fieldLabel}>Date of birth</Text>
-          <View style={styles.inputWrapper}>
-            <TextInput style={[styles.input, { flex: 1 }]} value={dob} onChangeText={setDob} placeholder="DD/MM/YYYY" placeholderTextColor={Colors.border} />
-            <Ionicons name="calendar-outline" size={18} color={Colors.gray} />
-          </View>
+          <DatePickerInput
+            value={dob}
+            onChangeText={setDob}
+            placeholder="DD/MM/YYYY"
+            editable={true}
+          />
         </View>
         <View style={styles.halfField}>
           <Text style={styles.fieldLabel}>Nationality</Text>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Alert, Modal, TextInput,
+  ActivityIndicator, RefreshControl, Alert, Modal, TextInput, ToastAndroid,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -10,6 +10,7 @@ import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useFocusEffect } from '@react-navigation/native';
 import { useReservationSocket } from '@/hooks/useReservationSocket';
+import { useNotifications } from '@/hooks/useNotifications';
 
 type TabKey = 'upcoming' | 'completed' | 'cancelled';
 
@@ -49,6 +50,9 @@ export default function MerchantBookingsScreen() {
   const [reason, setReason] = useState('');
   const [actioning, setActioning] = useState(false);
 
+  // Initialize notifications hook for real-time updates
+  const { notifications, unreadCount } = useNotifications();
+
   const loadData = useCallback(async () => {
     try {
       const token = await AsyncStorage.getItem('token');
@@ -84,6 +88,24 @@ export default function MerchantBookingsScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  // Listen for incoming notifications
+  useEffect(() => {
+    if (notifications.length > 0) {
+      const latestNotif = notifications[0];
+      
+      // Show toast for booking confirmations/rejections
+      if (latestNotif.type === 'booking_confirmed') {
+        ToastAndroid.show(`✅ ${latestNotif.title}`, ToastAndroid.LONG);
+        console.log('🔔 Toast shown for booking confirmation');
+        loadData(); // Refresh bookings list
+      } else if (latestNotif.type === 'booking_rejected') {
+        ToastAndroid.show(`❌ ${latestNotif.title}`, ToastAndroid.LONG);
+        console.log('🔔 Toast shown for booking rejection');
+        loadData(); // Refresh bookings list
+      }
+    }
+  }, [notifications, loadData]);
 
   // Handle real-time reservation updates from WebSocket (must be after loadData)
   const handleReservationUpdate = useCallback((update: any) => {

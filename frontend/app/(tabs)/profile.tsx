@@ -19,6 +19,7 @@ import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import CustomButton from '@/components/CustomButton';
+import DatePickerInput from '@/components/DatePickerInput';
 
 /* ── Data ── */
 
@@ -518,13 +519,11 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.fieldInput}>
             {isEditing ? (
-              <TextInput
-                style={styles.fieldTextInput}
+              <DatePickerInput
                 value={dateOfBirth}
                 onChangeText={setDateOfBirth}
-                placeholder="DD/MM/YYYY (e.g., 15/03/1990)"
-                placeholderTextColor={Colors.border}
-                keyboardType="numbers-and-punctuation"
+                placeholder="DD/MM/YYYY"
+                editable={true}
               />
             ) : (
               <Text style={dateOfBirth ? styles.fieldValue : styles.fieldPlaceholder}>

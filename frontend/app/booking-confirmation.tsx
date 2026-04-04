@@ -6,10 +6,15 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { API_CONFIG } from '@/app/config/apiConfig';
 // import LocationTracking from '@/components/LocationTracking'; // Disabled - requires native build
 
 /* ── Helpers ── */
@@ -36,6 +41,8 @@ const IMAGE_MAP: Record<string, any> = {
 
 /* ── Component ── */
 
+type BookingStep = 'detail' | 'success';
+
 export default function BookingConfirmationScreen() {
   const params = useLocalSearchParams<{
     id?: string;
@@ -46,6 +53,8 @@ export default function BookingConfirmationScreen() {
     time: string;
     guests: string;
     table: string;
+    restaurantId: string;
+    tableId: string;
     bookingName: string;
     bookingEmail: string;
     address: string;
@@ -53,6 +62,9 @@ export default function BookingConfirmationScreen() {
   }>();
   const router = useRouter();
   const [showTracking, setShowTracking] = useState(false);
+  const [step, setStep] = useState<BookingStep>('detail');
+  const [loading, setLoading] = useState(false);
+  const [confirmationId, setConfirmationId] = useState('');
 
   const image = IMAGE_MAP[params.name ?? ''] ?? require('@/assets/restaurant-1.jpg');
   const bookingId = params.bookingId || params.id || '';
@@ -68,23 +80,53 @@ export default function BookingConfirmationScreen() {
     { icon: 'location-outline' as const, label: 'Location', value: params.address || 'N/A' },
   ];
 
-  const handleNext = () => {
-    // Navigate to waiting confirmation screen
-    router.push({
-      pathname: '/booking-waiting-confirmation',
-      params: {
-        bookingId,
-        name: params.name,
-        ref: params.ref,
-        date: params.date,
-        time: params.time,
-        guests: params.guests,
-        table: params.table,
-        bookingName: params.bookingName,
-        bookingEmail: params.bookingEmail,
-        address: params.address,
-      },
-    } as any);
+  // CREATE BOOKING API CALL
+  const handleConfirmBooking = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('token');
+
+      console.log('📝 [DEBUG] Creating booking with:', {
+        restaurant_id: params.restaurantId,
+        table_id: params.tableId,
+        reservation_date: params.date,
+        reservation_time: params.time,
+        party_size: params.guests,
+        customer_name: params.bookingName,
+        customer_email: params.bookingEmail,
+        special_request: params.specialRequests,
+      });
+
+      const response = await axios.post(
+        `${API_CONFIG.BASE_URL}/api/reservations`,
+        {
+          restaurant_id: params.restaurantId,
+          table_id: params.tableId,
+          reservation_date: params.date,
+          reservation_time: params.time,
+          party_size: Number(params.guests),
+          customer_name: params.bookingName,
+          customer_email: params.bookingEmail,
+          special_request: params.specialRequests || '',
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      console.log('✅ [DEBUG] Booking created successfully:', response.data);
+      const newBookingId = response.data.id || bookingId;
+      setConfirmationId(newBookingId);
+      
+      // Show success screen
+      setStep('success');
+      setLoading(false);
+
+    } catch (error: any) {
+      console.error('❌ [DEBUG] Booking creation failed:', error.response?.data || error.message);
+      Alert.alert('Error', `Failed to create booking: ${error.response?.data?.error || error.message}`);
+      setLoading(false);
+    }
   };
 
   return (
@@ -103,22 +145,19 @@ export default function BookingConfirmationScreen() {
           <Text style={styles.trackingPlaceholderSub}>Location tracking is available in Google Maps</Text>
         </View>
       </View>
-    ) : (
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-      >
-        {/* Success icon */}
-        <View style={styles.checkCircle}>
-          <Ionicons name="checkmark-circle" size={64} color="#2BA15C" />
+    ) : step === 'detail' ? (
+      // 📋 BOOKING DETAIL SCREEN - Review and Confirm/Cancel
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <View style={styles.detailIcon}>
+          <Ionicons name="document-text-outline" size={64} color={Colors.primary} />
         </View>
 
-        <Text style={styles.title}>Booking Updated!</Text>
-        <Text style={styles.subtitle}>
-          Your reservation has been updated successfully
+        <Text style={styles.detailTitle}>Review Your Booking</Text>
+        <Text style={styles.detailSubtitle}>
+          Please check the booking details below
         </Text>
 
-        {/* Confirmation card */}
+        {/* Booking Details Card */}
         <View style={styles.card}>
           {/* Restaurant image header */}
           <View style={styles.imageWrapper}>
@@ -149,35 +188,67 @@ export default function BookingConfirmationScreen() {
           ) : null}
         </View>
 
-        {/* Track Location Button */}
+        {/* Confirm Button */}
         <TouchableOpacity
-          style={styles.trackBtn}
+          style={[styles.doneBtn, loading && { opacity: 0.6 }]}
           activeOpacity={0.8}
-          onPress={() => setShowTracking(true)}
+          onPress={handleConfirmBooking}
+          disabled={loading}
         >
-          <Ionicons name="location" size={20} color={Colors.primary} />
-          <Text style={styles.trackBtnText}>Track to Restaurant</Text>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.doneBtnText}>Confirm</Text>
+          )}
         </TouchableOpacity>
 
-        {/* Done button */}
+        {/* Cancel Button - Go Back */}
         <TouchableOpacity
-          style={styles.doneBtn}
+          style={[styles.cancelBookingBtn, loading && { opacity: 0.6 }]}
           activeOpacity={0.8}
-          onPress={handleNext}
+          onPress={() => router.back()}
+          disabled={loading}
         >
-          <Text style={styles.doneBtnText}>Confirm Booking</Text>
-        </TouchableOpacity>
-
-        {/* Skip button - Go to bookings */}
-        <TouchableOpacity
-          style={styles.skipBtn}
-          activeOpacity={0.8}
-          onPress={() => router.replace('/(tabs)/bookings' as any)}
-        >
-          <Text style={styles.skipBtnText}>Skip to Bookings</Text>
+          <Text style={styles.cancelBookingBtnText}>❌ Cancel</Text>
         </TouchableOpacity>
       </ScrollView>
-    )
+    ) : step === 'success' ? (
+      // ✅ SUCCESS SCREEN
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <View style={styles.successIcon}>
+          <Ionicons name="checkmark-circle" size={80} color="#2BA15C" />
+        </View>
+        
+        <Text style={styles.successTitle}>🎉 Thank you for Booking!</Text>
+        <Text style={styles.successSubtitle}>Your reservation at {params.name} is confirmed</Text>
+        
+        <View style={styles.successCard}>
+          <Text style={styles.successCardTitle}>Confirmation ID</Text>
+          <Text style={styles.confirmationId}>{confirmationId || bookingId}</Text>
+          <Text style={styles.successCardText}>📧 Confirmation email sent to {params.bookingEmail}</Text>
+          <Text style={styles.successCardText}>🔔 Notifications enabled</Text>
+        </View>
+        
+        <View style={styles.successDetails}>
+          <View style={styles.successRow}>
+            <Text style={styles.successLabel}>Date</Text>
+            <Text style={styles.successValue}>{formatDate(params.date ?? '')}</Text>
+          </View>
+          <View style={styles.successRow}>
+            <Text style={styles.successLabel}>Time</Text>
+            <Text style={styles.successValue}>{params.time}</Text>
+          </View>
+          <View style={styles.successRow}>
+            <Text style={styles.successLabel}>Guests</Text>
+            <Text style={styles.successValue}>{params.guests}</Text>
+          </View>
+        </View>
+        
+        <TouchableOpacity style={styles.skipBtn} activeOpacity={0.8} onPress={() => router.replace('/(tabs)/bookings' as any)}>
+          <Text style={styles.skipBtnText}>Back to Bookings</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    ) : null
   );
 }
 
@@ -193,25 +264,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 50,
     alignItems: 'center',
-  },
-
-  /* Success */
-  checkCircle: {
-    marginBottom: 16,
-  },
-  title: {
-    fontFamily: 'PlusJakartaSans-Bold',
-    fontSize: 26,
-    color: Colors.text,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 15,
-    color: Colors.gray,
-    textAlign: 'center',
-    marginBottom: 28,
   },
 
   /* Card */
@@ -389,5 +441,113 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.gray,
   },
+
+  /* Cancel Booking Button */
+  cancelBookingBtn: {
+    width: '100%',
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: '#FF6B6B',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    marginTop: 12,
+  },
+  cancelBookingBtnText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 16,
+    color: '#FF6B6B',
+  },
+
+  /* Detail Step Styles */
+  detailIcon: {
+    marginBottom: 16,
+  },
+  detailTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 24,
+    color: Colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  detailSubtitle: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 15,
+    color: Colors.gray,
+    textAlign: 'center',
+    marginBottom: 28,
+  },
+
+  /* Success Screen Styles */
+  successIcon: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 24,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  successSubtitle: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 16,
+    color: Colors.gray,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  successCard: {
+    backgroundColor: '#F0F8FF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.primary,
+  },
+  successCardTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 12,
+    color: Colors.gray,
+    marginBottom: 8,
+  },
+  confirmationId: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 18,
+    color: Colors.primary,
+    marginBottom: 12,
+  },
+  successCardText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 13,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  successDetails: {
+    backgroundColor: Colors.background,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+  },
+  successRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+  },
+  successLabel: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 13,
+    color: Colors.gray,
+  },
+  successValue: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 14,
+    color: Colors.text,
+  },
 });
+
 

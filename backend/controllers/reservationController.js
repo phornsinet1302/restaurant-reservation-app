@@ -43,6 +43,121 @@ const emitNotificationEvent = (io, userId, title, message, data = {}) => {
   console.log(`📡 WebSocket notification sent to ${userId}`);
 };
 
+// ==================== HELPER FUNCTION - SEND BOOKING CONFIRMATION EMAIL ====================
+const sendBookingConfirmationEmail = async (customerEmail, customerName, restaurantName, reservationDate, reservationTime, partySize, tableNumber = 'TBD', specialRequest = '') => {
+  try {
+    const sendEmail = require('../utils/emailService');
+    
+    const specialRequestSection = specialRequest ? `
+      <p><strong>Special Request:</strong> ${specialRequest}</p>
+    ` : '';
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #D4A574;">Booking Confirmation</h2>
+        <p>Hi ${customerName},</p>
+        <p>Thank you for your reservation! We're excited to serve you.</p>
+        
+        <div style="background-color: white; padding: 20px; border-radius: 8px; border-left: 4px solid #D4A574; margin: 20px 0;">
+          <h3 style="color: #333; margin-top: 0;">Reservation Details</h3>
+          <p><strong>Restaurant:</strong> ${restaurantName}</p>
+          <p><strong>Date:</strong> ${reservationDate}</p>
+          <p><strong>Time:</strong> ${reservationTime}</p>
+          <p><strong>Party Size:</strong> ${partySize} guests</p>
+          <p><strong>Table:</strong> ${tableNumber}</p>
+          ${specialRequestSection}
+        </div>
+        
+        <p>Please arrive 5-10 minutes before your reservation time. If you need to cancel or modify your reservation, please do so at least 24 hours in advance.</p>
+        
+        <p>If you have any questions, please contact the restaurant directly.</p>
+        
+        <p>Best regards,<br/>Restaurant Reservation Team</p>
+      </div>
+    `;
+    
+    await sendEmail(customerEmail, `Booking Confirmation - ${restaurantName}`, html);
+    console.log(`✅ Booking confirmation email sent to ${customerEmail}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to send booking confirmation email to ${customerEmail}:`, error.message);
+    // Don't fail the entire request if email fails
+    return false;
+  }
+};
+
+// ==================== HELPER FUNCTION - SEND BOOKING CONFIRMED EMAIL ====================
+const sendBookingConfirmedEmail = async (customerEmail, customerName, restaurantName, reservationDate, reservationTime, partySize) => {
+  try {
+    const sendEmail = require('../utils/emailService');
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #27AE60;">✅ Booking Confirmed!</h2>
+        <p>Hi ${customerName},</p>
+        <p>Great news! Your reservation has been confirmed by the restaurant.</p>
+        
+        <div style="background-color: white; padding: 20px; border-radius: 8px; border-left: 4px solid #27AE60; margin: 20px 0;">
+          <h3 style="color: #333; margin-top: 0;">Reservation Details</h3>
+          <p><strong>Restaurant:</strong> ${restaurantName}</p>
+          <p><strong>Date:</strong> ${reservationDate}</p>
+          <p><strong>Time:</strong> ${reservationTime}</p>
+          <p><strong>Party Size:</strong> ${partySize} guests</p>
+        </div>
+        
+        <p>Your table is reserved and ready for you. Please arrive on time for your reservation.</p>
+        
+        <p>Thank you for choosing us!<br/>Restaurant Reservation Team</p>
+      </div>
+    `;
+    
+    await sendEmail(customerEmail, `Booking Confirmed - ${restaurantName}`, html);
+    console.log(`✅ Booking confirmed email sent to ${customerEmail}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to send booking confirmed email to ${customerEmail}:`, error.message);
+    return false;
+  }
+};
+
+// ==================== HELPER FUNCTION - SEND BOOKING REJECTED EMAIL ====================
+const sendBookingRejectedEmail = async (customerEmail, customerName, restaurantName, reservationDate, reservationTime, rejectionReason = '') => {
+  try {
+    const sendEmail = require('../utils/emailService');
+    
+    const reasonSection = rejectionReason ? `
+      <p><strong>Reason:</strong> ${rejectionReason}</p>
+    ` : '';
+    
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 8px;">
+        <h2 style="color: #E74C3C;">❌ Booking Rejected</h2>
+        <p>Hi ${customerName},</p>
+        <p>Unfortunately, your reservation request has been rejected by the restaurant.</p>
+        
+        <div style="background-color: white; padding: 20px; border-radius: 8px; border-left: 4px solid #E74C3C; margin: 20px 0;">
+          <h3 style="color: #333; margin-top: 0;">Reservation Details</h3>
+          <p><strong>Restaurant:</strong> ${restaurantName}</p>
+          <p><strong>Date:</strong> ${reservationDate}</p>
+          <p><strong>Time:</strong> ${reservationTime}</p>
+          ${reasonSection}
+        </div>
+        
+        <p>You can try booking another date/time or contact the restaurant directly to discuss alternatives.</p>
+        
+        <p>We regret that this didn't work out. Please try again!<br/>Restaurant Reservation Team</p>
+      </div>
+    `;
+    
+    await sendEmail(customerEmail, `Booking Rejected - ${restaurantName}`, html);
+    console.log(`✅ Booking rejected email sent to ${customerEmail}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Failed to send booking rejected email to ${customerEmail}:`, error.message);
+    return false;
+  }
+};
+
 // ==================== EXISTING EXPORTS ====================
 exports.createReservation = async (req, res) => {
   try {
@@ -257,6 +372,18 @@ exports.createReservation = async (req, res) => {
         'booking_received'
       );
       
+      // 📧 Send confirmation email to customer
+      await sendBookingConfirmationEmail(
+        customer_email,
+        customer_name,
+        restaurantDataForNotif.name,
+        reservation_date,
+        reservation_time,
+        party_size,
+        'TBD',
+        special_request
+      );
+      
       // Emit WebSocket events
       const io = req.app.get('io');
       if (io) {
@@ -394,24 +521,30 @@ exports.cancelReservation = async (req, res) => {
       );
     }
 
-    // Emit WebSocket event to notify merchant of cancellation
+    // Emit WebSocket events to notify both customer and merchant
     const io = req.app.get('io');
-    if (io && reservation) {
-      io.to(reservation.restaurant_id).emit('reservation_updated', {
-        id: reservationId,
-        status: 'cancelled',
-        action: 'cancelled_by_customer',
-        message: 'A booking has been cancelled by the customer'
-      });
+    if (io && reservation && restaurantCancelInfo) {
+      const merchantId = restaurantCancelInfo.merchant_id;
       
-      // Emit to customer as well
-      io.to(customerId).emit('booking_cancelled', {
-        id: reservationId,
-        status: 'cancelled',
-        message: '❌ Your booking has been cancelled'
-      });
+      // Notify merchant of cancellation
+      emitNotificationEvent(
+        io,
+        merchantId,
+        '🚫 Booking Cancelled',
+        `A customer cancelled their reservation. Table now available.`,
+        { status: 'cancelled', reservation_id: reservationId, action: 'cancelled_by_customer' }
+      );
       
-      console.log('📡 WebSocket event sent for customer cancellation');
+      // Notify customer of cancellation
+      emitNotificationEvent(
+        io,
+        customerId,
+        '❌ Booking Cancelled',
+        `Your reservation at ${restaurantCancelInfo.name} has been cancelled.`,
+        { status: 'cancelled', reservation_id: reservationId }
+      );
+      
+      console.log('📡 WebSocket events sent for customer cancellation');
     }
 
     res.status(200).json({ message: "Reservation cancelled successfully.", data });
@@ -507,31 +640,30 @@ exports.updateReservationDetails = async (req, res) => {
       );
     }
     
-    // Emit WebSocket event to notify merchant of modification in real-time
+    // Emit WebSocket events to notify both customer and merchant
     const io = req.app.get('io');
-    if (io && existingReservation) {
-      const restaurantId = existingReservation.restaurant_id;
+    if (io && existingReservation && restaurantModifyInfo) {
+      const merchantId = restaurantModifyInfo.merchant_id;
       
-      // Notify merchant
-      io.to(restaurantId).emit('reservation_updated', {
-        id: reservationId,
-        status: updatedData[0]?.status || 'confirmed',
-        action: 'modified',
-        message: 'A booking has been modified by the customer'
-      });
+      // Notify merchant of modification
+      emitNotificationEvent(
+        io,
+        merchantId,
+        '✏️ Booking Modified',
+        `A customer modified their reservation for ${party_size} guests on ${reservation_date} at ${reservation_time}.`,
+        { status: updatedData[0]?.status, reservation_id: reservationId, action: 'modified', newDate: reservation_date, newTime: reservation_time }
+      );
       
-      // Notify customer
-      io.to(customerId).emit('booking_modified', {
-        id: reservationId,
-        status: updatedData[0]?.status,
-        action: 'modified',
-        message: '✏️ Your booking has been modified successfully',
-        newDate: reservation_date,
-        newTime: reservation_time,
-        newGuests: party_size
-      });
+      // Notify customer of modification
+      emitNotificationEvent(
+        io,
+        customerId,
+        '✏️ Booking Modified',
+        `Your reservation at ${restaurantName} has been updated to ${reservation_date} at ${reservation_time} for ${party_size} guests.`,
+        { status: updatedData[0]?.status, reservation_id: reservationId, action: 'modified', newDate: reservation_date, newTime: reservation_time, newGuests: party_size }
+      );
       
-      console.log('📡 WebSocket event sent to restaurant for modification:', restaurantId);
+      console.log('📡 WebSocket events sent for booking modification');
     }
     
     res.status(200).json(updatedData);
@@ -651,7 +783,7 @@ exports.merchantConfirmReservation = async (req, res) => {
     // Get reservation first (with table_id)
     const { data: reservationData, error: reservationError } = await supabaseAdmin
       .from('reservations')
-      .select('id, restaurant_id, status, table_id')
+      .select('id, restaurant_id, status, table_id, customer_id, customer_email, customer_name, party_size, reservation_date, reservation_time')
       .eq('id', reservationId)
       .single();
 
@@ -734,6 +866,18 @@ exports.merchantConfirmReservation = async (req, res) => {
       'booking_confirmed'
     );
     
+    // 📧 Send confirmation email to customer
+    if (reservationData.customer_email) {
+      await sendBookingConfirmedEmail(
+        reservationData.customer_email,
+        reservationData.customer_name || 'Valued Guest',
+        restaurantName,
+        reservationData.reservation_date,
+        reservationData.reservation_time,
+        reservationData.party_size
+      );
+    }
+    
     // Emit WebSocket event to notify merchant AND customer in real-time
     const io = req.app.get('io');
     if (io && reservationData) {
@@ -757,6 +901,16 @@ exports.merchantConfirmReservation = async (req, res) => {
         message: '✅ Your booking has been confirmed by the restaurant!'
       });
       console.log('📡 WebSocket event sent to customer:', customerId);
+      
+      // 📢 Broadcast table status change in REAL-TIME to all clients
+      io.emit('table_status_updated', {
+        table_id: reservationData.table_id,
+        status: 'occupied',
+        restaurant_id: reservationData.restaurant_id,
+        timestamp: new Date().toISOString(),
+        reservation_id: reservationId
+      });
+      console.log('📡 Broadcasted table_status_updated event for table:', reservationData.table_id);
     }
     
     res.status(200).json({ message: 'Reservation confirmed', data: data[0] });
@@ -782,7 +936,7 @@ exports.merchantRejectReservation = async (req, res) => {
     // Get reservation first
     const { data: reservationData, error: reservationError } = await supabaseAdmin
       .from('reservations')
-      .select('id, restaurant_id, status, customer_id')
+      .select('id, restaurant_id, status, customer_id, customer_email, customer_name, reservation_date, reservation_time, table_id')
       .eq('id', reservationId)
       .single();
 
@@ -826,6 +980,21 @@ exports.merchantRejectReservation = async (req, res) => {
 
     console.log('✅ Reservation rejected successfully');
     
+    // Release table back to available status
+    if (reservationData.table_id) {
+      console.log('   🔓 Releasing table:', reservationData.table_id);
+      const { error: tableError } = await supabaseAdmin
+        .from('tables')
+        .update({ status: 'available' })
+        .eq('id', reservationData.table_id);
+
+      if (tableError) {
+        console.log('   ⚠️  Warning: Table could not be released:', tableError.message);
+      } else {
+        console.log('   ✅ Table released successfully');
+      }
+    }
+    
     // Get restaurant name for notification
     const { data: restaurantRejectInfo } = await supabase
       .from('restaurants')
@@ -850,6 +1019,18 @@ exports.merchantRejectReservation = async (req, res) => {
       'booking_rejected'
     );
     
+    // 📧 Send rejection email to customer
+    if (reservationData.customer_email) {
+      await sendBookingRejectedEmail(
+        reservationData.customer_email,
+        reservationData.customer_name || 'Valued Guest',
+        restaurantName,
+        reservationData.reservation_date,
+        reservationData.reservation_time,
+        reason.trim()
+      );
+    }
+    
     // Emit WebSocket event to notify merchant AND customer in real-time
     const io = req.app.get('io');
     if (io && reservationData) {
@@ -872,6 +1053,17 @@ exports.merchantRejectReservation = async (req, res) => {
         reason: reason.trim()
       });
       console.log('📡 WebSocket event sent for rejection - merchant and customer');
+      
+      // 📢 Broadcast table status change in REAL-TIME
+      io.emit('table_status_updated', {
+        table_id: reservationData.table_id,
+        status: 'available',
+        restaurant_id: reservationData.restaurant_id,
+        timestamp: new Date().toISOString(),
+        reservation_id: reservationId,
+        reason: 'booking_rejected'
+      });
+      console.log('📡 Broadcasted table_status_updated event for table:', reservationData.table_id);
     }
     
     res.status(200).json({ message: 'Reservation rejected', data: data[0] });

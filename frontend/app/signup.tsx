@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
+import DatePickerInput from '@/components/DatePickerInput';
 import { API_CONFIG } from '@/app/config/apiConfig';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -413,13 +414,11 @@ export default function SignUpScreen() {
               />
             </View>
             <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Date of Birth (DD/MM/YYYY) - Optional"
-                placeholderTextColor={Colors.gray}
+              <DatePickerInput
                 value={dateOfBirth}
                 onChangeText={setDateOfBirth}
-                keyboardType="number-pad"
+                placeholder="DD/MM/YYYY"
+                editable={true}
               />
             </View>
             <View style={styles.bioWrapper}>
