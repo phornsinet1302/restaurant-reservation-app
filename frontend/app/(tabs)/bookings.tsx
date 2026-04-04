@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,16 +8,23 @@ import {
   TouchableOpacity,
   ImageSourcePropType,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/hooks/useAuth';
+import { API_CONFIG } from '@/app/config/apiConfig';
+import { useBookingUpdates } from '@/hooks/useBookingUpdates';
 import CustomButton from '@/components/CustomButton';
 
 /* ── Types ── */
 
-type BookingStatus = 'Upcoming' | 'Past' | 'Cancelled';
+type BookingStatus = 'Upcoming' | 'Confirmed' | 'Past' | 'Cancelled';
 
 type Booking = {
   id: string;
@@ -28,84 +35,172 @@ type Booking = {
   guests: number;
   table?: number;
   status: BookingStatus;
-  image: ImageSourcePropType;
-  tags?: string;
+  dbStatus?: string;
+  image: ImageSourcePropType | string;
+  imageUrl?: string;
   address?: string;
+  restaurantId?: string;
 };
 
 const TABS = ['Upcoming', 'Past', 'Cancelled / Modified'] as const;
-
-const BOOKINGS: Booking[] = [
-  {
-    id: 'b1',
-    name: 'Sakura Sushi Bar',
-    ref: 'RRA-ZZV3S',
-    date: '2026-03-09',
-    time: '2:30pm',
-    guests: 1,
-    table: 1,
-    status: 'Upcoming',
-    image: require('@/assets/restaurant-3.jpg'),
-    tags: 'Japanese Cuisine • Sushi Bar',
-    address: '12 Kingsway, London',
-  },
-  {
-    id: 'b2',
-    name: 'Romeo Lane',
-    ref: 'RRA-B1A72',
-    date: '2026-03-15',
-    time: '7:30pm',
-    guests: 4,
-    table: 12,
-    status: 'Upcoming',
-    image: require('@/assets/restaurant-1.jpg'),
-    tags: 'Crafted Cocktails • Gourmet Cuisine • Best Bar',
-    address: '7 Bell Yard, Holborn',
-  },
-  {
-    id: 'b3',
-    name: 'Sakura Sushi Bar',
-    ref: 'RRA-C9K41',
-    date: '2026-03-10',
-    time: '8:00pm',
-    guests: 2,
-    table: 5,
-    status: 'Past',
-    image: require('@/assets/restaurant-3.jpg'),
-  },
-  {
-    id: 'b4',
-    name: 'Bella Trattoria',
-    ref: 'RRA-M5Q88',
-    date: '2026-03-08',
-    time: '6:30pm',
-    guests: 6,
-    status: 'Cancelled',
-    image: require('@/assets/restaurant-2.jpg'),
-  },
-];
 
 /* ── Component ── */
 
 export default function BookingsScreen() {
   const [activeTab, setActiveTab] = useState(0);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const router = useRouter();
   const { isGuest } = useAuth();
 
+  // Handle real-time booking updates from WebSocket
+  const handleBookingUpdate = useCallback((update: any) => {
+    console.log('📢 Real-time booking update received:', update);
+    
+    // Show notification
+    if (update.action === 'confirmed') {
+      Alert.alert('✅ Booking Confirmed!', 'The restaurant has confirmed your booking!');
+    } else if (update.action === 'rejected') {
+      Alert.alert('❌ Booking Rejected', update.reason || 'Your booking has been rejected by the restaurant.');
+    } else if (update.action === 'cancelled') {
+      Alert.alert('🚫 Booking Cancelled', 'Your booking has been cancelled.');
+    }
+    
+    // Refresh bookings list immediately
+    loadBookings();
+  }, []);
 
+  // WebSocket hook for real-time updates
+  useBookingUpdates(customerId, handleBookingUpdate);
+
+  // Fetch bookings from API
+  const loadBookings = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        console.log('No token found');
+        setLoading(false);
+        return;
+      }
+
+      console.log('📋 Loading customer bookings...');
+      const response = await axios.get(`${API_CONFIG.BASE_URL}/api/reservations/my-reservations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log('✅ Bookings loaded:', response.data);
+
+      // Extract customer ID from token or first booking (for WebSocket)
+      if (!customerId && response.data && response.data.length > 0) {
+        // Try to decode JWT to get user ID
+        try {
+          const parts = token.split('.');
+          if (parts.length === 3) {
+            const decoded = JSON.parse(
+              Buffer.from(parts[1], 'base64').toString('utf-8')
+            );
+            if (decoded.sub) {
+              setCustomerId(decoded.sub);
+              console.log('🆔 Customer ID set from token:', decoded.sub);
+            }
+          }
+        } catch (e) {
+          console.log('Could not decode JWT:', e);
+        }
+      }
+
+      // Transform API data to UI format
+      const transformedBookings: Booking[] = (response.data || []).map((apiBooking: any) => {
+        const bookingStatus = getBookingStatus(apiBooking.status);
+        const restaurantImageUrl = apiBooking.restaurants?.image_url;
+        
+        console.log(`📸 Booking: ${apiBooking.restaurants?.name || 'Unknown'}`);
+        console.log(`   Full restaurant data:`, apiBooking.restaurants);
+        console.log(`   Image URL:`, restaurantImageUrl);
+        
+        return {
+          id: apiBooking.id,
+          name: apiBooking.restaurants?.name || 'Restaurant',
+          ref: `RRA-${apiBooking.id.slice(0, 5).toUpperCase()}`,
+          date: apiBooking.reservation_date,
+          time: formatTime(apiBooking.reservation_time),
+          guests: apiBooking.party_size,
+          table: apiBooking.tables?.table_number,
+          status: bookingStatus,
+          dbStatus: apiBooking.status,
+          image: restaurantImageUrl ? { uri: restaurantImageUrl } : require('@/assets/restaurant-1.jpg'),
+          imageUrl: restaurantImageUrl,
+          address: apiBooking.restaurant_address,
+          restaurantId: apiBooking.restaurant_id,
+        };
+      });
+
+      setBookings(transformedBookings);
+    } catch (error: any) {
+      console.error('❌ Error loading bookings:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [customerId]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadBookings();
+    setRefreshing(false);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBookings();
+    }, [loadBookings])
+  );
+
+  // Convert DB status to UI status
+  const getBookingStatus = (dbStatus: string): BookingStatus => {
+    if (dbStatus === 'completed' || dbStatus === 'past') return 'Past';
+    if (dbStatus === 'cancelled' || dbStatus === 'rejected') return 'Cancelled';
+    if (dbStatus === 'confirmed' || dbStatus === 'arrived') return 'Confirmed';
+    return 'Upcoming'; // pending only
+  };
+
+  // Format time from HH:MM to 12-hour format
+  const formatTime = (time: string) => {
+    if (!time) return '';
+    const [h, m] = time.split(':');
+    const hour = parseInt(h);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const h12 = hour % 12 || 12;
+    return `${h12}:${m}${ampm}`;
+  };
+
+  // Check if current time is more than 30 minutes away from reservation
+  const canModifyBooking = (booking: Booking): boolean => {
+    if (booking.status !== 'Upcoming' && booking.status !== 'Confirmed') return false;
+    
+    const reservationDateTime = new Date(`${booking.date}T${booking.time.replace(/[APM]/g, '').trim()}`);
+    const now = new Date();
+    const timeDiffMs = reservationDateTime.getTime() - now.getTime();
+    const timeDiffMinutes = timeDiffMs / (1000 * 60);
+    
+    return timeDiffMinutes > 30; // Can modify if more than 30 minutes away
+  };
 
   const tabStatusMap: Record<number, BookingStatus[]> = {
-    0: ['Upcoming'],
+    0: ['Upcoming', 'Confirmed'],
     1: ['Past'],
     2: ['Cancelled'],
   };
 
-  const filtered = BOOKINGS.filter((b) =>
+  const filtered = bookings.filter((b) =>
     tabStatusMap[activeTab]?.includes(b.status)
   );
 
   const getStatusColor = (status: BookingStatus) => {
     switch (status) {
+      case 'Confirmed':
+        return '#10b981'; // green
       case 'Upcoming':
         return Colors.primary;
       case 'Past':
@@ -116,162 +211,245 @@ export default function BookingsScreen() {
   };
 
   const handleModify = (booking: Booking) => {
+    if (!canModifyBooking(booking)) {
+      Alert.alert(
+        'Cannot Modify',
+        'You can only modify your booking more than 30 minutes before the reservation time.'
+      );
+      return;
+    }
+
     router.push({
       pathname: '../modify-booking',
       params: {
         id: booking.id,
+        restaurantId: booking.restaurantId || '',
         name: booking.name,
         ref: booking.ref,
         date: booking.date,
         time: booking.time,
         guests: String(booking.guests),
         table: String(booking.table ?? 0),
-        tags: booking.tags ?? '',
         address: booking.address ?? '',
       },
     } as any);
   };
 
-  const handleCancel = (booking: Booking) => {
+  const handleCancel = async (booking: Booking) => {
+    if (!canModifyBooking(booking)) {
+      Alert.alert(
+        'Cannot Cancel',
+        'You cannot cancel within 30 minutes of your reservation time.'
+      );
+      return;
+    }
+
     Alert.alert(
       'Cancel Booking',
       `Are you sure you want to cancel your booking at ${booking.name}?`,
       [
         { text: 'Keep Booking', style: 'cancel' },
-        { text: 'Cancel Booking', style: 'destructive', onPress: () => {} },
+        {
+          text: 'Cancel Booking',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await AsyncStorage.getItem('token');
+              if (!token) {
+                Alert.alert('Error', 'Authentication failed');
+                return;
+              }
+
+              console.log('🗑️ Cancelling booking:', booking.id);
+              await axios.delete(`${API_CONFIG.BASE_URL}/api/reservations/${booking.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+
+              console.log('✅ Booking cancelled successfully');
+              Alert.alert('Success', 'Your booking has been cancelled');
+              loadBookings(); // Refresh the list
+            } catch (error: any) {
+              console.error('❌ Error cancelling booking:', error);
+              Alert.alert('Error', 'Failed to cancel booking');
+            }
+          },
+        },
       ]
     );
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <Text style={styles.heading}>Booking History</Text>
-      <Text style={styles.subHeading}>Manage your reservations</Text>
-
       {isGuest ? (
-        <View style={styles.guestViewContainer}>
-          <View style={styles.guestIcon}>
-            <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} />
-          </View>
-          <Text style={styles.guestTitle}>Login Required</Text>
-          <Text style={styles.guestMessage}>Sign in to your account to view and manage your bookings.</Text>
-          <CustomButton
-            title="Log In"
-            onPress={() => router.push('/login')}
-            variant="primary"
-          />
-          <TouchableOpacity onPress={() => router.push('/account-type')} style={styles.guestSignupLink}>
-            <Text style={styles.guestSignupText}>Don't have an account? Sign Up</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <>
-          {/* Tab selector */}
-          <View style={styles.tabRow}>
-            {TABS.map((tab, idx) => (
-              <TouchableOpacity
-                key={tab}
-                style={[styles.tab, activeTab === idx && styles.tabActive]}
-                onPress={() => setActiveTab(idx)}
-              >
-                <Text
-                  style={[styles.tabText, activeTab === idx && styles.tabTextActive]}
-                >
-                  {tab}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Booking cards */}
-          {filtered.length === 0 && (
-            <View style={styles.emptyState}>
-              <Ionicons name="calendar-outline" size={48} color={Colors.border} />
-              <Text style={styles.emptyText}>No {TABS[activeTab].toLowerCase()} bookings</Text>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Guest view */}
+          <View style={styles.guestViewContainer}>
+            <View style={styles.guestIcon}>
+              <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} />
             </View>
-          )}
-
-          {filtered.map((booking) => (
-        <View key={booking.id} style={styles.bookingCard}>
-          {/* Top section */}
-          <View style={styles.bookingTop}>
-            <Image source={booking.image} style={styles.bookingImage} />
-            <View style={styles.bookingInfo}>
-              <View style={styles.bookingNameRow}>
-                <Text style={styles.bookingName} numberOfLines={1}>
-                  {booking.name}
-                </Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    { borderColor: getStatusColor(booking.status) },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusText,
-                      { color: getStatusColor(booking.status) },
-                    ]}
-                  >
-                    {booking.status}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.refText}>Ref: {booking.ref}</Text>
-              <View style={styles.detailRow}>
-                <Ionicons name="calendar-outline" size={14} color={Colors.primary} />
-                <Text style={styles.detailText}>{booking.date}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Ionicons name="time-outline" size={14} color={Colors.primary} />
-                <Text style={styles.detailText}>{booking.time}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Ionicons name="people-outline" size={14} color={Colors.primary} />
-                <Text style={styles.detailText}>
-                  {booking.guests} Guest{booking.guests > 1 ? 's' : ''}
-                  {booking.table ? ` \u2022 Table ${booking.table}` : ''}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Action buttons — vary by status */}
-          {booking.status === 'Upcoming' && (
-            <View style={styles.bookingActions}>
-              <TouchableOpacity
-                style={styles.modifyBtn}
-                onPress={() => handleModify(booking)}
-              >
-                <Text style={styles.modifyText}>Modify</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => handleCancel(booking)}
-              >
-                <Ionicons name="close" size={16} color={Colors.accent} />
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {booking.status === 'Past' && (
-            <TouchableOpacity style={styles.reviewBtn}>
-              <Text style={styles.reviewText}>Leave Review</Text>
+            <Text style={styles.guestTitle}>Login Required</Text>
+            <Text style={styles.guestMessage}>Sign in to your account to view and manage your bookings.</Text>
+            <CustomButton
+              title="Log In"
+              onPress={() => router.push('/login')}
+              variant="primary"
+            />
+            <TouchableOpacity onPress={() => router.push('/account-type')} style={styles.guestSignupLink}>
+              <Text style={styles.guestSignupText}>Don't have an account? Sign Up</Text>
             </TouchableOpacity>
+          </View>
+        </ScrollView>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {/* Header */}
+          <Text style={styles.heading}>Booking History</Text>
+          <Text style={styles.subHeading}>Manage your reservations</Text>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={styles.loadingText}>Loading your bookings...</Text>
+            </View>
+          ) : (
+            <>
+              {/* Tab selector */}
+              <View style={styles.tabRow}>
+                {TABS.map((tab, idx) => (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[styles.tab, activeTab === idx && styles.tabActive]}
+                    onPress={() => setActiveTab(idx)}
+                  >
+                    <Text
+                      style={[styles.tabText, activeTab === idx && styles.tabTextActive]}
+                    >
+                      {tab}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Booking cards */}
+              {filtered.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Ionicons name="calendar-outline" size={48} color={Colors.border} />
+                  <Text style={styles.emptyText}>No {TABS[activeTab].toLowerCase()} bookings</Text>
+                </View>
+              )}
+
+              {filtered.map((booking) => {
+                const canModify = canModifyBooking(booking);
+                return (
+                  <View key={booking.id} style={styles.bookingCard}>
+                    {/* Top section */}
+                    <View style={styles.bookingTop}>
+                      <Image 
+                        source={
+                          typeof booking.image === 'string' 
+                            ? { uri: booking.image }
+                            : booking.image
+                        }
+                        style={styles.bookingImage}
+                        defaultSource={require('@/assets/restaurant-1.jpg')}
+                        onLoad={() => console.log(`✅ Image loaded for: ${booking.name}`)}
+                        onError={(error) => {
+                          console.log(`⚠️  Image failed to load for ${booking.name}:`, error);
+                          console.log(`   Attempted URL:`, typeof booking.image === 'string' ? booking.image : 'local image');
+                        }}
+                      />
+                      <View style={styles.bookingInfo}>
+                        <View style={styles.bookingNameRow}>
+                          <Text style={styles.bookingName} numberOfLines={1}>
+                            {booking.name}
+                          </Text>
+                          <View
+                            style={[
+                              styles.statusBadge,
+                              { borderColor: getStatusColor(booking.status) },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusText,
+                                { color: getStatusColor(booking.status) },
+                              ]}
+                            >
+                              {booking.status}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.refText}>Ref: {booking.ref}</Text>
+                        <View style={styles.detailRow}>
+                          <Ionicons name="calendar-outline" size={14} color={Colors.primary} />
+                          <Text style={styles.detailText}>{booking.date}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Ionicons name="time-outline" size={14} color={Colors.primary} />
+                          <Text style={styles.detailText}>{booking.time}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                          <Ionicons name="people-outline" size={14} color={Colors.primary} />
+                          <Text style={styles.detailText}>
+                            {booking.guests} Guest{booking.guests > 1 ? 's' : ''}
+                            {booking.table ? ` \u2022 Table ${booking.table}` : ''}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {/* Action buttons — vary by status */}
+                    {(booking.status === 'Upcoming' || booking.status === 'Confirmed') && (
+                      <View style={styles.bookingActions}>
+                        <TouchableOpacity
+                          style={[styles.modifyBtn, !canModify && styles.disabledBtn]}
+                          onPress={() => handleModify(booking)}
+                          disabled={!canModify}
+                        >
+                          <Text style={[styles.modifyText, !canModify && styles.disabledText]}>
+                            Modify
+                          </Text>
+                          {!canModify && (
+                            <Text style={styles.timeWarning}>(within 30 min)</Text>
+                          )}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.cancelBtn, !canModify && styles.disabledBtn]}
+                          onPress={() => handleCancel(booking)}
+                          disabled={!canModify}
+                        >
+                          <Ionicons
+                            name="close"
+                            size={16}
+                            color={canModify ? Colors.accent : Colors.gray}
+                          />
+                          <Text style={[styles.cancelText, !canModify && styles.disabledText]}>
+                            Cancel
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+
+                    {booking.status === 'Past' && (
+                      <TouchableOpacity style={styles.reviewBtn}>
+                        <Text style={styles.reviewText}>Leave Review</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </>
           )}
-        </View>
-      ))}
-        </>
+        </ScrollView>
       )}
-      </ScrollView>
-
-
     </View>
   );
 }
@@ -287,6 +465,19 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
+  },
+
+  /* Loading state */
+  loadingContainer: {
+    paddingVertical: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 12,
   },
 
   /* Header */
@@ -363,6 +554,7 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 14,
+    resizeMode: 'cover',
   },
   bookingInfo: {
     flex: 1,
@@ -440,6 +632,18 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 14,
     color: Colors.accent,
+  },
+  disabledBtn: {
+    opacity: 0.5,
+    borderColor: Colors.gray,
+  },
+  disabledText: {
+    color: Colors.gray,
+  },
+  timeWarning: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 10,
+    color: Colors.gray,
   },
   reviewBtn: {
     height: 44,

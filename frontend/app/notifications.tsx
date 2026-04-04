@@ -1,92 +1,87 @@
-import React, { useState } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
-
-/* ── Data ── */
-
-type Notification = {
-  id: string;
-  type: 'confirmed' | 'modified';
-  title: string;
-  body: string;
-  time: string;
-  read: boolean;
-};
-
-const INITIAL_NOTIFICATIONS: Notification[] = [
-  {
-    id: 'n1',
-    type: 'confirmed',
-    title: 'Booking Confirmed',
-    body: 'Reservation RRA-3FX8E at Romeo Lane on 2026-03-09 at 6:30pm is confirmed.',
-    time: '2m ago',
-    read: false,
-  },
-  {
-    id: 'n2',
-    type: 'modified',
-    title: 'Booking Modified',
-    body: 'Your reservation at Romeo Lane was marked as modified. Please create a new reservation time.',
-    time: '2m ago',
-    read: false,
-  },
-  {
-    id: 'n3',
-    type: 'confirmed',
-    title: 'Booking Confirmed',
-    body: 'Reservation RRA-T8E4T at Romeo Lane on 2026-03-10 at 1:30pm is confirmed.',
-    time: '3m ago',
-    read: false,
-  },
-  {
-    id: 'n4',
-    type: 'confirmed',
-    title: 'Booking Confirmed',
-    body: 'Reservation RRA-ZZV3S at Sakura Sushi Bar on 2026-03-09 at 2:30pm is confirmed.',
-    time: '10m ago',
-    read: false,
-  },
-];
+import { useNotifications } from '@/hooks/useNotifications';
 
 /* ── Component ── */
 
 export default function NotificationsScreen() {
   const router = useRouter();
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+  const {
+    notifications,
+    loading,
+    unreadCount,
+    markAllAsRead,
+    markAsRead,
+    deleteNotification,
+    fetchNotifications,
+  } = useNotifications();
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  // Refresh notifications when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchNotifications();
+    }, [fetchNotifications])
+  );
 
-  const markAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
-
-  const toggleRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: !n.read } : n)),
-    );
-  };
-
-  const getIcon = (type: Notification['type']) => {
-    if (type === 'confirmed') {
-      return (
-        <View style={[styles.iconCircle, styles.iconConfirmed]}>
-          <Ionicons name="checkmark" size={20} color={Colors.white} />
-        </View>
-      );
+  const getIcon = (type: string) => {
+    switch (type) {
+      case 'booking_confirmed':
+        return (
+          <View style={[styles.iconCircle, styles.iconConfirmed]}>
+            <Ionicons name="checkmark" size={20} color={Colors.white} />
+          </View>
+        );
+      case 'booking_rejected':
+        return (
+          <View style={[styles.iconCircle, styles.iconRejected]}>
+            <Ionicons name="close" size={20} color={Colors.white} />
+          </View>
+        );
+      case 'booking_modified':
+        return (
+          <View style={[styles.iconCircle, styles.iconModified]}>
+            <Ionicons name="pencil" size={20} color={Colors.white} />
+          </View>
+        );
+      case 'booking_cancelled':
+        return (
+          <View style={[styles.iconCircle, styles.iconCancelled]}>
+            <Ionicons name="ban" size={20} color={Colors.white} />
+          </View>
+        );
+      default:
+        return (
+          <View style={[styles.iconCircle, styles.iconDefault]}>
+            <Ionicons name="notifications" size={20} color={Colors.white} />
+          </View>
+        );
     }
-    return (
-      <View style={[styles.iconCircle, styles.iconModified]}>
-        <Text style={styles.iconEmoji}>✏️</Text>
-      </View>
-    );
+  };
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    return date.toLocaleDateString();
   };
 
   return (
@@ -100,39 +95,60 @@ export default function NotificationsScreen() {
           <Text style={styles.headerTitle}>Notifications</Text>
           <Text style={styles.headerSub}>{unreadCount} unread</Text>
         </View>
-        <TouchableOpacity style={styles.markAllBtn} onPress={markAllRead}>
-          <Ionicons name="checkmark-done" size={18} color={Colors.primary} />
-          <Text style={styles.markAllText}>Mark all read</Text>
-        </TouchableOpacity>
+        {unreadCount > 0 && (
+          <TouchableOpacity style={styles.markAllBtn} onPress={markAllAsRead}>
+            <Ionicons name="checkmark-done" size={18} color={Colors.primary} />
+            <Text style={styles.markAllText}>Mark all read</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Notification List */}
-      <ScrollView
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {notifications.map((n) => (
-          <TouchableOpacity
-            key={n.id}
-            style={[
-              styles.card,
-              !n.read && styles.cardUnread,
-            ]}
-            activeOpacity={0.8}
-            onPress={() => toggleRead(n.id)}
-          >
-            <View style={styles.cardRow}>
-              {getIcon(n.type)}
-              <View style={styles.cardContent}>
-                <Text style={styles.cardTitle}>{n.title}</Text>
-                <Text style={styles.cardBody}>{n.body}</Text>
-                <Text style={styles.cardTime}>{n.time}</Text>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading notifications...</Text>
+        </View>
+      ) : notifications.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="notifications-off-outline" size={48} color={Colors.gray} />
+          <Text style={styles.emptyText}>No notifications yet</Text>
+          <Text style={styles.emptySubText}>You'll get notifications about your bookings here</Text>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {notifications.map((n) => (
+            <TouchableOpacity
+              key={n.id}
+              style={[
+                styles.card,
+                !n.is_read && styles.cardUnread,
+              ]}
+              activeOpacity={0.8}
+              onPress={() => markAsRead(n.id)}
+            >
+              <View style={styles.cardRow}>
+                {getIcon(n.type)}
+                <View style={styles.cardContent}>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{n.title}</Text>
+                  <Text style={styles.cardBody} numberOfLines={2}>{n.message}</Text>
+                  <Text style={styles.cardTime}>{formatTime(n.created_at)}</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => deleteNotification(n.id)}
+                >
+                  <Ionicons name="trash-outline" size={16} color={Colors.gray} />
+                </TouchableOpacity>
               </View>
-              {!n.read && <View style={styles.unreadDot} />}
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+              {!n.is_read && <View style={styles.unreadDot} />}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -186,6 +202,40 @@ const styles = StyleSheet.create({
     color: Colors.primary,
   },
 
+  /* Loading */
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 12,
+  },
+
+  /* Empty State */
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 18,
+    color: Colors.text,
+    marginTop: 16,
+  },
+  emptySubText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+
   /* List */
   listContent: {
     paddingHorizontal: 20,
@@ -222,13 +272,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   iconConfirmed: {
-    backgroundColor: Colors.success,
+    backgroundColor: '#10b981',
+  },
+  iconRejected: {
+    backgroundColor: '#ef4444',
   },
   iconModified: {
-    backgroundColor: '#FDF6E0',
+    backgroundColor: '#f59e0b',
   },
-  iconEmoji: {
-    fontSize: 20,
+  iconCancelled: {
+    backgroundColor: '#8b5cf6',
+  },
+  iconDefault: {
+    backgroundColor: Colors.primary,
   },
 
   /* Card content */
@@ -254,12 +310,23 @@ const styles = StyleSheet.create({
     color: Colors.gray,
   },
 
+  /* Delete button */
+  deleteBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+
   /* Unread dot */
   unreadDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: Colors.primary,
-    marginTop: 6,
+    position: 'absolute',
+    top: 12,
+    right: 12,
   },
 });

@@ -507,3 +507,60 @@ exports.getRequiredFields = async (req, res) => {
   });
 };
 
+// DEBUG: Check all restaurants and their image_urls
+exports.debugRestaurantImages = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('restaurants')
+      .select('id, name, image_url, merchant_id, is_published');
+    
+    if (error) throw error;
+    
+    console.log('🔍 DEBUG: All restaurants and their image_urls:');
+    data.forEach((r, idx) => {
+      console.log(`   ${idx + 1}. ${r.name}`);
+      console.log(`      - ID: ${r.id}`);
+      console.log(`      - Image URL: ${r.image_url || '(NULL)'}`);
+      console.log(`      - Published: ${r.is_published}`);
+    });
+    
+    res.status(200).json({
+      total: data.length,
+      restaurants: data
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// ADMIN: Set image_url for a restaurant (for testing/fixing)
+exports.setRestaurantImageUrl = async (req, res) => {
+  try {
+    const { restaurantId, imageUrl } = req.body;
+    
+    if (!restaurantId || !imageUrl) {
+      return res.status(400).json({ error: 'restaurantId and imageUrl are required' });
+    }
+    
+    console.log(`📸 Setting image_url for restaurant ${restaurantId}`);
+    console.log(`   New image URL: ${imageUrl}`);
+    
+    const { data, error } = await supabaseAdmin
+      .from('restaurants')
+      .update({ image_url: imageUrl })
+      .eq('id', restaurantId)
+      .select();
+    
+    if (error) throw error;
+    
+    console.log(`✅ Image URL updated successfully for: ${data[0]?.name}`);
+    
+    res.status(200).json({
+      message: 'Restaurant image_url updated successfully',
+      data: data[0]
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+

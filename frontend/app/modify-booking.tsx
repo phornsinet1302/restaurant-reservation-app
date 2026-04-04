@@ -61,10 +61,10 @@ function suggestTable(guests: number) {
 
 export default function ModifyBookingScreen() {
   const params = useLocalSearchParams<{
+    id: string;
     restaurantId: string;
     name: string;
     address: string;
-    description: string;
   }>();
   const router = useRouter();
 
@@ -84,6 +84,7 @@ export default function ModifyBookingScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  const reservationId = params.id?.trim() || '';
   const restaurantId = params.restaurantId?.trim() || '';
   const restaurantName = params.name || 'Restaurant';
 
@@ -239,65 +240,75 @@ export default function ModifyBookingScreen() {
   const handleSave = async () => {
     // ===== COMPREHENSIVE VALIDATION =====
     console.log('🔍 Starting booking validation...');
+    console.log('📝 Params received:', { restaurantId, reservationId, name: restaurantName });
     
-    // 1. Validate Name
-    if (!bookingName.trim()) {
-      Alert.alert('Name Required', 'Please enter your full name for the booking');
+    const isUpdating = reservationId.trim().length > 0;
+    
+    // CRITICAL: Check if we have required data
+    if (!isUpdating && (!restaurantId || restaurantId.trim() === '')) {
+      console.error('❌ CRITICAL: restaurantId is empty!');
+      Alert.alert(
+        'Missing Restaurant Info',
+        'Restaurant information was not passed correctly. Please go back to the restaurant detail page and try clicking "Book a Table" again.',
+        [
+          {
+            text: 'Go Back',
+            onPress: () => router.back(),
+          },
+        ]
+      );
       return;
     }
-    if (bookingName.trim().length < 2) {
-      Alert.alert('Invalid Name', 'Name must be at least 2 characters long');
-      return;
-    }
-    console.log('✓ Name valid:', bookingName.trim());
+    
+    // For updates, skip name and email validation since we're not modifying those
+    if (!isUpdating) {
+      // 1. Validate Name (only for new bookings)
+      if (!bookingName.trim()) {
+        Alert.alert('Name Required', 'Please enter your full name for the booking');
+        return;
+      }
+      if (bookingName.trim().length < 2) {
+        Alert.alert('Invalid Name', 'Name must be at least 2 characters long');
+        return;
+      }
 
-    // 2. Validate Email
-    if (!bookingEmail.trim()) {
-      Alert.alert('Email Required', 'Please enter your email address');
-      return;
+      // 2. Validate Email (only for new bookings)
+      if (!bookingEmail.trim()) {
+        Alert.alert('Email Required', 'Please enter your email address');
+        return;
+      }
+      if (!isValidEmail(bookingEmail.trim())) {
+        Alert.alert('Invalid Email', 'Please enter a valid email address (e.g., user@example.com)');
+        return;
+      }
     }
-    if (!isValidEmail(bookingEmail.trim())) {
-      Alert.alert('Invalid Email', 'Please enter a valid email address (e.g., user@example.com)');
-      return;
-    }
-    console.log('✓ Email valid:', bookingEmail.trim());
 
     // 3. Validate Guests
     if (guests < 1 || guests > 20) {
       Alert.alert('Invalid Party Size', 'Please select between 1 and 20 guests');
       return;
     }
-    console.log('✓ Party size valid:', guests);
 
     // 4. Validate Date
     if (!selectedDate) {
       Alert.alert('Date Required', 'Please select a date for your reservation');
       return;
     }
-    console.log('✓ Date valid:', selectedDate.toDateString());
 
     // 5. Validate Time
     if (!selectedTime) {
       Alert.alert('Time Required', 'Please select a time for your reservation');
       return;
     }
-    console.log('✓ Time valid:', selectedTime);
 
     // 6. Validate Table Selection
     if (!selectedTableId) {
       Alert.alert('Table Required', 'Please select a table from the available options');
       return;
     }
-    console.log('✓ Table selected:', selectedTableId);
 
-    // 7. Validate Restaurant ID
-    if (!restaurantId || !restaurantId.trim()) {
-      Alert.alert('Restaurant Error', 'Restaurant information is missing. Please go back and try again');
-      return;
-    }
-    console.log('✓ Restaurant ID valid:', restaurantId);
-
-    console.log('✅ All validations passed!');
+    console.log('✅ All frontend validations passed!');
+    console.log('📋 Operation:', isUpdating ? 'UPDATE existing booking' : 'CREATE new booking');
 
     try {
       setSubmitting(true);
@@ -327,67 +338,110 @@ export default function ModifyBookingScreen() {
       const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
       const timeStr = convertTimeToHHMM(selectedTime);
 
-      // Build complete booking payload
-      const bookingPayload = {
-        restaurant_id: restaurantId.trim(),
-        table_id: selectedTableId,
-        reservation_date: dateStr,
-        reservation_time: timeStr,
-        party_size: guests,
-        special_request: specialRequests.trim(),
-        customer_name: bookingName.trim(),
-        customer_email: bookingEmail.trim(),
-      };
-
-      console.log('📦 Booking payload:', {
-        restaurant_id: bookingPayload.restaurant_id,
-        table_id: bookingPayload.table_id,
-        reservation_date: bookingPayload.reservation_date,
-        reservation_time: bookingPayload.reservation_time,
-        party_size: bookingPayload.party_size,
-        customer_name: bookingPayload.customer_name,
-        customer_email: bookingPayload.customer_email,
-        special_request: bookingPayload.special_request || '(none)',
-      });
-
-      // Make the API request
       const headers = {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       };
-      
-      console.log('Request URL:', `${API_URL}/api/reservations`);
-      console.log('Request method: POST');
 
-      const response = await axios.post(
-        `${API_URL}/api/reservations`,
-        bookingPayload,
-        { headers }
-      );
+      let response;
+      let successMessage;
 
-      console.log('✅ Booking successful!');
+      if (isUpdating) {
+        // Update existing reservation
+        const updatePayload = {
+          table_id: selectedTableId,
+          reservation_date: dateStr,
+          reservation_time: timeStr,
+          party_size: guests,
+          special_request: specialRequests.trim(),
+        };
+
+        console.log('📦 Update payload:', {
+          reservation_id: reservationId,
+          ...updatePayload,
+        });
+        
+        console.log('Request URL:', `${API_URL}/api/reservations/${reservationId}/update`);
+        console.log('Request method: PATCH');
+
+        response = await axios.patch(
+          `${API_URL}/api/reservations/${reservationId}/update`,
+          updatePayload,
+          { headers }
+        );
+        successMessage = 'Your booking has been updated successfully';
+        
+        console.log('✅ Booking updated successfully!');
+      } else {
+        // Create new reservation
+        const createPayload = {
+          restaurant_id: restaurantId,
+          table_id: selectedTableId,
+          reservation_date: dateStr,
+          reservation_time: timeStr,
+          party_size: guests,
+          special_request: specialRequests.trim(),
+          customer_name: bookingName.trim(),
+          customer_email: bookingEmail.trim(),
+        };
+
+        console.log('📦 CREATE PAYLOAD:', JSON.stringify(createPayload, null, 2));
+        console.log('Request URL:', `${API_URL}/api/reservations`);
+        console.log('Request method: POST');
+
+        response = await axios.post(
+          `${API_URL}/api/reservations`,
+          createPayload,
+          { headers }
+        );
+        successMessage = 'Your booking has been created successfully';
+        
+        console.log('✅ Booking created successfully!');
+      }
+
       console.log('Response:', response.data);
+      console.log('Response type:', typeof response.data);
+      console.log('Is array?', Array.isArray(response.data));
 
       const booking = Array.isArray(response.data) ? response.data[0] : response.data;
-
-      // Navigate to confirmation
-      router.push({
-        pathname: '/booking-confirmation',
-        params: {
-          bookingId: booking.id,
-          id: booking.id,
-          name: restaurantName,
-          ref: booking.id?.slice(0, 8) || 'RRA-NEW',
-          date: dateStr,
-          time: selectedTime,
-          guests: String(guests),
-          table: selectedTableId,
-          bookingName: bookingName.trim(),
-          bookingEmail: bookingEmail.trim(),
-          address: params.address || '',
-          specialRequests,
+      console.log('Booking object:', booking);
+      
+      const bookingRef = booking?.id || booking?.reservation_id || 'REF-' + Date.now();
+      console.log('Booking reference:', bookingRef);
+      
+      Alert.alert('Success', successMessage, [
+        {
+          text: 'View Booking',
+          onPress: () => {
+            if (isUpdating) {
+              router.push('/(tabs)/bookings');
+            } else {
+              // Get selected table object to get the actual table number
+              const selectedTable = tables.find(t => t.id === selectedTableId);
+              const tableNumber = selectedTable?.table_number || selectedTable?.id || selectedTableId;
+              
+              // Navigate to confirmation screen for new bookings
+              router.push({
+                pathname: '/booking-confirmation',
+                params: {
+                  bookingId: bookingRef,
+                  id: bookingRef,
+                  name: restaurantName,
+                  ref: bookingRef,
+                  date: dateStr,
+                  time: selectedTime,  // Use readable format (e.g., "7:30pm")
+                  guests: String(guests),
+                  table: String(tableNumber),
+                  bookingName,
+                  bookingEmail,
+                  address: params.address || '',
+                  specialRequests: specialRequests.trim(),
+                },
+              } as any);
+            }
+          },
         },
-      } as any);
+      ]);
     } catch (err: any) {
       console.error('=== BOOKING ERROR ===');
       console.error('Error type:', err.constructor.name);
@@ -459,7 +513,7 @@ export default function ModifyBookingScreen() {
           <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
             <Ionicons name="arrow-back" size={24} color={Colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Modify Booking</Text>
+          <Text style={styles.headerTitle}>{reservationId ? 'Modify Booking' : 'New Booking'}</Text>
           <View style={{ width: 24 }} />
         </View>
 
@@ -474,11 +528,19 @@ export default function ModifyBookingScreen() {
           ) : null}
         </View>
 
+        {/* Form Legend */}
+        <View style={styles.legendBox}>
+          <Text style={styles.legendText}>
+            <Text style={{color: '#E74C3C'}}>*</Text> Required fields
+            <Text style={{color: Colors.gray}}> • (Optional) fields</Text>
+          </Text>
+        </View>
+
         {/* Date section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="calendar-outline" size={16} color={Colors.gray} />
-            <Text style={styles.sectionLabel}>Date</Text>
+            <Text style={styles.sectionLabel}>Date <Text style={{color: '#E74C3C'}}>*</Text></Text>
           </View>
 
           <View style={styles.dateHeaderRow}>
@@ -537,7 +599,7 @@ export default function ModifyBookingScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="time-outline" size={16} color={Colors.gray} />
-            <Text style={styles.sectionLabel}>Time</Text>
+            <Text style={styles.sectionLabel}>Time <Text style={{color: '#E74C3C'}}>*</Text></Text>
           </View>
           <View style={styles.timeGrid}>
             {TIME_SLOTS.map((slot) => {
@@ -566,7 +628,7 @@ export default function ModifyBookingScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="people-outline" size={16} color={Colors.gray} />
-            <Text style={styles.sectionLabel}>Party size</Text>
+            <Text style={styles.sectionLabel}>Party size <Text style={{color: '#E74C3C'}}>*</Text></Text>
           </View>
           <View style={styles.partyRow}>
             <Text style={styles.guestsLabel}>
@@ -594,7 +656,7 @@ export default function ModifyBookingScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="grid-outline" size={16} color={Colors.gray} />
-            <Text style={styles.sectionLabel}>Select Table</Text>
+            <Text style={styles.sectionLabel}>Select Table <Text style={{color: '#E74C3C'}}>*</Text></Text>
           </View>
           
           {error ? (
@@ -635,7 +697,7 @@ export default function ModifyBookingScreen() {
         </View>
 
         {/* Special Requests */}
-        <Text style={styles.fieldLabel}>Special Requests</Text>
+        <Text style={styles.fieldLabel}>Special Requests <Text style={{color: Colors.gray}}>(Optional)</Text></Text>
         <View style={styles.textAreaWrap}>
           <TextInput
             style={styles.textArea}
@@ -649,7 +711,7 @@ export default function ModifyBookingScreen() {
         </View>
 
         {/* Booking name */}
-        <Text style={styles.fieldLabel}>Booking name</Text>
+        <Text style={styles.fieldLabel}>Booking name <Text style={{color: '#E74C3C'}}>*</Text></Text>
         <View style={styles.inputWrap}>
           <TextInput
             style={styles.input}
@@ -661,7 +723,7 @@ export default function ModifyBookingScreen() {
         </View>
 
         {/* Booking email */}
-        <Text style={styles.fieldLabel}>Booking email</Text>
+        <Text style={styles.fieldLabel}>Booking email <Text style={{color: '#E74C3C'}}>*</Text></Text>
         <View style={styles.inputWrap}>
           <TextInput
             style={styles.input}
@@ -752,6 +814,22 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
     color: 'rgba(255,255,255,0.7)',
+  },
+
+  /* Legend */
+  legendBox: {
+    backgroundColor: '#F0F3F7',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.primary,
+  },
+  legendText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.text,
+    lineHeight: 16,
   },
 
   /* Section card */

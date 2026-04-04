@@ -1,5 +1,49 @@
 const supabase = require('../config/supabase');
 const { supabaseAdmin } = require('../config/supabase');
+
+// ==================== HELPER FUNCTION - CREATE NOTIFICATIONS ====================
+const createNotification = async (userId, title, message, type = 'booking') => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('notifications')
+      .insert([{
+        user_id: userId,
+        title,
+        message,
+        type,
+        is_read: false,
+      }])
+      .select();
+    
+    if (error) {
+      console.error('⚠️ Failed to create notification:', error.message);
+      return null;
+    }
+    
+    console.log(`📢 Notification created for user ${userId}: ${title}`);
+    return data[0];
+  } catch (err) {
+    console.error('⚠️ Notification creation error:', err.message);
+    return null;
+  }
+};
+
+// ==================== HELPER FUNCTION - EMIT WEBSOCKET EVENTS ====================
+const emitNotificationEvent = (io, userId, title, message, data = {}) => {
+  if (!io) return;
+  
+  io.to(userId).emit('notification_received', {
+    title,
+    message,
+    type: 'alert',
+    timestamp: new Date().toISOString(),
+    ...data
+  });
+  
+  console.log(`📡 WebSocket notification sent to ${userId}`);
+};
+
+// ==================== EXISTING EXPORTS ====================
 exports.createReservation = async (req, res) => {
   try {
     const { restaurant_id, table_id, reservation_date, reservation_time, party_size, special_request, customer_name, customer_email } = req.body;
@@ -184,6 +228,54 @@ exports.createReservation = async (req, res) => {
     console.log('   ✅ Reservation created successfully!');
     console.log('   Reservation ID:', data[0]?.id);
     
+    // ===== CREATE NOTIFICATIONS FOR CUSTOMER & MERCHANT =====
+    const reservationId = data[0]?.id;
+    const restaurantId = restaurant_id;
+    const customerId = req.user.id;
+    
+    // Get restaurant info for notification message
+    const { data: restaurantDataForNotif } = await supabase
+      .from('restaurants')
+      .select('name, merchant_id')
+      .eq('id', restaurantId)
+      .single();
+    
+    if (restaurantDataForNotif) {
+      // Notification for customer
+      await createNotification(
+        customerId,
+        '✅ Booking Created Successfully!',
+        `Your reservation at ${restaurantDataForNotif.name} on ${reservation_date} at ${reservation_time} has been recorded. Waiting for confirmation.`,
+        'booking_created'
+      );
+      
+      // Notification for merchant
+      await createNotification(
+        restaurantDataForNotif.merchant_id,
+        '📥 New Booking Request',
+        `New reservation request for ${party_size} guests at ${reservation_date} ${reservation_time}. Please confirm or reject.`,
+        'booking_received'
+      );
+      
+      // Emit WebSocket events
+      const io = req.app.get('io');
+      if (io) {
+        emitNotificationEvent(
+          io,
+          customerId,
+          '✅ Booking Created',
+          `Your reservation at ${restaurantDataForNotif.name} is pending confirmation`
+        );
+        
+        emitNotificationEvent(
+          io,
+          restaurantDataForNotif.merchant_id,
+          '📥 New Booking',
+          `${party_size} guests on ${reservation_date} at ${reservation_time}`
+        );
+      }
+    }
+    
     res.status(201).json(data);
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -193,13 +285,30 @@ exports.createReservation = async (req, res) => {
 
 // 2. GET MY RESERVATIONS (GET)
 exports.getMyReservations = async (req, res) => {
-  const { data, error } = await supabase
-    .from('reservations')
-    .select('*, restaurants(name), tables(table_number)') 
-    .eq('customer_id', req.user.id); // Looks for customer_id
+  try {
+    const { data, error } = await supabase
+      .from('reservations')
+      .select('*, restaurants(name, image_url), tables(table_number)') 
+      .eq('customer_id', req.user.id);
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(200).json(data);
+    if (error) return res.status(400).json({ error: error.message });
+    
+    // Debug logging
+    console.log('📋 [getMyReservations] Retrieved reservations for customer:', req.user.id);
+    if (data && data.length > 0) {
+      console.log(`   Found ${data.length} reservations`);
+      data.forEach((booking, idx) => {
+        console.log(`   Booking ${idx + 1}:`);
+        console.log(`     - Restaurant:`, booking.restaurants?.name);
+        console.log(`     - Image URL:`, booking.restaurants?.image_url);
+      });
+    }
+    
+    res.status(200).json(data);
+  } catch (err) {
+    console.error('❌ Error in getMyReservations:', err.message);
+    res.status(400).json({ error: err.message });
+  }
 };
 
 // 3. GET RESERVATION DETAILS (GET)
@@ -230,15 +339,206 @@ exports.updateReservationStatus = async (req, res) => {
 
 // 5. CANCEL RESERVATION (DELETE)
 exports.cancelReservation = async (req, res) => {
-  const { data, error } = await supabaseAdmin
-    .from('reservations')
-    .update({ status: 'cancelled' })
-    .eq('id', req.params.id)
-    .eq('customer_id', req.user.id)
-    .select();
+  try {
+    const reservationId = req.params.id;
+    const customerId = req.user.id;
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(200).json({ message: "Reservation cancelled successfully.", data });
+    // Get reservation details first to get restaurant_id
+    const { data: reservation, error: fetchError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, restaurant_id, customer_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (fetchError || !reservation) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Verify customer owns this reservation
+    if (reservation.customer_id !== customerId) {
+      return res.status(403).json({ error: 'You can only cancel your own bookings' });
+    }
+
+    // Cancel the reservation
+    const { data, error } = await supabaseAdmin
+      .from('reservations')
+      .update({ status: 'cancelled' })
+      .eq('id', reservationId)
+      .select();
+
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Get restaurant and merchant info for notifications
+    const { data: restaurantCancelInfo } = await supabase
+      .from('restaurants')
+      .select('name, merchant_id')
+      .eq('id', reservation.restaurant_id)
+      .single();
+
+    // Create notifications
+    if (restaurantCancelInfo) {
+      // Notification for customer
+      await createNotification(
+        customerId,
+        '❌ Booking Cancelled',
+        `Your reservation at ${restaurantCancelInfo.name} has been cancelled.`,
+        'booking_cancelled'
+      );
+      
+      // Notification for merchant
+      await createNotification(
+        restaurantCancelInfo.merchant_id,
+        '🚫 Booking Cancelled',
+        `A customer has cancelled their reservation. The table is now available.`,
+        'booking_cancelled'
+      );
+    }
+
+    // Emit WebSocket event to notify merchant of cancellation
+    const io = req.app.get('io');
+    if (io && reservation) {
+      io.to(reservation.restaurant_id).emit('reservation_updated', {
+        id: reservationId,
+        status: 'cancelled',
+        action: 'cancelled_by_customer',
+        message: 'A booking has been cancelled by the customer'
+      });
+      
+      // Emit to customer as well
+      io.to(customerId).emit('booking_cancelled', {
+        id: reservationId,
+        status: 'cancelled',
+        message: '❌ Your booking has been cancelled'
+      });
+      
+      console.log('📡 WebSocket event sent for customer cancellation');
+    }
+
+    res.status(200).json({ message: "Reservation cancelled successfully.", data });
+  } catch (err) {
+    console.error('❌ Error cancelling reservation:', err.message);
+    res.status(500).json({ error: 'Failed to cancel reservation: ' + err.message });
+  }
+};
+
+// 5b. UPDATE RESERVATION DETAILS (PATCH - Customer updates booking details)
+exports.updateReservationDetails = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const customerId = req.user.id;
+
+    console.log('✏️ [updateReservationDetails] Reservation ID:', reservationId, 'Customer ID:', customerId);
+
+    // Validate input
+    const { table_id, reservation_date, reservation_time, party_size, special_request } = req.body;
+
+    if (!table_id || !reservation_date || !reservation_time || !party_size) {
+      return res.status(400).json({ error: 'Missing required fields: table_id, reservation_date, reservation_time, party_size' });
+    }
+
+    // Get existing reservation to verify it belongs to the customer
+    const { data: existingReservation, error: fetchError } = await supabaseAdmin
+      .from('reservations')
+      .select('id, customer_id, restaurant_id, status, table_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (fetchError || !existingReservation) {
+      console.log('❌ Reservation not found');
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    // Verify customer owns this reservation
+    if (existingReservation.customer_id !== customerId) {
+      console.log('❌ Customer does not own this reservation');
+      return res.status(403).json({ error: 'You can only modify your own bookings' });
+    }
+
+    // Only allow modification for pending or confirmed status
+    if (!['pending', 'confirmed'].includes(existingReservation.status)) {
+      console.log('❌ Cannot modify reservation with status:', existingReservation.status);
+      return res.status(400).json({ error: 'Can only modify pending or confirmed bookings' });
+    }
+
+    // Update the reservation
+    const { data: updatedData, error: updateError } = await supabaseAdmin
+      .from('reservations')
+      .update({
+        table_id,
+        reservation_date,
+        reservation_time,
+        party_size,
+        special_request: special_request || null,
+      })
+      .eq('id', reservationId)
+      .select();
+
+    if (updateError) {
+      console.log('❌ Update error:', updateError.message);
+      return res.status(400).json({ error: updateError.message });
+    }
+
+    console.log('✅ Reservation updated successfully');
+    
+    // Get restaurant and merchant info for notifications
+    const { data: restaurantModifyInfo } = await supabase
+      .from('restaurants')
+      .select('name, merchant_id')
+      .eq('id', existingReservation.restaurant_id)
+      .single();
+    
+    const restaurantName = restaurantModifyInfo?.name || 'Restaurant';
+    const merchantId = restaurantModifyInfo?.merchant_id;
+    
+    // Create notifications for customer and merchant
+    await createNotification(
+      customerId,
+      '✏️ Booking Modified',
+      `Your reservation at ${restaurantName} has been updated to ${reservation_date} at ${reservation_time} for ${party_size} guests.`,
+      'booking_modified'
+    );
+    
+    if (merchantId) {
+      await createNotification(
+        merchantId,
+        '✏️ Booking Modified',
+        `A customer modified their reservation for ${party_size} guests on ${reservation_date} at ${reservation_time}.`,
+        'booking_modified'
+      );
+    }
+    
+    // Emit WebSocket event to notify merchant of modification in real-time
+    const io = req.app.get('io');
+    if (io && existingReservation) {
+      const restaurantId = existingReservation.restaurant_id;
+      
+      // Notify merchant
+      io.to(restaurantId).emit('reservation_updated', {
+        id: reservationId,
+        status: updatedData[0]?.status || 'confirmed',
+        action: 'modified',
+        message: 'A booking has been modified by the customer'
+      });
+      
+      // Notify customer
+      io.to(customerId).emit('booking_modified', {
+        id: reservationId,
+        status: updatedData[0]?.status,
+        action: 'modified',
+        message: '✏️ Your booking has been modified successfully',
+        newDate: reservation_date,
+        newTime: reservation_time,
+        newGuests: party_size
+      });
+      
+      console.log('📡 WebSocket event sent to restaurant for modification:', restaurantId);
+    }
+    
+    res.status(200).json(updatedData);
+  } catch (err) {
+    console.error('❌ Unexpected error:', err.message);
+    res.status(500).json({ error: 'Failed to update reservation: ' + err.message });
+  }
 };
 
 // 6. CHECK-IN (POST)
@@ -409,6 +709,56 @@ exports.merchantConfirmReservation = async (req, res) => {
     }
 
     console.log('✅ Reservation confirmed successfully');
+    
+    // Get restaurant name for notification
+    const { data: restaurantConfirmInfo } = await supabase
+      .from('restaurants')
+      .select('name')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+    
+    const restaurantName = restaurantConfirmInfo?.name || 'Restaurant';
+    
+    // Create notifications for merchant and customer
+    await createNotification(
+      merchantId,
+      '✅ Booking Confirmed',
+      `You confirmed a reservation for ${reservationData.party_size} guests on ${reservationData.reservation_date} at ${reservationData.reservation_time}.`,
+      'booking_confirmed'
+    );
+    
+    await createNotification(
+      reservationData.customer_id,
+      '✅ Booking Confirmed!',
+      `Your reservation at ${restaurantName} on ${reservationData.reservation_date} at ${reservationData.reservation_time} has been confirmed!`,
+      'booking_confirmed'
+    );
+    
+    // Emit WebSocket event to notify merchant AND customer in real-time
+    const io = req.app.get('io');
+    if (io && reservationData) {
+      const restaurantId = reservationData.restaurant_id;
+      const customerId = reservationData.customer_id;
+      
+      // Notify merchant
+      io.to(restaurantId).emit('reservation_updated', {
+        id: reservationId,
+        status: 'confirmed',
+        action: 'confirmed',
+        message: 'A booking has been confirmed'
+      });
+      console.log('📡 WebSocket event sent to restaurant:', restaurantId);
+      
+      // Notify customer
+      io.to(customerId).emit('booking_confirmed', {
+        id: reservationId,
+        status: 'confirmed',
+        action: 'confirmed',
+        message: '✅ Your booking has been confirmed by the restaurant!'
+      });
+      console.log('📡 WebSocket event sent to customer:', customerId);
+    }
+    
     res.status(200).json({ message: 'Reservation confirmed', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -432,7 +782,7 @@ exports.merchantRejectReservation = async (req, res) => {
     // Get reservation first
     const { data: reservationData, error: reservationError } = await supabaseAdmin
       .from('reservations')
-      .select('id, restaurant_id, status')
+      .select('id, restaurant_id, status, customer_id')
       .eq('id', reservationId)
       .single();
 
@@ -475,6 +825,55 @@ exports.merchantRejectReservation = async (req, res) => {
     }
 
     console.log('✅ Reservation rejected successfully');
+    
+    // Get restaurant name for notification
+    const { data: restaurantRejectInfo } = await supabase
+      .from('restaurants')
+      .select('name')
+      .eq('id', reservationData.restaurant_id)
+      .single();
+    
+    const restaurantName = restaurantRejectInfo?.name || 'Restaurant';
+    
+    // Create notifications for merchant and customer
+    await createNotification(
+      merchantId,
+      '❌ Booking Rejected',
+      `You rejected a reservation. Reason: ${reason.trim()}`,
+      'booking_rejected'
+    );
+    
+    await createNotification(
+      reservationData.customer_id,
+      '❌ Booking Rejected',
+      `Your reservation at ${restaurantName} has been rejected. Reason: ${reason.trim()}`,
+      'booking_rejected'
+    );
+    
+    // Emit WebSocket event to notify merchant AND customer in real-time
+    const io = req.app.get('io');
+    if (io && reservationData) {
+      const restaurantId = reservationData.restaurant_id;
+      const customerId = reservationData.customer_id;
+      
+      io.to(restaurantId).emit('reservation_updated', {
+        id: reservationId,
+        status: 'rejected',
+        action: 'rejected',
+        message: 'Your booking has been rejected'
+      });
+      
+      // Notify customer
+      io.to(customerId).emit('booking_rejected', {
+        id: reservationId,
+        status: 'rejected',
+        action: 'rejected',
+        message: '❌ Your booking has been rejected by the restaurant',
+        reason: reason.trim()
+      });
+      console.log('📡 WebSocket event sent for rejection - merchant and customer');
+    }
+    
     res.status(200).json({ message: 'Reservation rejected', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -540,6 +939,20 @@ exports.merchantCancelReservation = async (req, res) => {
     }
 
     console.log('✅ Reservation cancelled successfully');
+    
+    // Emit WebSocket event to notify about cancellation
+    const io = req.app.get('io');
+    if (io && reservationData) {
+      const restaurantId = reservationData.restaurant_id;
+      io.to(restaurantId).emit('reservation_updated', {
+        id: reservationId,
+        status: 'cancelled',
+        action: 'cancelled',
+        message: 'A booking has been cancelled'
+      });
+      console.log('📡 WebSocket event sent for cancellation');
+    }
+    
     res.status(200).json({ message: 'Reservation cancelled', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -686,6 +1099,20 @@ exports.customerMarkCompleted = async (req, res) => {
     }
 
     console.log('✅ Reservation completed successfully');
+    
+    // Emit WebSocket event to notify about completion
+    const io = req.app.get('io');
+    if (io && reservationData) {
+      const restaurantId = reservationData.restaurant_id;
+      io.to(restaurantId).emit('reservation_updated', {
+        id: reservationId,
+        status: 'completed',
+        action: 'completed',
+        message: 'A booking has been marked as completed'
+      });
+      console.log('📡 WebSocket event sent for completion');
+    }
+    
     res.status(200).json({ message: 'Reservation completed', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -750,6 +1177,20 @@ exports.merchantMarkArrived = async (req, res) => {
     }
 
     console.log('✅ Reservation marked as arrived');
+    
+    // Emit WebSocket event to notify about arrival
+    const io = req.app.get('io');
+    if (io && reservationData) {
+      const restaurantId = reservationData.restaurant_id;
+      io.to(restaurantId).emit('reservation_updated', {
+        id: reservationId,
+        status: 'arrived',
+        action: 'arrived',
+        message: 'Guest has arrived'
+      });
+      console.log('📡 WebSocket event sent for guest arrival');
+    }
+    
     res.status(200).json({ message: 'Reservation marked as arrived', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -827,6 +1268,66 @@ exports.merchantMarkCompleted = async (req, res) => {
         // Don't fail the request if table update fails
       } else {
         console.log('   ✅ Table released to available');
+      }
+    }
+
+    // Fetch customer ID for notification
+    const { data: reservationDetailData } = await supabaseAdmin
+      .from('reservations')
+      .select('customer_id')
+      .eq('id', reservationId)
+      .single();
+
+    if (reservationDetailData) {
+      const customerId = reservationDetailData.customer_id;
+      
+      // Fetch restaurant name for notification message
+      const { data: restaurantCompletedData } = await supabaseAdmin
+        .from('restaurants')
+        .select('name')
+        .eq('id', reservationData.restaurant_id)
+        .single();
+
+      const restaurantName = restaurantCompletedData?.name || 'Restaurant';
+
+      // Create notification for customer
+      await createNotification(
+        customerId,
+        '✅ Booking Completed',
+        `Your booking at ${restaurantName} has been marked as completed.`,
+        'booking_completed'
+      );
+
+      // Create notification for merchant
+      await createNotification(
+        merchantId,
+        '✅ Booking Completed',
+        `You have marked the booking as completed.`,
+        'booking_completed'
+      );
+
+      // Get IO instance from app
+      const io = req.app.get('io');
+      if (io) {
+        // Emit to customer
+        emitNotificationEvent(
+          io,
+          customerId,
+          '✅ Booking Completed',
+          `Your booking at ${restaurantName} has been marked as completed.`,
+          {
+            type: 'booking_completed',
+            reservationId: reservationId,
+            restaurantName: restaurantName
+          }
+        );
+
+        // Emit to merchant (via restaurant room)
+        io.to(`restaurant_${reservationData.restaurant_id}`).emit('reservation_updated', {
+          type: 'booking_completed',
+          reservationId: reservationId,
+          message: 'Booking marked as completed'
+        });
       }
     }
 

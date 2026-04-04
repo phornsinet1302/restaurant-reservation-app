@@ -20,7 +20,9 @@ const MONTHS = [
 ];
 
 function formatDate(dateStr: string) {
+  if (!dateStr) return 'Date not set';
   const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return 'Invalid date';
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
@@ -56,14 +58,14 @@ export default function BookingConfirmationScreen() {
   const bookingId = params.bookingId || params.id || '';
 
   const details = [
-    { icon: 'pricetag-outline' as const, label: 'Reference', value: params.ref },
+    { icon: 'pricetag-outline' as const, label: 'Reference', value: params.ref || 'N/A' },
     { icon: 'calendar-outline' as const, label: 'Date', value: formatDate(params.date ?? '') },
-    { icon: 'time-outline' as const, label: 'Time', value: params.time },
-    { icon: 'people-outline' as const, label: 'Guests', value: `${params.guests} Guest${Number(params.guests) > 1 ? 's' : ''}` },
-    { icon: 'grid-outline' as const, label: 'Table', value: `Table ${params.table}` },
-    { icon: 'person-outline' as const, label: 'Name', value: params.bookingName },
-    { icon: 'mail-outline' as const, label: 'Email', value: params.bookingEmail },
-    { icon: 'location-outline' as const, label: 'Location', value: params.address },
+    { icon: 'time-outline' as const, label: 'Time', value: params.time || 'N/A' },
+    { icon: 'people-outline' as const, label: 'Guests', value: `${params.guests || '0'} Guest${Number(params.guests) > 1 ? 's' : ''}` },
+    { icon: 'grid-outline' as const, label: 'Table', value: `Table ${params.table || 'N/A'}` },
+    { icon: 'person-outline' as const, label: 'Name', value: params.bookingName || 'N/A' },
+    { icon: 'mail-outline' as const, label: 'Email', value: params.bookingEmail || 'N/A' },
+    { icon: 'location-outline' as const, label: 'Location', value: params.address || 'N/A' },
   ];
 
   const handleNext = () => {
