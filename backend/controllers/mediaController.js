@@ -160,15 +160,17 @@ exports.uploadMedia = async (req, res) => {
 exports.uploadStory = async (req, res) => {
   try {
     const { restaurant_id, media_url, video_url, headline, caption } = req.body;
+    const merchantId = req.user.id; // Get merchant ID from authenticated user
     
     console.log('📖 [uploadStory] Creating story with:');
+    console.log('   Current merchant ID:', merchantId);
     console.log('   restaurant_id:', restaurant_id);
     console.log('   media_url:', media_url ? media_url.substring(0, 60) + '...' : 'none');
     console.log('   video_url:', video_url ? video_url.substring(0, 60) + '...' : 'none');
     console.log('   headline:', headline);
     console.log('   caption:', caption);
     
-    // Verify restaurant exists
+    // Verify restaurant exists and belongs to the current merchant
     const { data: restaurant, error: restaurantError } = await supabaseAdmin
       .from('restaurants')
       .select('id, name, is_published, merchant_id')
@@ -182,7 +184,17 @@ exports.uploadStory = async (req, res) => {
     
     console.log(`   ✅ Restaurant found: ${restaurant.name}`);
     console.log(`      Published: ${restaurant.is_published}`);
-    console.log(`      Merchant ID: ${restaurant.merchant_id}`);
+    console.log(`      Merchant ID in DB: ${restaurant.merchant_id}`);
+    
+    // Verify ownership
+    if (restaurant.merchant_id !== merchantId) {
+      console.error('❌ Unauthorized - merchant does not own this restaurant');
+      console.error('   Expected merchant_id:', merchantId);
+      console.error('   Actual merchant_id:', restaurant.merchant_id);
+      return res.status(403).json({ error: 'Unauthorized - you do not own this restaurant' });
+    }
+    
+    console.log('   ✅ Merchant ownership verified');
     
     // Calculate expiration time (24 hours from right now) and creation time
     const now = new Date();

@@ -246,10 +246,12 @@ export default function HomeScreen() {
     }
   };
 
-  const loadRestaurants = async () => {
+  const loadRestaurants = async (retryCount = 0) => {
     try {
       setRestaurantsLoading(true);
-      const response = await axios.get(`${API_URL}/api/restaurants`);
+      console.log('📱 Loading restaurants...', retryCount > 0 ? `(Retry ${retryCount})` : '');
+      // Use 30s timeout for consistency with search screen
+      const response = await axios.get(`${API_URL}/api/restaurants`, { timeout: 30000 });
       
       // Get user location from state or storage
       let currentLocation = userLocation;
@@ -303,8 +305,17 @@ export default function HomeScreen() {
       })));
       
       setRestaurants(apiRestaurants);
-    } catch (error) {
-      console.warn('Failed to load restaurants:', error);
+    } catch (error: any) {
+      console.warn('Failed to load restaurants:', error.message);
+      
+      // Check if it's a timeout error and retry
+      if (error.code === 'ECONNABORTED' && retryCount < 2) {
+        console.log('⏱️ Timeout occurred, retrying... (' + (retryCount + 1) + '/2)');
+        // Wait 2 seconds before retrying
+        await new Promise(r => setTimeout(r, 2000));
+        return loadRestaurants(retryCount + 1);
+      }
+      
       setRestaurants([]);
     } finally {
       setRestaurantsLoading(false);

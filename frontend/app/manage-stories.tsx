@@ -77,10 +77,16 @@ export default function ManageStoriesScreen() {
 
       console.log('   Token exists:', !!token);
       console.log('   User exists:', !!user);
+      console.log('   Token value:', token ? token.substring(0, 30) + '...' : 'null');
+      console.log('   User ID:', user?.id || 'null');
 
       if (!token || !user) {
-        console.warn('⚠️ No token or user found');
+        console.warn('❌ No token or user found - user must be logged in as merchant');
+        console.warn('   Redirecting to login...');
         setLoading(false);
+        Alert.alert('Login Required', 'Please log in as a merchant to manage stories', [
+          { text: 'OK', onPress: () => router.replace('/login' as any) }
+        ]);
         return;
       }
 
@@ -93,13 +99,13 @@ export default function ManageStoriesScreen() {
         setRestaurantName(dashRes.data.restaurant_name);
       }
 
-      // Get restaurant ID and stories
-      const restRes = await axios.get(`${API_CONFIG.BASE_URL}/api/restaurants`, {
+      // Get restaurant ID and stories (use merchant-specific endpoint for accuracy)
+      const restRes = await axios.get(`${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      console.log('   Found restaurants:', restRes.data?.length);
+      console.log('   Found restaurants:', restRes.data?.data ? '1' : '0');
       
-      const myRestaurant = restRes.data?.find?.((r: any) => r.merchant_id === user.id);
+      const myRestaurant = restRes.data?.data;
       if (myRestaurant) {
         console.log('   My restaurant ID:', myRestaurant.id);
         console.log('   My restaurant name:', myRestaurant.name);
@@ -243,10 +249,55 @@ export default function ManageStoriesScreen() {
       console.log('   Headline:', headline);
       console.log('   Media Type:', mediaType);
 
-      // Prepare image URL
-      const imageUrl = imageUri === 'cover'
-        ? 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4'
-        : imageUri || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4';
+      // Handle image upload
+      let cloudImageUrl = null;
+      
+      if (imageUri && imageUri !== 'cover') {
+        console.log('   🖼️ Uploading image to cloud storage...');
+        try {
+          const formData = new FormData();
+          formData.append('file', {
+            uri: imageUri,
+            type: 'image/jpeg',
+            name: `story_${Date.now()}.jpg`,
+          } as any);
+
+          console.log('   📤 Sending image to backend...');
+          console.log('   Endpoint: /api/media/upload-image');
+          
+          const uploadRes = await axios.post(
+            `${API_CONFIG.BASE_URL}/api/media/upload-image`,
+            formData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'multipart/form-data',
+              },
+              timeout: 60000,
+            }
+          );
+          
+          cloudImageUrl = uploadRes.data.image_url;
+          console.log('   ✅ Image uploaded successfully');
+          console.log('   Cloud URL:', cloudImageUrl.substring(0, 80) + '...');
+        } catch (uploadError: any) {
+          console.error('   ❌ Image upload failed:', uploadError.message);
+          console.error('   Response:', uploadError.response?.data);
+          
+          Alert.alert(
+            'Image Upload Failed',
+            `Could not upload image to cloud storage: ${uploadError.response?.data?.error || uploadError.message}. Please try again.`
+          );
+          
+          setPublishing(false);
+          return;
+        }
+      } else if (imageUri === 'cover') {
+        cloudImageUrl = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4';
+      } else {
+        // No image selected
+        cloudImageUrl = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4';
+      }
 
       let cloudVideoUrl = null;
       
@@ -302,7 +353,7 @@ export default function ManageStoriesScreen() {
       console.log('   📝 Creating story record...');
       const storyPayload = {
         restaurant_id: restaurantId,
-        media_url: imageUrl,
+        media_url: cloudImageUrl,
         video_url: cloudVideoUrl,
         media_type: mediaType,
         headline: headline.trim(),
@@ -311,7 +362,7 @@ export default function ManageStoriesScreen() {
       
       console.log('   Payload:', {
         restaurant_id: restaurantId,
-        media_url: imageUrl.substring(0, 50) + '...',
+        media_url: cloudImageUrl.substring(0, 50) + '...',
         video_url: cloudVideoUrl ? cloudVideoUrl.substring(0, 50) + '...' : 'none',
         media_type: mediaType,
         headline,

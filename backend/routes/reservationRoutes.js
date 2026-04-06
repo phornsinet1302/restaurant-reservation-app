@@ -26,6 +26,7 @@ router.post('/:id/machine-confirm', reservationController.simulateMachineConfirm
 
 // ===== GENERIC ROUTES (MUST COME LAST) =====
 router.post('/', reservationController.createReservation);
+router.get('/my-reservations/stats', reservationController.getMyReservationStats);
 router.get('/my-reservations', reservationController.getMyReservations);
 router.get('/:id', reservationController.getReservationDetails);
 router.delete('/:id', reservationController.cancelReservation);

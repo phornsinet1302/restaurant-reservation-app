@@ -45,7 +45,7 @@ export default function MerchantBookingsScreen() {
 
   // Modal states for actions
   const [modalVisible, setModalVisible] = useState(false);
-  const [actionType, setActionType] = useState<'confirm' | 'reject' | 'cancel' | 'arrived' | 'completed'>('reject');
+  const [actionType, setActionType] = useState<'confirm' | 'reject' | 'arrived' | 'completed'>('reject');
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [reason, setReason] = useState('');
   const [actioning, setActioning] = useState(false);
@@ -141,7 +141,7 @@ export default function MerchantBookingsScreen() {
 
   const onRefresh = () => { setRefreshing(true); loadData(); };
 
-  const handleAction = (type: 'confirm' | 'reject' | 'cancel' | 'arrived' | 'completed', reservation: Reservation) => {
+  const handleAction = (type: 'confirm' | 'reject' | 'arrived' | 'completed', reservation: Reservation) => {
     setActionType(type);
     setSelectedReservation(reservation);
     setReason('');
@@ -151,8 +151,8 @@ export default function MerchantBookingsScreen() {
   const confirmAction = async () => {
     if (!selectedReservation) return;
     
-    if ((actionType === 'reject' || actionType === 'cancel') && !reason.trim()) {
-      Alert.alert('Error', `Please provide a reason for ${actionType}ing this booking`);
+    if ((actionType === 'reject') && !reason.trim()) {
+      Alert.alert('Error', `Please provide a reason for rejecting this booking`);
       return;
     }
 
@@ -175,10 +175,6 @@ export default function MerchantBookingsScreen() {
         endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/reject`;
         payload = { reason: reason.trim() };
         newStatus = 'rejected';
-      } else if (actionType === 'cancel') {
-        endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/cancel`;
-        payload = { reason: reason.trim() };
-        newStatus = 'cancelled';
       } else if (actionType === 'arrived') {
         endpoint = `${API_CONFIG.BASE_URL}/api/reservations/merchant/${selectedReservation.id}/mark-arrived`;
         newStatus = 'arrived';
@@ -332,13 +328,6 @@ export default function MerchantBookingsScreen() {
               <Ionicons name="close-circle" size={16} color="white" />
               <Text style={styles.actionBtnText}>Reject</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.cancelBtn]}
-              onPress={() => handleAction('cancel', item)}
-            >
-              <Ionicons name="trash" size={16} color="white" />
-              <Text style={styles.actionBtnText}>Cancel</Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -439,7 +428,6 @@ export default function MerchantBookingsScreen() {
               <Text style={styles.modalTitle}>
                 {actionType === 'confirm' ? 'Confirm Booking' :
                  actionType === 'reject' ? 'Reject Booking' :
-                 actionType === 'cancel' ? 'Cancel Booking' :
                  actionType === 'arrived' ? 'Customer Arrived' :
                  'Complete Booking'}
               </Text>
@@ -470,14 +458,14 @@ export default function MerchantBookingsScreen() {
                     <Text style={styles.modalValue}>{selectedReservation.party_size} guests</Text>
                   </View>
 
-                  {(actionType === 'reject' || actionType === 'cancel') && (
+                  {(actionType === 'reject') && (
                     <View style={styles.reasonSection}>
                       <Text style={styles.modalLabel}>
-                        {actionType === 'reject' ? 'Rejection Reason' : 'Cancellation Reason'} *
+                        Rejection Reason *
                       </Text>
                       <TextInput
                         style={styles.reasonInput}
-                        placeholder={`Enter ${actionType} reason...`}
+                        placeholder={`Enter rejection reason...`}
                         value={reason}
                         onChangeText={setReason}
                         multiline
@@ -502,7 +490,6 @@ export default function MerchantBookingsScreen() {
                   styles.modalButton,
                   actionType === 'confirm' ? styles.confirmButton :
                   actionType === 'reject' ? styles.rejectButton :
-                  actionType === 'cancel' ? styles.cancelButton :
                   actionType === 'arrived' ? styles.arrivedButton :
                   styles.completedButton
                 ]}
@@ -515,7 +502,6 @@ export default function MerchantBookingsScreen() {
                   <Text style={styles.actionModalText}>
                     {actionType === 'confirm' ? 'Confirm' :
                      actionType === 'reject' ? 'Reject' :
-                     actionType === 'cancel' ? 'Cancel' :
                      actionType === 'arrived' ? 'Mark Arrived' :
                      'Complete Booking'}
                   </Text>
@@ -602,9 +588,6 @@ const styles = StyleSheet.create({
   },
   rejectBtn: {
     backgroundColor: '#F44336',
-  },
-  cancelBtn: {
-    backgroundColor: '#9E9E9E',
   },
   actionBtnText: {
     color: 'white',
@@ -696,9 +679,6 @@ const styles = StyleSheet.create({
   },
   rejectButton: {
     backgroundColor: '#F44336',
-  },
-  cancelButton: {
-    backgroundColor: '#9E9E9E',
   },
   arrivedBtn: {
     backgroundColor: '#2196F3',

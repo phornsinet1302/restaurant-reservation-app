@@ -240,8 +240,10 @@ export default function RestaurantListingScreen() {
 
       setUploadingMenuPhoto(true);
       
-      console.log(`[uploadMenuPhoto] Starting upload for restaurant: ${restaurantId}`);
-      console.log(`[uploadMenuPhoto] Image URI: ${imageUri}`);
+      console.log(`[uploadMenuPhoto] Starting upload`);
+      console.log(`   Display order: ${displayOrder}`);
+      console.log(`   Restaurant ID: ${restaurantId}`);
+      console.log(`   Image URI: ${imageUri}`);
       
       const formData = new FormData();
       formData.append('image', {
@@ -252,8 +254,12 @@ export default function RestaurantListingScreen() {
       formData.append('title', `Menu Photo ${displayOrder}`);
       formData.append('display_order', displayOrder.toString());
 
+      console.log(`[uploadMenuPhoto] FormData prepared:`);
+      console.log(`   display_order field: "${displayOrder.toString()}"`);
+      console.log(`   title field: "Menu Photo ${displayOrder}"`);
+
       const endpoint = `${API_CONFIG.BASE_URL}/api/menu-photos/${restaurantId}`;
-      console.log(`[uploadMenuPhoto] Calling endpoint: ${endpoint}`);
+      console.log(`[uploadMenuPhoto] POST to: ${endpoint}`);
       console.log(`[uploadMenuPhoto] Token present: ${!!token}`);
       
       const uploadRes = await axios.post(
@@ -294,7 +300,7 @@ export default function RestaurantListingScreen() {
         Alert.alert('Error', 'This is not your restaurant.');
       } else if (error?.response?.status === 400) {
         const msg = error?.response?.data?.error || 'Invalid request';
-        Alert.alert('Error', msg);
+        Alert.alert('Upload Failed', msg);
       } else if (error?.code === 'ECONNREFUSED') {
         Alert.alert('Error', 'Cannot connect to backend. Is the server running on port 3000?');
       } else {
