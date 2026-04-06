@@ -43,17 +43,41 @@ export default function MerchantTablesScreen() {
       const user = userStr ? JSON.parse(userStr) : null;
       if (!token || !user) return;
 
-      const restRes = await axios.get(`${API_CONFIG.BASE_URL}/api/restaurants`);
-      const myRestaurant = restRes.data?.find?.((r: any) => r.merchant_id === user.id);
-      if (myRestaurant) {
+      console.log('📱 [Tables] ► START loadData for merchant:', user.id);
+      console.log('📱 [Tables] Token exists:', token ? '✅' : '❌');
+
+      // Use merchant-specific endpoint to get restaurant (works for published & unpublished)
+      const url = `${API_CONFIG.BASE_URL}/api/restaurants/merchant/my-restaurant`;
+      console.log('📱 [Tables] → Calling:', url);
+      
+      const restRes = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      console.log('📱 [Tables] ← API Response:', JSON.stringify(restRes.data, null, 2));
+      
+      const myRestaurant = restRes.data?.data;
+      console.log('📱 [Tables] Extracted restaurant:', myRestaurant?.id ? `✅ ${myRestaurant.id}` : '❌ null');
+      
+      if (myRestaurant?.id) {
+        console.log('📱 [Tables] → Setting restaurantId:', myRestaurant.id);
         setRestaurantId(myRestaurant.id);
         const tableRes = await axios.get(
-          `${API_CONFIG.BASE_URL}/api/tables?restaurant_id=${myRestaurant.id}`
+          `${API_CONFIG.BASE_URL}/api/tables?restaurant_id=${myRestaurant.id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
         );
         setTables(tableRes.data || []);
+        console.log('📱 [Tables] ✅ Loaded', tableRes.data?.length || 0, 'tables');
+      } else {
+        console.log('📱 [Tables] ⚠️ No restaurant found - user may need to create one');
+        setTables([]);
       }
-    } catch {
-      // empty
+    } catch (err: any) {
+      console.error('❌ [Tables] loadData FAILED');
+      console.error('   Status:', err.response?.status);
+      console.error('   Error:', err.response?.data || err.message);
+      console.error('   Full error:', JSON.stringify(err.response?.data, null, 2));
+      setTables([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -102,8 +126,20 @@ export default function MerchantTablesScreen() {
   };
 
   const handleAddTable = async () => {
+    console.log('📌 [handleAddTable] Validation check:');
+    console.log('   Table Number:', newTableNumber ? `"${newTableNumber}"` : 'EMPTY');
+    console.log('   Capacity:', newCapacity ? `"${newCapacity}"` : 'EMPTY');
+    console.log('   Restaurant ID:', restaurantId ? `"${restaurantId}"` : 'EMPTY');
+
     if (!newTableNumber || !newCapacity || !restaurantId) {
-      Alert.alert('Error', 'Please fill in all fields');
+      let missingFields = [];
+      if (!newTableNumber) missingFields.push('Table Number');
+      if (!newCapacity) missingFields.push('Capacity');
+      if (!restaurantId) missingFields.push('Restaurant ID (try reloading the page)');
+      
+      const message = `Please fill in: ${missingFields.join(', ')}`;
+      console.log('❌ Validation failed:', message);
+      Alert.alert('Error', message);
       return;
     }
 
@@ -130,6 +166,9 @@ export default function MerchantTablesScreen() {
 
     try {
       const token = await AsyncStorage.getItem('token');
+      console.log('📌 [handleAddTable] Sending request:');
+      console.log('   Endpoint:', `${API_CONFIG.BASE_URL}/api/tables`);
+      console.log('   Data:', { restaurant_id: restaurantId, table_number: tableNum, capacity: cap });
       const res = await axios.post(`${API_CONFIG.BASE_URL}/api/tables`,
         { restaurant_id: restaurantId, table_number: tableNum, capacity: cap },
         { headers: { Authorization: `Bearer ${token}` } }

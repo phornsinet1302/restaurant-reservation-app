@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,44 +26,88 @@ export default function MerchantDashboard() {
   const router = useRouter();
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
   const [restaurantAddress, setRestaurantAddress] = useState('');
-  const [revenue, setRevenue] = useState('0.00');
   const [availableDishes, setAvailableDishes] = useState(0);
   const [pendingBookings, setPendingBookings] = useState(0);
-  const [rating, setRating] = useState('4.7');
+  const [confirmedBookings, setConfirmedBookings] = useState(0);
+  const [arrivedBookings, setArrivedBookings] = useState(0);
+  const [completedBookings, setCompletedBookings] = useState(0);
   const [weeklyData, setWeeklyData] = useState([30, 15, 20, 18, 22, 25, 20]);
   const [activeDay, setActiveDay] = useState(0); // Monday = 0
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
+    
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      console.log('🔄 [MerchantDashboard] Auto-refreshing...');
+      loadDashboardData();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const loadDashboardData = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      if (!token) return;
+      if (!token) {
+        console.warn('❌ No token found');
+        return;
+      }
+
+      console.log('📊 [MerchantDashboard] Fetching dashboard data from:', `${API_CONFIG.BASE_URL}/api/merchant/dashboard`);
 
       const res = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      console.log('✅ [MerchantDashboard] Full response received:', res.data);
+
       if (res.data) {
         setRestaurantName(res.data.restaurant_name || 'My Restaurant');
         setRestaurantAddress(res.data.address || '');
-        setRevenue(res.data.today_revenue?.toFixed(2) || '59.00');
-        setAvailableDishes(res.data.total_menu_items || 4);
+        setAvailableDishes(res.data.total_menu_items || 0);
         setPendingBookings(res.data.pending_bookings || 0);
-        setRating(res.data.rating?.toString() || '4.7');
+        setConfirmedBookings(res.data.confirmed_bookings || 0);
+        setArrivedBookings(res.data.arrived_bookings || 0);
+        setCompletedBookings(res.data.completed_bookings || 0);
+
+        console.log('📈 ALL Dashboard stats updated:', {
+          restaurant: res.data.restaurant_name,
+          address: res.data.address,
+          dishes: res.data.total_menu_items,
+          pending: res.data.pending_bookings,
+          confirmed: res.data.confirmed_bookings,
+          arrived: res.data.arrived_bookings,
+          completed: res.data.completed_bookings,
+        });
+      } else {
+        console.warn('⚠️ No data returned from endpoint');
       }
-    } catch {
-      // Use defaults on error
+    } catch (error) {
+      console.error('❌ [MerchantDashboard] Error loading dashboard:', error.response?.data || error.message);
+      console.error('   Full error:', error);
+    } finally {
+      setRefreshing(false);
     }
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadDashboardData();
   };
 
   const maxVal = Math.max(...weeklyData, 1);
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
+      >
         {/* Header with gradient */}
         <LinearGradient
           colors={[Colors.primary, '#D4A821', '#C49B1D']}
@@ -88,15 +133,6 @@ export default function MerchantDashboard() {
 
         {/* Stat cards */}
         <View style={styles.statsGrid}>
-          {/* Revenue */}
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: '#F0EFDF' }]}>
-              <Text style={{ fontSize: 16 }}>$</Text>
-            </View>
-            <Text style={styles.statValue}>${revenue}</Text>
-            <Text style={styles.statLabel}>Today's Revenue</Text>
-          </View>
-
           {/* Available Dishes */}
           <View style={styles.statCard}>
             <View style={[styles.statIcon, { backgroundColor: '#F0EFDF' }]}>
@@ -115,13 +151,31 @@ export default function MerchantDashboard() {
             <Text style={styles.statLabel}>Pending Bookings</Text>
           </View>
 
-          {/* Rating */}
+          {/* Confirmed Bookings */}
           <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: '#F0EFDF' }]}>
-              <Ionicons name="star-outline" size={16} color={Colors.primary} />
+            <View style={[styles.statIcon, { backgroundColor: '#DCFCE7' }]}>
+              <Ionicons name="checkmark-circle-outline" size={16} color="#10b981" />
             </View>
-            <Text style={styles.statValue}>{rating}</Text>
-            <Text style={styles.statLabel}>Rating</Text>
+            <Text style={styles.statValue}>{confirmedBookings}</Text>
+            <Text style={styles.statLabel}>Confirmed</Text>
+          </View>
+
+          {/* Arrived Bookings */}
+          <View style={styles.statCard}>
+            <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="person-add-outline" size={16} color="#F59E0B" />
+            </View>
+            <Text style={styles.statValue}>{arrivedBookings}</Text>
+            <Text style={styles.statLabel}>Arrived</Text>
+          </View>
+
+          {/* Completed Bookings */}
+          <View style={styles.statCard}>
+            <View style={[styles.statIcon, { backgroundColor: '#EDE9FE' }]}>
+              <Ionicons name="flag-outline" size={16} color="#8B5CF6" />
+            </View>
+            <Text style={styles.statValue}>{completedBookings}</Text>
+            <Text style={styles.statLabel}>Completed</Text>
           </View>
         </View>
 

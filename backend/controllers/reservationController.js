@@ -410,6 +410,51 @@ exports.createReservation = async (req, res) => {
   }
 };
 
+// 2A. GET MY RESERVATION STATS (GET - Customer booking dashboard summary)
+exports.getMyReservationStats = async (req, res) => {
+  try {
+    const customer_id = req.user.id;
+    console.log(`📊 [getMyReservationStats] Fetching stats for customer: ${customer_id}`);
+
+    // Get all reservations for this customer
+    const { data: allReservations, error: fetchError } = await supabase
+      .from('reservations')
+      .select('id, status')
+      .eq('customer_id', customer_id);
+
+    if (fetchError) {
+      console.error('❌ Error fetching reservations:', fetchError.message);
+      return res.status(400).json({ error: fetchError.message });
+    }
+
+    // Count by status
+    const stats = {
+      pending: 0,
+      confirmed: 0,
+      arrived: 0,
+      completed: 0,
+      rejected: 0,
+      cancelled: 0
+    };
+
+    allReservations?.forEach(res => {
+      if (res.status === 'pending') stats.pending++;
+      else if (res.status === 'confirmed') stats.confirmed++;
+      else if (res.status === 'arrived') stats.arrived++;
+      else if (res.status === 'completed') stats.completed++;
+      else if (res.status === 'rejected') stats.rejected++;
+      else if (res.status === 'cancelled') stats.cancelled++;
+    });
+
+    console.log(`📈 Booking stats:`, stats);
+
+    res.status(200).json(stats);
+  } catch (error) {
+    console.error('❌ Error in getMyReservationStats:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
 // 2. GET MY RESERVATIONS (GET)
 exports.getMyReservations = async (req, res) => {
   try {

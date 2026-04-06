@@ -35,10 +35,14 @@ exports.uploadMenuPhoto = async (req, res) => {
     const { restaurantId } = req.params;
     const { title, description, display_order } = req.body;
 
-    console.log(`📸 [uploadMenuPhoto] Uploading for restaurant: ${restaurantId}`);
+    console.log(`📸 [uploadMenuPhoto] Received request`);
+    console.log(`   Restaurant ID: ${restaurantId}`);
     console.log(`   Merchant ID: ${merchantId}`);
     console.log(`   File present: ${!!req.file}`);
-    console.log(`   Body: title=${title}, display_order=${display_order}`);
+    console.log(`   Request body keys:`, Object.keys(req.body));
+    console.log(`   title: "${title}" (type: ${typeof title})`);
+    console.log(`   description: "${description}" (type: ${typeof description})`);
+    console.log(`   display_order: "${display_order}" (type: ${typeof display_order}), parsed: ${parseInt(display_order) || 'NaN'}`);
 
     if (!req.file) {
       console.error('❌ No file provided in request');
@@ -68,14 +72,84 @@ exports.uploadMenuPhoto = async (req, res) => {
     // Check if max 3 photos already exists
     const { data: existingPhotos, error: countError } = await supabaseAdmin
       .from('menu_photos')
-      .select('id', { count: 'exact' })
-      .eq('restaurant_id', restaurantId);
+      .select('id, display_order, photo_url')
+      .eq('restaurant_id', restaurantId)
+      .order('display_order', { ascending: false });
 
-    if (!countError && existingPhotos && existingPhotos.length >= 3) {
-      return res.status(400).json({ error: 'Maximum 3 photos per restaurant allowed' });
+    if (countError) {
+      console.error('❌ Error fetching existing photos:', countError);
+      return res.status(400).json({ error: countError.message });
     }
 
-    // Upload to Supabase Storage
+    console.log(`   Existing photos: ${existingPhotos?.length || 0}`);
+    if (existingPhotos && existingPhotos.length > 0) {
+      existingPhotos.forEach((p, i) => {
+        console.log(`      Photo ${i + 1}: id=${p.id}, display_order=${p.display_order}`);
+      });
+    }
+
+    // Get next display order - use explicit order if provided, otherwise max + 1
+    let nextOrder = 1;
+    if (existingPhotos && existingPhotos.length > 0) {
+      const maxOrder = Math.max(...existingPhotos.map(p => p.display_order || 0));
+      nextOrder = maxOrder + 1;
+    }
+    
+    // If explicit display_order provided, use it
+    if (display_order) {
+      nextOrder = parseInt(display_order);
+    }
+
+    console.log(`   Target display_order: ${nextOrder}`);
+    
+    // Check if a photo already exists at this display_order
+    console.log(`   Checking for existing photo at display_order: ${nextOrder}`);
+    const existingAtOrder = existingPhotos?.find(p => {
+      console.log(`      Comparing: p.display_order=${p.display_order} vs nextOrder=${nextOrder}, match=${p.display_order === nextOrder}`);
+      return p.display_order === nextOrder;
+    });
+    
+    console.log(`   Result: ${existingAtOrder ? 'FOUND existing photo' : 'NO existing photo'}`);
+    
+    if (existingAtOrder) {
+      console.log(`   ℹ️ Photo exists at order ${nextOrder}, will replace it`);
+      console.log(`      Existing photo ID: ${existingAtOrder.id}`);
+      console.log(`      Existing photo URL: ${existingAtOrder.photo_url}`);
+      
+      // Delete the old photo's storage file
+      try {
+        if (existingAtOrder.photo_url) {
+          const filePath = existingAtOrder.photo_url.split('/storage/v1/object/public/menu-photos/')[1];
+          if (filePath) {
+            console.log(`      Deleting old storage file: ${filePath}`);
+            const deleteResult = await supabaseAdmin.storage.from('menu-photos').remove([filePath]);
+            console.log(`      Storage delete result:`, deleteResult);
+          }
+        }
+      } catch (deleteErr) {
+        console.warn(`   ⚠️ Failed to delete old storage file:`, deleteErr.message);
+      }
+      
+      // Delete the old photo record from database
+      console.log(`   Deleting DB record for photo ID: ${existingAtOrder.id}`);
+      const { error: deleteError, data: deleteData } = await supabaseAdmin
+        .from('menu_photos')
+        .delete()
+        .eq('id', existingAtOrder.id);
+      
+      if (deleteError) {
+        console.error('❌ Failed to delete old photo record:', deleteError);
+        return res.status(400).json({ error: 'Failed to replace existing photo: ' + deleteError.message });
+      }
+      console.log(`   ✅ Old photo deleted successfully`);
+      console.log(`      Delete result:`, deleteData);
+    }
+
+    // Check if we're adding a new photo (not replacing)
+    if (!existingAtOrder && existingPhotos && existingPhotos.length >= 3) {
+      console.error('❌ Maximum 3 photos per restaurant already reached');
+      return res.status(400).json({ error: 'Maximum 3 photos per restaurant allowed. Please delete a photo first.' });
+    }
     const photoId = Math.random().toString(36).substring(2, 15);
     const filePath = `restaurant-${restaurantId}/menu-${photoId}.jpg`;
 
@@ -100,29 +174,40 @@ exports.uploadMenuPhoto = async (req, res) => {
 
     console.log(`   Public URL: ${publicUrl.publicUrl}`);
 
-    // Get next display order
-    const nextOrder = display_order || (existingPhotos?.length || 0) + 1;
-
-    // Save to database
+    // Save to database with calculated display_order
+    const insertPayload = {
+      restaurant_id: restaurantId,
+      photo_url: publicUrl.publicUrl,
+      title: title || 'Menu Item',
+      description: description || '',
+      display_order: nextOrder,
+    };
+    
+    console.log(`   Inserting photo record:`);
+    console.log(`      restaurant_id: ${insertPayload.restaurant_id}`);
+    console.log(`      photo_url: ${insertPayload.photo_url.substring(0, 80)}...`);
+    console.log(`      title: ${insertPayload.title}`);
+    console.log(`      display_order: ${insertPayload.display_order}`);
+    
     const { data: photo, error: dbError } = await supabaseAdmin
       .from('menu_photos')
-      .insert([
-        {
-          restaurant_id: restaurantId,
-          photo_url: publicUrl.publicUrl,
-          title: title || 'Menu Item',
-          description: description || '',
-          display_order: Math.min(nextOrder, 3),
-        },
-      ])
+      .insert([insertPayload])
       .select()
       .single();
 
     if (dbError) {
-      console.error('❌ Database error:', dbError);
+      console.error('❌ Database insert error:');
+      console.error(`   Code: ${dbError.code}`);
+      console.error(`   Message: ${dbError.message}`);
+      console.error(`   Details: ${JSON.stringify(dbError.details)}`);
       // Try to clean up storage upload
-      await supabaseAdmin.storage.from('menu-photos').remove([filePath]);
-      return res.status(400).json({ error: dbError.message });
+      try {
+        await supabaseAdmin.storage.from('menu-photos').remove([filePath]);
+        console.log('   Cleaned up storage file after DB error');
+      } catch (cleanupErr) {
+        console.warn('   Failed to cleanup storage file:', cleanupErr.message);
+      }
+      return res.status(400).json({ error: dbError.message, details: dbError.details });
     }
 
     console.log('✅ Photo uploaded successfully:', photo.id);

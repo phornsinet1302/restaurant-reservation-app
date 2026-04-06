@@ -117,6 +117,7 @@ export default function BookingsScreen() {
         const restaurantImageUrl = apiBooking.restaurants?.image_url;
         
         console.log(`📸 Booking: ${apiBooking.restaurants?.name || 'Unknown'}`);
+        console.log(`   DB Status: "${apiBooking.status}" -> UI Status: "${bookingStatus}"`);
         console.log(`   Full restaurant data:`, apiBooking.restaurants);
         console.log(`   Image URL:`, restaurantImageUrl);
         
@@ -137,6 +138,14 @@ export default function BookingsScreen() {
         };
       });
 
+      console.log('✅ Transformed bookings:', transformedBookings);
+      console.log('Status distribution:');
+      const statusCounts = {};
+      transformedBookings.forEach(b => {
+        statusCounts[b.status] = (statusCounts[b.status] || 0) + 1;
+      });
+      console.log(statusCounts);
+
       setBookings(transformedBookings);
     } catch (error: any) {
       console.error('❌ Error loading bookings:', error);
@@ -149,7 +158,7 @@ export default function BookingsScreen() {
     setRefreshing(true);
     await loadBookings();
     setRefreshing(false);
-  }, []);
+  }, [loadBookings]);
 
   useFocusEffect(
     useCallback(() => {

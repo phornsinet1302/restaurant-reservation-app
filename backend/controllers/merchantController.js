@@ -154,38 +154,71 @@ const autoRejectConflictingBookings = async (confirmedReservation, io) => {
 exports.getDashboardOverview = async (req, res) => {
   try {
     const merchant_id = req.user.id; // From the logged-in user token
+    console.log(`\n📊 [getDashboardOverview] Merchant ID: ${merchant_id}`);
 
     // A. Find the restaurant owned by this merchant
     const { data: restaurant, error: restErr } = await supabase
       .from('restaurants')
-      .select('id, name')
+      .select('id, name, address')
       .eq('merchant_id', merchant_id)
       .single();
 
     if (restErr || !restaurant) {
+        console.error(`❌ Restaurant not found for merchant ${merchant_id}`);
         return res.status(404).json({ error: "No restaurant found for this merchant account." });
     }
 
-    // B. Get total number of reservations
-    const { count: resCount, error: resErr } = await supabase
-      .from('reservations')
-      .select('*', { count: 'exact', head: true })
-      .eq('restaurant_id', restaurant.id);
+    console.log(`🏪 Restaurant found: ${restaurant.name} (ID: ${restaurant.id})`);
 
-    // C. Get total number of menu items
+    // B. Get total number of menu items
     const { count: menuCount, error: menuErr } = await supabase
       .from('menu_items')
       .select('*', { count: 'exact', head: true })
       .eq('restaurant_id', restaurant.id);
 
+    console.log(`📋 Menu items count: ${menuCount || 0}`);
+
+    // C. Get pending bookings count
+    const { data: allReservations, error: allResErr } = await supabase
+      .from('reservations')
+      .select('id, status')
+      .eq('restaurant_id', restaurant.id);
+
+    console.log(`📊 Total reservations: ${allReservations?.length || 0}`);
+
+    // Group by status to see distribution
+    const statusDistribution = {};
+    allReservations?.forEach(res => {
+      statusDistribution[res.status] = (statusDistribution[res.status] || 0) + 1;
+    });
+
+    console.log(`📈 Status distribution:`, statusDistribution);
+
+    // Count all status types
+    let confirmedCount = 0, arrivedCount = 0, completedCount = 0, pendingCount = 0;
+    
+    allReservations?.forEach(res => {
+      if (res.status === 'pending') pendingCount++;
+      else if (res.status === 'confirmed') confirmedCount++;
+      else if (res.status === 'arrived') arrivedCount++;
+      else if (res.status === 'completed') completedCount++;
+    });
+
+    console.log(`⏳ Pending: ${pendingCount} | ✅ Confirmed: ${confirmedCount} | 👤 Arrived: ${arrivedCount} | 🚩 Completed: ${completedCount}\n`);
+
     // D. Send back a beautiful summary package
     res.status(200).json({
       restaurant_name: restaurant.name,
-      total_reservations: resCount || 0,
-      total_menu_items: menuCount || 0
+      address: restaurant.address,
+      total_menu_items: menuCount || 0,
+      pending_bookings: pendingCount,
+      confirmed_bookings: confirmedCount,
+      arrived_bookings: arrivedCount,
+      completed_bookings: completedCount
     });
 
   } catch (error) {
+    console.error(`❌ Error in getDashboardOverview:`, error.message);
     res.status(400).json({ error: error.message });
   }
 };

@@ -185,7 +185,7 @@ export default function SearchScreen() {
   };
 
   // Fetch restaurants based on search term
-  const fetchRestaurants = async (query: string) => {
+  const fetchRestaurants = async (query: string, retryCount = 0) => {
     try {
       setLoading(true);
       setError('');
@@ -195,14 +195,18 @@ export default function SearchScreen() {
         url += `?search=${encodeURIComponent(query)}`;
       }
       
-      console.log('🔍 Fetching from:', url);
-      const response = await axios.get(url, { timeout: 10000 });
+      console.log('🔍 Fetching from:', url, retryCount > 0 ? `(Retry ${retryCount})` : '');
+      // Increased timeout from 10s to 30s to handle network latency
+      const response = await axios.get(url, { timeout: 30000 });
       console.log('✅ Response received:', response.data);
 
       // Calculate distances for each restaurant and map opening_hours to hours
       let restaurantsWithDistance = response.data || [];
       if (userLocation && restaurantsWithDistance.length > 0) {
         restaurantsWithDistance = restaurantsWithDistance.map((restaurant: Restaurant) => {
+          let distance = 'Unknown';
+          
+          // Calculate distance if restaurant has coordinates
           if (restaurant.latitude && restaurant.longitude) {
             const distanceKm = calculateDistance(
               userLocation.latitude,
@@ -210,24 +214,53 @@ export default function SearchScreen() {
               restaurant.latitude,
               restaurant.longitude
             );
-            return {
-              ...restaurant,
-              distance: formatDistance(distanceKm),
-              hours: restaurant.opening_hours || 'Check hours',
-            };
+            distance = formatDistance(distanceKm);
           }
+          
           return {
             ...restaurant,
+            distance: distance,
             hours: restaurant.opening_hours || 'Check hours',
           };
         });
+      } else {
+        // Set default values if no user location
+        restaurantsWithDistance = restaurantsWithDistance.map((restaurant: Restaurant) => ({
+          ...restaurant,
+          distance: 'Unknown',
+          hours: restaurant.opening_hours || 'Check hours',
+        }));
       }
+
+      console.log('🔍 [SearchScreen] Loaded restaurants with distances:', restaurantsWithDistance.map((r: any) => ({ 
+        id: r.id, 
+        name: r.name,
+        distance: r.distance,
+        hours: r.hours,
+      })));
 
       setRestaurants(restaurantsWithDistance);
     } catch (err: any) {
       console.error('❌ Search error:', err.message);
       console.error('❌ Error details:', err.response?.data || err);
-      setError('Unable to load restaurants. Please try again.');
+      
+      // Check if it's a timeout error and retry
+      if (err.code === 'ECONNABORTED' && retryCount < 2) {
+        console.log('⏱️ Timeout occurred, retrying... (' + (retryCount + 1) + '/2)');
+        // Wait 2 seconds before retrying
+        await new Promise(r => setTimeout(r, 2000));
+        return fetchRestaurants(query, retryCount + 1);
+      }
+      
+      // Provide user-friendly error message
+      if (err.code === 'ECONNABORTED') {
+        setError('Network request took too long. Please check your connection and try again.');
+      } else if (err.message.includes('Network') || err.code === 'ECONNREFUSED') {
+        setError('Unable to connect to server. Please check your internet connection.');
+      } else {
+        setError('Unable to load restaurants. Please try again.');
+      }
+      
       setRestaurants([]);
     } finally {
       setLoading(false);
@@ -363,7 +396,7 @@ export default function SearchScreen() {
                 address: r.address || 'No address provided',
                 description: r.description || 'No description',
                 hours: r.hours || 'Check hours',
-                distance: r.distance || '—',
+                distance: r.distance || 'Unknown',
               },
             } as any)
           }
@@ -414,7 +447,7 @@ export default function SearchScreen() {
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="location-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{r.distance || '—'}</Text>
+              <Text style={styles.metaText}>{r.distance || 'Unknown'}</Text>
             </View>
           </View>
         </TouchableOpacity>
