@@ -124,9 +124,25 @@ export const useNotifications = () => {
     const setupWebSocket = async () => {
       try {
         const token = await AsyncStorage.getItem('token');
-        if (!token) return;
+        if (!token) {
+          console.log('⚠️ No token found for WebSocket setup');
+          return;
+        }
 
+        // Decode JWT to get user ID
         console.log('🔌 Setting up WebSocket for notifications...');
+        let userId = '';
+        try {
+          const parts = token.split('.');
+          if (parts.length === 3) {
+            // Base64 decode the payload
+            const decoded = JSON.parse(atob(parts[1]));
+            userId = decoded.sub || decoded.id || '';
+            console.log('👤 User ID from token:', userId);
+          }
+        } catch (e) {
+          console.warn('⚠️ Could not decode JWT:', e);
+        }
         
         const newSocket = io(API_CONFIG.BASE_URL, {
           auth: { token },
@@ -137,11 +153,22 @@ export const useNotifications = () => {
         });
 
         newSocket.on('connect', () => {
-          console.log('✅ WebSocket connected for notifications');
+          console.log('✅ WebSocket connected for notifications. Socket ID:', newSocket.id);
+          
+          // Join the user's private room for notifications
+          if (userId) {
+            newSocket.emit('join_room', userId);
+            console.log(`🚪 Emitted join_room with user ID: ${userId}`);
+          } else {
+            console.warn('⚠️ Could not extract user ID from token');
+          }
         });
 
         newSocket.on('notification_received', (data: any) => {
           console.log('📥 New notification received:', data);
+          console.log('   Title:', data.title);
+          console.log('   Message:', data.message);
+          console.log('   Type:', data.type);
           
           // Add new notification to the beginning of the list
           const newNotification: Notification = {
@@ -156,10 +183,15 @@ export const useNotifications = () => {
           
           setNotifications((prev) => [newNotification, ...prev]);
           setUnreadCount((prev) => prev + 1);
+          console.log('✅ Notification added to list');
         });
 
         newSocket.on('disconnect', () => {
           console.log('⚠️ WebSocket disconnected');
+        });
+
+        newSocket.on('error', (error: any) => {
+          console.error('❌ WebSocket error:', error);
         });
 
         setSocket(newSocket);

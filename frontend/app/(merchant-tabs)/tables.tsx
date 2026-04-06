@@ -8,6 +8,7 @@ import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useRealtimeTableUpdates } from '@/hooks/useRealtimeTableUpdates';
 
 interface Table {
   id: string;
@@ -28,6 +29,12 @@ export default function MerchantTablesScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTableNumber, setNewTableNumber] = useState('');
   const [newCapacity, setNewCapacity] = useState('');
+
+  // 🔌 Real-time table updates from backend
+  const { realtimeTables } = useRealtimeTableUpdates(restaurantId || '', tables);
+  
+  // Use real-time tables if available, otherwise use local tables
+  const displayTables = realtimeTables.length > 0 ? realtimeTables : tables;
 
   const loadData = useCallback(async () => {
     try {
@@ -199,9 +206,9 @@ export default function MerchantTablesScreen() {
     }
   };
 
-  const availableCount = tables.filter(t => t.status === 'available').length;
-  const bookedCount = tables.filter(t => t.status === 'booked').length;
-  const guestTotal = tables.reduce((sum, t) => sum + (t.guest_count || 0), 0);
+  const availableCount = displayTables.filter(t => t.status === 'available').length;
+  const bookedCount = displayTables.filter(t => t.status === 'booked').length;
+  const guestTotal = displayTables.reduce((sum, t) => sum + (t.guest_count || 0), 0);
 
   const getStatusStyle = (status: string) => {
     if (status === 'booked') return { label: 'Booked', color: '#E88B00', bg: '#FFF3E0', icon: 'time-outline' as const };
@@ -254,14 +261,14 @@ export default function MerchantTablesScreen() {
         </View>
 
         {/* Table Cards */}
-        {tables.length === 0 ? (
+        {displayTables.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="cafe-outline" size={48} color={Colors.border} />
             <Text style={styles.emptyText}>No tables yet</Text>
             <Text style={styles.emptySubtext}>Tap "Add New Table" to get started</Text>
           </View>
         ) : (
-          tables.map(table => {
+          displayTables.map(table => {
             const st = getStatusStyle(table.status);
             return (
               <View key={table.id} style={styles.tableCard}>

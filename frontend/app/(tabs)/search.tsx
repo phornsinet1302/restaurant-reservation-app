@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 import {
   View,
   Text,
@@ -29,23 +30,96 @@ import { API_CONFIG } from '@/app/config/apiConfig';
 
 const API_URL = API_CONFIG.BASE_URL;
 
+type Restaurant = {
+  id: string;
+  name: string;
+  address?: string;
+  description?: string;
+  rating?: number;
+  image_url?: string;
+  latitude?: number;
+  longitude?: number;
+  distance?: string;
+  hours?: string;
+  opening_hours?: string;
+};
+
 export default function SearchScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
-  const [restaurants, setRestaurants] = useState([]);
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [token, setToken] = useState<string>('');
   const [toggleLoading, setToggleLoading] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const { isGuest } = useAuth();
   const router = useRouter();
+
+  // Calculate distance between two coordinates using Haversine formula
+  const calculateDistance = (userLat: number, userLon: number, restLat: number, restLon: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (restLat - userLat) * (Math.PI / 180);
+    const dLon = (restLon - userLon) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(userLat * (Math.PI / 180)) * Math.cos(restLat * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // Format distance for display
+  const formatDistance = (distanceKm: number): string => {
+    if (distanceKm < 1) {
+      const meters = Math.round(distanceKm * 1000);
+      return `${meters}m`;
+    }
+    return `${distanceKm.toFixed(1)}km`;
+  };
+
+  // Request location permission and get location
+  const requestLocationPermission = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        await getCurrentLocation();
+      } else {
+        console.log('Location permission denied');
+        setLocationError('Location permission denied');
+        setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      }
+    } catch (error) {
+      console.error('Error requesting location permission:', error);
+      setLocationError('Failed to request location permission');
+      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+    }
+  };
+
+  // Get current location
+  const getCurrentLocation = async () => {
+    try {
+      const location = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = location.coords;
+      setUserLocation({ latitude, longitude });
+      setLocationError(null);
+      await AsyncStorage.setItem('userLocation', JSON.stringify({ latitude, longitude }));
+    } catch (error) {
+      console.error('Error getting location:', error);
+      setLocationError('Failed to get current location');
+      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+    }
+  };
 
   // Load favorites and fetch initial restaurants on mount
   useEffect(() => {
     loadFavoritesAndToken();
-    fetchRestaurants(''); // Load all restaurants on initial mount
+    // Set default location immediately for distance calculation
+    setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+    requestLocationPermission();
+    fetchRestaurants('');
   }, []);
 
   const loadFavoritesAndToken = async () => {
@@ -124,7 +198,32 @@ export default function SearchScreen() {
       console.log('🔍 Fetching from:', url);
       const response = await axios.get(url, { timeout: 10000 });
       console.log('✅ Response received:', response.data);
-      setRestaurants(response.data || []);
+
+      // Calculate distances for each restaurant and map opening_hours to hours
+      let restaurantsWithDistance = response.data || [];
+      if (userLocation && restaurantsWithDistance.length > 0) {
+        restaurantsWithDistance = restaurantsWithDistance.map((restaurant: Restaurant) => {
+          if (restaurant.latitude && restaurant.longitude) {
+            const distanceKm = calculateDistance(
+              userLocation.latitude,
+              userLocation.longitude,
+              restaurant.latitude,
+              restaurant.longitude
+            );
+            return {
+              ...restaurant,
+              distance: formatDistance(distanceKm),
+              hours: restaurant.opening_hours || 'Check hours',
+            };
+          }
+          return {
+            ...restaurant,
+            hours: restaurant.opening_hours || 'Check hours',
+          };
+        });
+      }
+
+      setRestaurants(restaurantsWithDistance);
     } catch (err: any) {
       console.error('❌ Search error:', err.message);
       console.error('❌ Error details:', err.response?.data || err);
@@ -147,6 +246,17 @@ export default function SearchScreen() {
 
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Reload restaurants when location changes
+  useEffect(() => {
+    if (userLocation && searchTerm.length >= 0) {
+      if (searchTerm.length > 0) {
+        fetchRestaurants(searchTerm);
+      } else {
+        fetchRestaurants('');
+      }
+    }
+  }, [userLocation]);
 
   return (
     <View style={styles.container}>
@@ -248,13 +358,17 @@ export default function SearchScreen() {
               params: {
                 id: r.id,
                 name: r.name,
+                rating: r.rating || '4.5',
+                reviews: '3.2k',
                 address: r.address || 'No address provided',
                 description: r.description || 'No description',
+                hours: r.hours || 'Check hours',
+                distance: r.distance || '—',
               },
             } as any)
           }
         >
-          {/* Placeholder Image */}
+          {/* Image with rating badge */}
           <View style={styles.cardImageWrapper}>
             {r.image_url ? (
               <Image source={{ uri: r.image_url }} style={styles.cardImage} />
@@ -269,9 +383,11 @@ export default function SearchScreen() {
             </View>
           </View>
 
-          {/* Name row */}
-          <View style={styles.cardNameRow}>
-            <Text style={styles.cardName} numberOfLines={1}>{r.name}</Text>
+          {/* Info row */}
+          <View style={styles.infoRow}>
+            <View style={styles.nameCol}>
+              <Text style={styles.cardName} numberOfLines={1}>{r.name}</Text>
+            </View>
             <View style={styles.cardActions}>
               <TouchableOpacity
                 onPress={() => handleToggleFavorite(r.id, r.name)}
@@ -284,19 +400,23 @@ export default function SearchScreen() {
                 />
               </TouchableOpacity>
               <TouchableOpacity style={styles.detailsBtn}>
-                <Text style={styles.detailsBtnText}>View</Text>
+                <Text style={styles.detailsBtnText}>Details</Text>
                 <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Address */}
-          <Text style={styles.cardAddress} numberOfLines={1}>{r.address}</Text>
-
-          {/* Description */}
-          {r.description && (
-            <Text style={styles.cardDesc} numberOfLines={2}>{r.description}</Text>
-          )}
+          {/* Meta row */}
+          <View style={styles.metaRow}>
+            <View style={styles.metaItem}>
+              <Ionicons name="time-outline" size={14} color={Colors.gray} />
+              <Text style={styles.metaText}>{r.hours || 'Check hours'}</Text>
+            </View>
+            <View style={styles.metaItem}>
+              <Ionicons name="location-outline" size={14} color={Colors.gray} />
+              <Text style={styles.metaText}>{r.distance || '—'}</Text>
+            </View>
+          </View>
         </TouchableOpacity>
       ))}
       </ScrollView>
@@ -444,17 +564,19 @@ const styles = StyleSheet.create({
   },
 
   /* Card info */
-  cardNameRow: {
+  infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 12,
   },
+  nameCol: {
+    flex: 1,
+  },
   cardName: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 18,
     color: Colors.text,
-    flex: 1,
   },
   cardActions: {
     flexDirection: 'row',
@@ -476,18 +598,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.text,
   },
-  cardAddress: {
-    fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 13,
-    color: Colors.gray,
-    marginTop: 2,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+    marginTop: 6,
   },
-  cardDesc: {
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaText: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
-    lineHeight: 20,
     color: Colors.gray,
-    marginTop: 8,
   },
 
   /* Center content for loading/error/empty states */
