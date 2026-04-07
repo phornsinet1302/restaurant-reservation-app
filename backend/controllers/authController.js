@@ -275,22 +275,39 @@ exports.logoutUser = async (req, res) => {
 exports.getProfile = async (req, res) => {
   try {
     const userId = req.user.id;
+    console.log('\n🔐 [GET /api/auth/me] Fetching profile for user:', userId);
 
-    // Fetch the profile and attempt to join with restaurants
+    // Fetch the user profile (removed restaurant join - was causing schema error)
     const { data: profile, error } = await supabase
       .from('users')
-      .select('*, restaurants(*)') 
+      .select('*') 
       .eq('id', userId)
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Database error:', error.message);
+      throw error;
+    }
+
+    console.log('✅ Profile fetched successfully');
+    console.log('   User email:', profile.email);
+    console.log('   Profile picture URL:', profile.profile_picture_url ? '✅ Yes (' + profile.profile_picture_url.substring(0, 50) + '...)' : '❌ None');
+
+    // Optionally fetch restaurants separately if needed
+    const { data: restaurants, error: restError } = await supabase
+      .from('restaurants')
+      .select('*')
+      .eq('merchant_id', userId);
+
+    console.log('   Restaurants:', restaurants?.length || 0);
 
     res.status(200).json({
       success: true,
-      user: profile 
+      user: profile,
+      restaurants: restaurants || []
     });
   } catch (error) {
-    console.error("Profile Fetch Error:", error.message);
+    console.error("❌ Profile Fetch Error:", error.message);
     res.status(400).json({ error: error.message });
   }
 };
@@ -394,6 +411,141 @@ exports.updateProfile = async (req, res) => {
     console.error('Full error:', error);
     console.log('=== UPDATE PROFILE END (ERROR) ===\n');
     res.status(400).json({ error: error.message });
+  }
+};
+
+// Upload profile picture and store URL in database
+exports.uploadProfilePicture = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided' });
+    }
+
+    const userId = req.user.id;
+    const fileName = `profile_${userId}_${Date.now()}.jpg`;
+
+    console.log('📸 [uploadProfilePicture] Uploading for user:', userId);
+    console.log('   File name:', req.file.originalname);
+    console.log('   File size:', req.file.size, 'bytes');
+
+    // Upload to Supabase Storage - user-profiles bucket
+    const { data, error } = await supabaseAdmin.storage
+      .from('user-profiles')
+      .upload(fileName, req.file.buffer, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: 'image/jpeg',
+      });
+
+    if (error) {
+      console.error('❌ Upload failed:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Get public URL
+    const { data: publicData } = supabaseAdmin.storage
+      .from('user-profiles')
+      .getPublicUrl(fileName);
+
+    const profilePictureUrl = publicData.publicUrl;
+    console.log('✅ Image uploaded successfully');
+    console.log('   Public URL:', profilePictureUrl.substring(0, 60) + '...');
+
+    // Update user record with profile picture URL - TRY RAW SQL
+    console.log('\n' + '='.repeat(70));
+    console.log('💾 SAVING TO DATABASE - RAW SQL APPROACH');
+    console.log('='.repeat(70));
+    console.log('   User ID:', userId);
+    console.log('   URL:', profilePictureUrl);
+    
+    // Try raw SQL query directly
+    console.log('\n🔄 Attempting raw SQL update...');
+    
+    try {
+      // Use supabaseAdmin to execute raw SQL
+      const { data: sqlResult, error: sqlError } = await supabaseAdmin.rpc('exec_sql', {
+        sql: `UPDATE public.users SET profile_picture_url = '${profilePictureUrl.replace(/'/g, "''")}' WHERE id = '${userId}' RETURNING id, email, profile_picture_url;`
+      }).catch(err => {
+        console.log('   RPC method not available, trying alternative...');
+        return null;
+      });
+
+      if (sqlResult) {
+        console.log('✅ Raw SQL executed');
+        console.log('   Result:', JSON.stringify(sqlResult));
+      }
+    } catch (err) {
+      console.log('   Raw SQL not available:', err.message);
+    }
+
+    // FALLBACK: Try simple update without select
+    console.log('\n🔄 Fallback: Simple UPDATE (no select)...');
+    const { error: simpleError } = await supabaseAdmin
+      .from('users')
+      .update({ profile_picture_url: profilePictureUrl })
+      .eq('id', userId);
+
+    if (simpleError) {
+      console.error('❌ Simple update failed:', simpleError.message);
+    } else {
+      console.log('✅ Simple update executed (no error)');
+    }
+
+    // VERIFY with direct fetch
+    console.log('\n🔍 VERIFICATION - Fetching user...');
+    const { data: verifyData, error: verifyError } = await supabaseAdmin
+      .from('users')
+      .select('id, email, profile_picture_url')
+      .eq('id', userId)
+      .single();
+
+    if (verifyError) {
+      console.error('❌ Verification failed:', verifyError.message);
+      console.error('='.repeat(70));
+      return res.status(400).json({ error: 'User fetch failed: ' + verifyError.message });
+    }
+
+    console.log('✅ User fetched:');
+    console.log('   ID:', verifyData.id);
+    console.log('   Email:', verifyData.email);
+    console.log('   Current profile_picture_url:', verifyData.profile_picture_url || 'NULL ❌');
+    
+    if (verifyData.profile_picture_url === profilePictureUrl) {
+      console.log('\n✅ SUCCESS! Profile picture saved!');
+    } else {
+      console.log('\n❌ FAILED! URL not saved!');
+      console.log('   Expected:', profilePictureUrl);
+      console.log('   Got:', verifyData.profile_picture_url);
+      
+      // Debug: check if column even exists
+      console.log('\n🔍 COLUMN CHECK:');
+      try {
+        const { data: columnCheck } = await supabaseAdmin
+          .from('information_schema.columns')
+          .select('column_name, data_type')
+          .match({ table_name: 'users', column_name: 'profile_picture_url' });
+        
+        if (columnCheck && columnCheck.length > 0) {
+          console.log('   ✅ Column exists:', JSON.stringify(columnCheck[0]));
+        } else {
+          console.log('   ❌ Column NOT FOUND in schema!');
+        }
+      } catch (err) {
+        console.log('   Could not verify column:', err.message);
+      }
+    }
+    
+    console.log('='.repeat(70) + '\n');
+
+    res.status(200).json({
+      message: 'Profile picture uploaded successfully',
+      profile_picture_url: profilePictureUrl,
+      verified: verifyData?.profile_picture_url === profilePictureUrl,
+    });
+  } catch (error) {
+    console.error('\n❌ Profile picture upload error:', error.message);
+    console.error('   Full error:', error);
+    res.status(500).json({ error: error.message });
   }
 };
 

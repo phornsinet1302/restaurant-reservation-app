@@ -210,23 +210,52 @@ export default function HomeScreen() {
 
       // Load user profile data
       const userData = await AsyncStorage.getItem('user');
-      if (userData) {
+      const token = await AsyncStorage.getItem('token');
+      
+      if (userData && token) {
         const parsedUser = JSON.parse(userData);
         setUserName(parsedUser.fullName || parsedUser.name || 'Guest');
         setUserEmail(parsedUser.email || '');
 
-        // Load user profile image - use user ID for unique key
-        if (parsedUser.id || parsedUser.email) {
-          const userIdKey = parsedUser.id || parsedUser.email;
-          const savedImage = await AsyncStorage.getItem(`profileImage_${userIdKey}`);
-          if (savedImage) {
-            setProfileImageUri(savedImage);
+        // Fetch latest profile data from backend (includes profile_picture_url)
+        try {
+          console.log('📸 [HomeScreen] Fetching profile data from backend...');
+          const response = await axios.get(`${API_URL}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000,
+          });
+          
+          console.log('📸 [HomeScreen] Backend response received');
+          console.log('   User data:', response.data?.user?.id ? '✅' : '❌');
+          
+          if (response.data?.user?.profile_picture_url) {
+            console.log('📸 [HomeScreen] ✅ Profile picture found!');
+            console.log('   URL:', response.data.user.profile_picture_url.substring(0, 60) + '...');
+            setProfileImageUri(response.data.user.profile_picture_url);
+            
+            // Update AsyncStorage with latest profile picture URL
+            parsedUser.profile_picture_url = response.data.user.profile_picture_url;
+            await AsyncStorage.setItem('user', JSON.stringify(parsedUser));
+            console.log('   ✅ Saved to local storage');
           } else {
-            setProfileImageUri(null); // Clear old image if user has none
+            console.log('📸 [HomeScreen] ❌ No profile picture found in backend');
+            setProfileImageUri(null);
+          }
+        } catch (error) {
+          console.warn('📸 [HomeScreen] ❌ Failed to fetch profile from backend:', error.message);
+          console.log('   Attempt to use fallback from localStorage...');
+          // Fallback to localStorage if backend fails
+          if (parsedUser.profile_picture_url) {
+            console.log('   ✅ Using profile picture from localStorage');
+            setProfileImageUri(parsedUser.profile_picture_url);
+          } else {
+            console.log('   ❌ No picture in localStorage either');
+            setProfileImageUri(null);
           }
         }
       } else {
-        // No user data, clear profile image
+        // No user data or token, clear profile image
+        console.log('📸 [HomeScreen] No user data or token found');
         setProfileImageUri(null);
       }
     } catch (error) {

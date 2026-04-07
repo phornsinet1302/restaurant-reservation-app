@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 
@@ -14,7 +15,9 @@ export default function EditProfileScreen() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -28,8 +31,76 @@ export default function EditProfileScreen() {
         setFullName(user.fullName || user.name || '');
         setEmail(user.email || '');
         setPhone(user.phone || '');
+        // Load profile picture from backend
+        if (user.profile_picture_url) {
+          setProfilePictureUrl(user.profile_picture_url);
+        }
       }
     } catch {}
+  };
+
+  const pickAndUploadImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow access to your photo library.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const image = result.assets[0];
+        console.log('📸 Selected image:', image.uri);
+
+        setUploadingImage(true);
+        const token = await AsyncStorage.getItem('token');
+
+        // Create FormData
+        const formData = new FormData();
+        formData.append('file', {
+          uri: image.uri,
+          type: 'image/jpeg',
+          name: `profile_${Date.now()}.jpg`,
+        } as any);
+
+        console.log('📤 Uploading profile picture to backend...');
+        const uploadRes = await axios.post(
+          `${API_CONFIG.BASE_URL}/api/auth/upload-profile-picture`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'multipart/form-data',
+            },
+            timeout: 60000,
+          }
+        );
+
+        const newUrl = uploadRes.data.profile_picture_url;
+        console.log('✅ Profile picture uploaded:', newUrl.substring(0, 60) + '...');
+        
+        setProfilePictureUrl(newUrl);
+        
+        // Update user in AsyncStorage with new profile picture URL
+        const userStr = await AsyncStorage.getItem('user');
+        const user = userStr ? JSON.parse(userStr) : {};
+        user.profile_picture_url = newUrl;
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+
+        Alert.alert('Success', 'Profile picture updated!');
+        setUploadingImage(false);
+      }
+    } catch (error: any) {
+      console.error('❌ Image upload failed:', error.message);
+      Alert.alert('Upload Failed', error.response?.data?.error || error.message);
+      setUploadingImage(false);
+    }
   };
 
   const getInitial = () => fullName ? fullName.charAt(0).toUpperCase() : 'U';
@@ -78,10 +149,22 @@ export default function EditProfileScreen() {
       {/* Avatar */}
       <View style={styles.avatarSection}>
         <View style={styles.avatar}>
-          <Text style={styles.avatarLetter}>{getInitial()}</Text>
+          {profilePictureUrl ? (
+            <Image source={{ uri: profilePictureUrl }} style={styles.avatarImage} />
+          ) : (
+            <Text style={styles.avatarLetter}>{getInitial()}</Text>
+          )}
         </View>
-        <TouchableOpacity style={styles.cameraIcon}>
-          <Ionicons name="camera" size={14} color={Colors.text} />
+        <TouchableOpacity 
+          style={styles.cameraIcon}
+          onPress={pickAndUploadImage}
+          disabled={uploadingImage}
+        >
+          <Ionicons 
+            name={uploadingImage ? "hourglass" : "camera"} 
+            size={14} 
+            color={Colors.text} 
+          />
         </TouchableOpacity>
       </View>
 
@@ -158,6 +241,11 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 36,
     color: Colors.primary,
+  },
+  avatarImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
   },
   cameraIcon: {
     position: 'absolute',
