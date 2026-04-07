@@ -790,8 +790,8 @@ exports.getMerchantPendingReservations = async (req, res) => {
       .single();
 
     if (restaurantError || !restaurantData) {
-      console.log('❌ Restaurant not found for merchant');
-      return res.status(404).json({ error: 'Restaurant not found' });
+      console.log('ℹ️ No restaurant found for merchant - returning empty list');
+      return res.status(200).json([]);
     }
 
     const restaurantId = restaurantData.id;

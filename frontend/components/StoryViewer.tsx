@@ -14,6 +14,7 @@ import {
 import { Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
+import { useRouter } from 'expo-router';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const STORY_DURATION = 15_000; // 15 seconds per story
@@ -29,6 +30,7 @@ export type StorySlide = {
 
 export type StoryGroup = {
   id: string;
+  restaurantId?: string;
   name: string;
   time: string;
   distance: string;
@@ -51,6 +53,7 @@ export default function StoryViewer({
   onClose,
   onStoryDeleted,
 }: StoryViewerProps) {
+  const router = useRouter();
   const [groupIdx, setGroupIdx] = useState(initialGroupIndex);
   const [slideIdx, setSlideIdx] = useState(0);
   const [videoError, setVideoError] = useState<boolean>(false);
@@ -267,7 +270,17 @@ export default function StoryViewer({
         <Text style={styles.slideTitle}>{slide.title}</Text>
         <Text style={styles.slideDesc}>{slide.description}</Text>
 
-        <TouchableOpacity style={styles.bookButton} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={styles.bookButton}
+          activeOpacity={0.8}
+          onPress={() => {
+            const restaurantId = group.restaurantId;
+            if (restaurantId) {
+              onClose();
+              router.push(`/restaurant-detail?id=${restaurantId}`);
+            }
+          }}
+        >
           <Text style={styles.bookButtonText}>Book Table</Text>
         </TouchableOpacity>
       </View>

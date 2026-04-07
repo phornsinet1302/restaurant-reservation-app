@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Alert, Modal, TextInput, ToastAndroid,
+  ActivityIndicator, RefreshControl, Modal, TextInput, ToastAndroid,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -11,6 +11,7 @@ import { API_CONFIG } from '@/app/config/apiConfig';
 import { useFocusEffect } from '@react-navigation/native';
 import { useReservationSocket } from '@/hooks/useReservationSocket';
 import { useNotifications } from '@/hooks/useNotifications';
+import { useAppToast } from '@/components/ToastProvider';
 
 type TabKey = 'upcoming' | 'completed' | 'cancelled';
 
@@ -38,6 +39,7 @@ interface Reservation {
 export default function MerchantBookingsScreen() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('upcoming');
+  const { toast } = useAppToast();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
@@ -82,7 +84,7 @@ export default function MerchantBookingsScreen() {
       console.error('❌ Error loading bookings:', error);
       console.error('Error response:', error.response?.data);
       console.error('Error status:', error.response?.status);
-      Alert.alert('Error', 'Failed to load bookings. Please check the backend server.');
+      toast('Failed to load bookings. Please check the backend server.', 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -152,7 +154,7 @@ export default function MerchantBookingsScreen() {
     if (!selectedReservation) return;
     
     if ((actionType === 'reject') && !reason.trim()) {
-      Alert.alert('Error', `Please provide a reason for rejecting this booking`);
+      toast(`Please provide a reason for rejecting this booking`, 'error');
       return;
     }
 
@@ -160,7 +162,7 @@ export default function MerchantBookingsScreen() {
     try {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
-        Alert.alert('Error', 'No auth token found');
+        toast('No auth token found', 'error');
         return;
       }
 
@@ -201,7 +203,7 @@ export default function MerchantBookingsScreen() {
         )
       );
       
-      Alert.alert('Success', `Booking ${actionType}ed successfully`);
+      toast(`Booking ${actionType}ed successfully`, 'success');
       setModalVisible(false);
       
       // Refresh data in background after a short delay
@@ -213,7 +215,7 @@ export default function MerchantBookingsScreen() {
       console.error('  Error message:', error.message);
       console.error('  Status:', error.response?.status);
       console.error('  Error data:', error.response?.data);
-      Alert.alert('Error', error.response?.data?.error || `Failed to ${actionType} booking`);
+      toast(error.response?.data?.error || `Failed to ${actionType} booking`, 'error');
     } finally {
       setActioning(false);
     }

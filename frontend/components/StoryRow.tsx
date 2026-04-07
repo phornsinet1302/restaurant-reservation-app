@@ -136,7 +136,7 @@ export default function StoryRow() {
             <TouchableOpacity
               key={restaurant.id}
               style={styles.storyCard}
-              onPress={() => router.push(`/story?groupIndex=${idx}`)}
+              onPress={() => router.push(`/story?restaurantId=${restaurant.id}`)}
               activeOpacity={0.8}
             >
               {/* Story Thumbnail with Gradient Overlay */}
