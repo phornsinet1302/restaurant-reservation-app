@@ -1,8 +1,22 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const authController = require('../controllers/authController');
 const emailController = require('../controllers/emailController');
 const { protect } = require('../middleware/authMiddleware');
+
+// Configure multer for profile picture uploads
+const uploadProfilePicture = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
 
 // --- Public Routes ---
 router.get('/login-info', authController.loginInfo);
@@ -28,6 +42,7 @@ router.post('/apple-login', authController.appleLogin);
 // --- Protected Routes ---
 router.get('/me', protect, authController.getProfile);
 router.put('/update-profile', protect, authController.updateProfile);
+router.post('/upload-profile-picture', protect, uploadProfilePicture.single('file'), authController.uploadProfilePicture);
 router.post('/reset-password', protect, authController.resetPassword);
 router.post('/complete-profile-setup', protect, authController.completeProfileSetup);
 router.get('/check-profile-completion', protect, authController.checkProfileCompletion);
