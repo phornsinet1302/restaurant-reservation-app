@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,9 @@ import {
   ImageSourcePropType,
   Linking,
   Platform,
-  Alert,
   ActivityIndicator,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -22,6 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -110,6 +112,7 @@ function StarRow({ rating, size = 18 }: { rating: number; size?: number }) {
 /* ── Component ── */
 
 export default function RestaurantDetailScreen() {
+  const { toast } = useAppToast();
   const router = useRouter();
   const params = useLocalSearchParams<{
     id: string;
@@ -120,6 +123,8 @@ export default function RestaurantDetailScreen() {
     description: string;
     hours: string;
     distance: string;
+    latitude: string;
+    longitude: string;
   }>();
 
   const [isFav, setIsFav] = useState(false);
@@ -130,26 +135,58 @@ export default function RestaurantDetailScreen() {
   const [menuLoading, setMenuLoading] = useState(false);
   const [menuPhotos, setMenuPhotos] = useState<any[]>([]);
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
+  const [allPhotos, setAllPhotos] = useState<ImageSourcePropType[]>([]);
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [showPhotoViewer, setShowPhotoViewer] = useState(false);
+  const photoListRef = useRef<FlatList>(null);
   const { isGuest } = useAuth();
   const [showGuestModal, setShowGuestModal] = useState(false);
   // const [restaurantLocation, setRestaurantLocation] = useState(null); // Disabled
   // const [locationLoading, setLocationLoading] = useState(true); // Disabled
 
   const restaurantId = (params.id || '').trim();
-  const name = params.name || 'Pret A Manger';
-  const rating = params.rating || '4.0';
-  const reviewsCount = params.reviews || '3.2k';
-  const address = params.address || '42 Fleet Street, City';
-  const description =
-    params.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.';
-  const hours = params.hours || 'Open Until 3:00pm';
-  const distance = params.distance || '0.2 miles';
+  const [name, setName] = useState(params.name || '');
+  const [rating, setRating] = useState(params.rating || '4.0');
+  const [reviewsCount] = useState(params.reviews || '3.2k');
+  const [address, setAddress] = useState(params.address || '');
+  const [latitude, setLatitude] = useState<number | null>(params.latitude ? parseFloat(params.latitude) : null);
+  const [longitude, setLongitude] = useState<number | null>(params.longitude ? parseFloat(params.longitude) : null);
+  const [description, setDescription] = useState(params.description || '');
+  const [hours, setHours] = useState(params.hours || '');
+  const [distance] = useState(params.distance || '0.2 miles');
 
   // Use uploaded cover image if available, otherwise fall back to static map
-  const heroImage = heroImageUrl 
+  const heroImage = heroImageUrl
     ? { uri: heroImageUrl }
     : RESTAURANT_IMAGES[name] || require('@/assets/restaurant-4.jpg');
-  const closingTime = hours.replace('Open Until ', '');
+  const closingTime = (hours || 'Open Until 3:00pm').replace('Open Until ', '');
+
+  // Build combined photos list for the viewer
+  const buildAllPhotos = (): ImageSourcePropType[] => {
+    const photos: ImageSourcePropType[] = [];
+    if (menuPhotos.length > 0) {
+      menuPhotos.forEach((p) => photos.push({ uri: p.photo_url }));
+    } else {
+      FOOD_PHOTOS.forEach((p) => photos.push(p));
+    }
+    menuItems.forEach((item) => {
+      if (item.image_url) photos.push({ uri: item.image_url });
+    });
+    return photos;
+  };
+
+  const openPhotoViewer = (photo: ImageSourcePropType) => {
+    const photos = buildAllPhotos();
+    const idx = photos.findIndex((p) => {
+      const pUri = (p as any)?.uri;
+      const targetUri = (photo as any)?.uri;
+      if (pUri && targetUri) return pUri === targetUri;
+      return p === photo;
+    });
+    setAllPhotos(photos);
+    setPhotoIndex(idx >= 0 ? idx : 0);
+    setShowPhotoViewer(true);
+  };
 
   useEffect(() => {
     loadUserDataAndCheckFavorite();
@@ -222,6 +259,18 @@ export default function RestaurantDetailScreen() {
         setHeroImageUrl(response.data.image_url);
       }
 
+      // Populate restaurant info from API (fills in missing URL params, e.g. when navigating from stories)
+      if (response.data) {
+        const r = response.data;
+        if (r.name) setName(r.name);
+        if (r.address) setAddress(r.address);
+        if (r.description) setDescription(r.description);
+        if (r.rating != null) setRating(String(r.rating));
+        if (r.closing_hours) setHours(`Open Until ${r.closing_hours}`);
+        if (r.latitude != null) setLatitude(parseFloat(r.latitude));
+        if (r.longitude != null) setLongitude(parseFloat(r.longitude));
+      }
+
       if (response.data?.menu_items) {
         console.log(`✅ Found ${response.data.menu_items.length} menu items:`, response.data.menu_items);
         setMenuItems(response.data.menu_items);
@@ -274,12 +323,12 @@ export default function RestaurantDetailScreen() {
 
   const handleToggleFavorite = async () => {
     if (!token) {
-      Alert.alert('Error', 'You must be logged in to favorite restaurants');
+      toast('You must be logged in to favorite restaurants', 'error');
       return;
     }
 
     if (!restaurantId || restaurantId.length === 0) {
-      Alert.alert('Error', 'Restaurant ID is missing');
+      toast('Restaurant ID is missing', 'error');
       return;
     }
 
@@ -291,7 +340,7 @@ export default function RestaurantDetailScreen() {
           headers: { Authorization: `Bearer ${token}` },
         });
         setIsFav(false);
-        Alert.alert('Removed', `${name} removed from favorites`);
+        toast(`${name} removed from favorites`, 'success');
       } else {
         // Add to favorites
         await axios.post(
@@ -300,12 +349,12 @@ export default function RestaurantDetailScreen() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setIsFav(true);
-        Alert.alert('Added', `${name} added to favorites`);
+        toast(`${name} added to favorites`, 'success');
       }
     } catch (error: any) {
       console.error('Favorite toggle error:', error.response?.data || error.message);
       console.error('Restaurant ID being sent:', JSON.stringify(restaurantId));
-      Alert.alert('Error', 'Failed to update favorite. Please try again.');
+      toast('Failed to update favorite. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -313,19 +362,37 @@ export default function RestaurantDetailScreen() {
 
   const openGoogleMaps = async () => {
     try {
-      const query = encodeURIComponent(address || 'Location');
-      
+      const destination =
+        latitude && longitude
+          ? `${latitude},${longitude}`
+          : encodeURIComponent(address || 'Location');
+
+      const useCoords = !!(latitude && longitude);
+
+      // Always prefer Google Maps; fall back to web Google Maps
       const urls = Platform.select({
         ios: [
-          `maps://maps.apple.com/?q=${query}`,
-          `https://maps.apple.com/?q=${query}`,
+          // Google Maps app (deep link)
+          useCoords
+            ? `comgooglemaps://?daddr=${destination}&directionsmode=driving`
+            : `comgooglemaps://?q=${destination}`,
+          // Web fallback (opens in browser → may redirect to GM app)
+          useCoords
+            ? `https://www.google.com/maps/dir/?api=1&destination=${destination}`
+            : `https://www.google.com/maps/search/?api=1&query=${destination}`,
         ],
         android: [
-          `geo:0,0?q=${query}`,
-          `https://www.google.com/maps/search/?api=1&query=${query}`,
+          useCoords
+            ? `google.navigation:q=${destination}`
+            : `geo:0,0?q=${destination}`,
+          useCoords
+            ? `https://www.google.com/maps/dir/?api=1&destination=${destination}`
+            : `https://www.google.com/maps/search/?api=1&query=${destination}`,
         ],
         default: [
-          `https://www.google.com/maps/search/?api=1&query=${query}`,
+          useCoords
+            ? `https://www.google.com/maps/dir/?api=1&destination=${destination}`
+            : `https://www.google.com/maps/search/?api=1&query=${destination}`,
         ],
       }) || [];
 
@@ -345,11 +412,11 @@ export default function RestaurantDetailScreen() {
       }
 
       if (!opened) {
-        Alert.alert('Error', 'Unable to open maps. Please try again later.');
+        toast('Unable to open Google Maps. Please make sure Google Maps is installed.', 'error');
       }
     } catch (error) {
       console.error('Error opening maps:', error);
-      Alert.alert('Error', 'Could not open maps');
+      toast('Could not open maps', 'error');
     }
   };
 
@@ -394,7 +461,7 @@ export default function RestaurantDetailScreen() {
 
             {/* Action buttons */}
             <View style={styles.heroActions}>
-              <TouchableOpacity style={styles.moreInfoBtn}>
+              <TouchableOpacity style={styles.moreInfoBtn} onPress={() => toast('More info coming soon', 'info')}>
                 <Ionicons name="information-circle-outline" size={18} color={Colors.white} />
                 <Text style={styles.moreInfoText}>More info</Text>
               </TouchableOpacity>
@@ -433,19 +500,61 @@ export default function RestaurantDetailScreen() {
           >
             {menuPhotos.length > 0 ? (
               menuPhotos.map((photo) => (
-                <Image 
-                  key={photo.id} 
-                  source={{ uri: photo.photo_url }} 
-                  style={styles.photoThumb} 
-                />
+                <TouchableOpacity key={photo.id} activeOpacity={0.8} onPress={() => openPhotoViewer({ uri: photo.photo_url })}>
+                  <Image 
+                    source={{ uri: photo.photo_url }} 
+                    style={styles.photoThumb} 
+                  />
+                </TouchableOpacity>
               ))
             ) : (
               FOOD_PHOTOS.map((photo, i) => (
-                <Image key={i} source={photo} style={styles.photoThumb} />
+                <TouchableOpacity key={i} activeOpacity={0.8} onPress={() => openPhotoViewer(photo)}>
+                  <Image source={photo} style={styles.photoThumb} />
+                </TouchableOpacity>
               ))
             )}
           </ScrollView>
         </View>
+
+        {/* ── Full-screen Photo Viewer (swipe + zoom) ── */}
+        <Modal visible={showPhotoViewer} transparent animationType="fade" onRequestClose={() => setShowPhotoViewer(false)}>
+          <View style={styles.photoModalOverlay}>
+            <TouchableOpacity style={styles.photoModalClose} onPress={() => setShowPhotoViewer(false)}>
+              <Ionicons name="close" size={28} color="#fff" />
+            </TouchableOpacity>
+            <FlatList
+              ref={photoListRef}
+              data={allPhotos}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              initialScrollIndex={photoIndex}
+              getItemLayout={(_, index) => ({ length: SCREEN_WIDTH, offset: SCREEN_WIDTH * index, index })}
+              onMomentumScrollEnd={(e) => {
+                const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                setPhotoIndex(idx);
+              }}
+              keyExtractor={(_, i) => String(i)}
+              renderItem={({ item }) => (
+                <ScrollView
+                  style={{ width: SCREEN_WIDTH }}
+                  contentContainerStyle={styles.photoZoomContainer}
+                  maximumZoomScale={4}
+                  minimumZoomScale={1}
+                  showsHorizontalScrollIndicator={false}
+                  showsVerticalScrollIndicator={false}
+                  bouncesZoom
+                >
+                  <Image source={item} style={styles.photoModalImage} resizeMode="contain" />
+                </ScrollView>
+              )}
+            />
+            {allPhotos.length > 1 && (
+              <Text style={styles.photoCounter}>{photoIndex + 1} / {allPhotos.length}</Text>
+            )}
+          </View>
+        </Modal>
 
         {/* ── Map Location ── */}
         <View style={styles.mapCard}>
@@ -488,7 +597,7 @@ export default function RestaurantDetailScreen() {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.reviewCta}>
+          <TouchableOpacity style={styles.reviewCta} onPress={() => toast('Reviews coming soon', 'info')}>
             <Text style={styles.reviewCtaText}>Complete a Visit to Review</Text>
           </TouchableOpacity>
 
@@ -526,7 +635,7 @@ export default function RestaurantDetailScreen() {
 
         {/* ── Food Menu / Book Table buttons ── */}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.foodMenuBtn}>
+          <TouchableOpacity style={styles.foodMenuBtn} onPress={() => toast('Food menu coming soon', 'info')}>
             <Text style={styles.foodMenuText}>Food Menu</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -564,7 +673,9 @@ export default function RestaurantDetailScreen() {
             menuItems.map((item) => (
               <View key={item.id} style={styles.menuItem}>
                 {item.image_url ? (
-                  <Image source={{ uri: item.image_url }} style={styles.menuItemImage} />
+                  <TouchableOpacity activeOpacity={0.8} onPress={() => openPhotoViewer({ uri: item.image_url! })}>
+                    <Image source={{ uri: item.image_url }} style={styles.menuItemImage} />
+                  </TouchableOpacity>
                 ) : (
                   <View style={[styles.menuItemImage, { backgroundColor: '#F0EFDF', justifyContent: 'center', alignItems: 'center' }]}>
                     <Ionicons name="image-outline" size={20} color={Colors.gray} />
@@ -777,6 +888,41 @@ const styles = StyleSheet.create({
     width: 160,
     height: 120,
     borderRadius: 12,
+  },
+  photoModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoModalClose: {
+    position: 'absolute',
+    top: 54,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+  photoModalImage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_WIDTH,
+  },
+  photoZoomContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoCounter: {
+    position: 'absolute',
+    bottom: 50,
+    alignSelf: 'center',
+    color: '#fff',
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 15,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    overflow: 'hidden',
   },
 
   /* Map card */

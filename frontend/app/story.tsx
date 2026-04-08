@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ActivityIndicator, View, Alert } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import StoryViewer, { StoryGroup } from '@/components/StoryViewer';
 import { API_CONFIG } from '@/app/config/apiConfig';
@@ -9,7 +9,7 @@ import axios from 'axios';
 const API_URL = API_CONFIG.BASE_URL;
 
 export default function StoryScreen() {
-  const { groupIndex } = useLocalSearchParams<{ groupIndex: string }>();
+  const { groupIndex, restaurantId } = useLocalSearchParams<{ groupIndex: string; restaurantId: string }>();
   const router = useRouter();
   const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +81,7 @@ export default function StoryScreen() {
       // Transform backend data to StoryGroup format
       const groups: StoryGroup[] = (response.data || []).map((restaurant: any) => ({
         id: `s_${restaurant.id}`,
+        restaurantId: restaurant.id,
         name: restaurant.name,
         time: formatTime(new Date(restaurant.stories[0]?.created_at)),
         distance: '0 miles',
@@ -121,7 +122,15 @@ export default function StoryScreen() {
     );
   }
 
-  const idx = parseInt(groupIndex ?? '0', 10);
+  // Resolve the correct group index: prefer restaurantId lookup over numeric index
+  let initialIdx = 0;
+  if (restaurantId) {
+    const found = storyGroups.findIndex((g) => g.restaurantId === restaurantId);
+    initialIdx = found >= 0 ? found : 0;
+  } else {
+    const parsed = parseInt(groupIndex ?? '0', 10);
+    initialIdx = isNaN(parsed) ? 0 : Math.min(parsed, storyGroups.length - 1);
+  }
 
   const handleStoryDeleted = () => {
     console.log('📖 Story was deleted - UI updated to reflect changes');
@@ -130,7 +139,7 @@ export default function StoryScreen() {
   return (
     <StoryViewer
       groups={storyGroups.length > 0 ? storyGroups : []}
-      initialGroupIndex={Math.min(idx, storyGroups.length - 1)}
+      initialGroupIndex={initialIdx}
       onClose={() => router.back()}
       onStoryDeleted={handleStoryDeleted}
     />

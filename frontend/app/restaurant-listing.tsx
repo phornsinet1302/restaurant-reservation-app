@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Dimensions,
+  TextInput, Image, ActivityIndicator, KeyboardAvoidingView, Platform, Dimensions,
   Modal as RNModal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-// import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'; // TEMPORARILY DISABLED FOR EXPO GO
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '@/constants/Colors';
@@ -14,6 +13,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { LinearGradient } from 'expo-linear-gradient';
+import WebMapPicker from '@/components/WebMapPicker';
+import { useAppToast } from '@/components/ToastProvider';
+
+// Conditionally import react-native-maps (crashes in Expo Go)
+let MapView: any = null;
+let Marker: any = null;
+let PROVIDER_GOOGLE: any = null;
+try {
+  const Maps = require('react-native-maps');
+  MapView = Maps.default;
+  Marker = Maps.Marker;
+  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+} catch (e) {
+  // react-native-maps not available (Expo Go)
+}
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -96,13 +110,14 @@ const formatTime = (hour: number, minute: string, period: 'AM' | 'PM') =>
 
 /* ─── Main Screen ─── */
 export default function RestaurantListingScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // Basic details
   const [restaurantName, setRestaurantName] = useState('');
-  const [cuisineLine, setCuisineLine] = useState('');
+
   const [description, setDescription] = useState('');
   const [phone, setPhone] = useState('');
 
@@ -212,7 +227,7 @@ export default function RestaurantListingScreen() {
       }
 
       if (!result.assets || result.assets.length === 0) {
-        Alert.alert('Error', 'No image was selected');
+        toast('No image was selected', 'error');
         return;
       }
 
@@ -227,14 +242,14 @@ export default function RestaurantListingScreen() {
         message: error?.message,
         code: error?.code,
       });
-      Alert.alert('Error', `Failed to pick image: ${error?.message || 'Unknown error'}`);
+      toast(`Failed to pick image: ${error?.message || 'Unknown error'}`, 'error');
     }
   };
 
   const uploadMenuPhoto = async (imageUri: string, displayOrder: number) => {
     try {
       if (!restaurantId || !token) {
-        Alert.alert('Error', 'Restaurant not found. Please refresh.');
+        toast('Restaurant not found. Please refresh.', 'error');
         return;
       }
 
@@ -277,10 +292,10 @@ export default function RestaurantListingScreen() {
       
       if (uploadRes.data?.data) {
         await loadMenuPhotos(restaurantId);
-        Alert.alert('Success', 'Menu photo uploaded!');
+        toast('Menu photo uploaded!', 'success');
       } else if (uploadRes.data?.success) {
         await loadMenuPhotos(restaurantId);
-        Alert.alert('Success', 'Menu photo uploaded!');
+        toast('Menu photo uploaded!', 'success');
       }
     } catch (error: any) {
       console.error('Upload error:', error);
@@ -293,19 +308,19 @@ export default function RestaurantListingScreen() {
       
       // Handle specific error cases
       if (error?.response?.status === 404) {
-        Alert.alert('Error', 'API endpoint not found. Make sure backend is running on port 3000.');
+        toast('API endpoint not found. Make sure backend is running on port 3000.', 'error');
       } else if (error?.response?.status === 401) {
-        Alert.alert('Error', 'Unauthorized. Please log in again.');
+        toast('Unauthorized. Please log in again.', 'error');
       } else if (error?.response?.status === 403) {
-        Alert.alert('Error', 'This is not your restaurant.');
+        toast('This is not your restaurant.', 'error');
       } else if (error?.response?.status === 400) {
         const msg = error?.response?.data?.error || 'Invalid request';
-        Alert.alert('Upload Failed', msg);
+        toast(msg, 'error');
       } else if (error?.code === 'ECONNREFUSED') {
-        Alert.alert('Error', 'Cannot connect to backend. Is the server running on port 3000?');
+        toast('Cannot connect to backend. Is the server running on port 3000?', 'error');
       } else {
         const msg = error?.response?.data?.error || error?.message || 'Failed to upload photo';
-        Alert.alert('Error', msg);
+        toast(msg, 'error');
       }
     } finally {
       setUploadingMenuPhoto(false);
@@ -313,17 +328,14 @@ export default function RestaurantListingScreen() {
   };
 
   const deleteMenuPhoto = async (photoId: string) => {
-    Alert.alert(
-      'Delete Photo',
-      'Remove this menu photo?',
-      [
+    confirm('Delete Photo', 'Remove this menu photo?', [
         { text: 'Cancel', onPress: () => {} },
         {
           text: 'Delete',
           onPress: async () => {
             try {
               if (!token) {
-                Alert.alert('Error', 'Not authenticated');
+                toast('Not authenticated', 'error');
                 return;
               }
 
@@ -333,16 +345,15 @@ export default function RestaurantListingScreen() {
               );
 
               await loadMenuPhotos(restaurantId);
-              Alert.alert('Success', 'Photo removed');
+              toast('Photo removed', 'success');
             } catch (error: any) {
               const msg = error?.response?.data?.error || 'Failed to delete';
-              Alert.alert('Error', msg);
+              toast(msg, 'error');
             }
           },
           style: 'destructive',
         },
-      ]
-    );
+      ]);
   };
 
   const pickCoverImage = async () => {
@@ -368,7 +379,7 @@ export default function RestaurantListingScreen() {
       }
 
       if (!result.assets || result.assets.length === 0) {
-        Alert.alert('Error', 'No image was selected');
+        toast('No image was selected', 'error');
         return;
       }
 
@@ -384,7 +395,7 @@ export default function RestaurantListingScreen() {
         message: error?.message,
         code: error?.code,
       });
-      Alert.alert('Error', `Failed to pick image: ${error?.message || 'Unknown error'}`);
+      toast(`Failed to pick image: ${error?.message || 'Unknown error'}`, 'error');
     }
   };
 
@@ -414,12 +425,12 @@ export default function RestaurantListingScreen() {
       if (imageUrl) {
         setCoverImage(imageUrl);
         setShowImagePreview(false);
-        Alert.alert('Success', 'Cover image updated! Tap "Publish" to save changes.');
+        toast('Cover image updated! Tap "Publish" to save changes.', 'success');
         return imageUrl;
       }
     } catch (error: any) {
       console.error('Upload error:', error);
-      Alert.alert('Error', 'Failed to upload image. Please try again.');
+      toast('Failed to upload image. Please try again.', 'error');
       throw error;
     } finally {
       setUploadingImage(false);
@@ -452,7 +463,6 @@ export default function RestaurantListingScreen() {
           setRestaurantId(myRestaurant.id);
           console.log(`[loadRestaurantData] Loaded restaurant ID: ${myRestaurant.id}`);
           setRestaurantName(myRestaurant.name || '');
-          setCuisineLine(myRestaurant.cuisine || myRestaurant.category || '');
           setDescription(myRestaurant.description || '');
           setAddress(myRestaurant.address || '');
           setPhone(myRestaurant.phone || '');
@@ -544,7 +554,7 @@ export default function RestaurantListingScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission required');
+        toast('Location permission required', 'warning');
         return;
       }
 
@@ -563,37 +573,32 @@ export default function RestaurantListingScreen() {
       });
       await getAddressFromCoordinates(lat, lng);
     } catch (error) {
-      Alert.alert('Error', 'Could not get current location');
+      toast('Could not get current location', 'error');
     }
   };
 
   const handleSave = async () => {
     // Validate all required fields
     if (!restaurantName.trim()) {
-      Alert.alert('Error', 'Restaurant name is required');
+      toast('Restaurant name is required', 'error');
       return;
     }
     if (!description.trim()) {
-      Alert.alert('Error', 'Description is required');
+      toast('Description is required', 'error');
       return;
     }
     if (!address.trim()) {
-      Alert.alert('Error', 'Address is required');
+      toast('Address is required', 'error');
       return;
     }
     if (!phone.trim()) {
-      Alert.alert('Error', 'Phone number is required');
+      toast('Phone number is required', 'error');
       return;
     }
-    if (!cuisineLine.trim()) {
-      Alert.alert('Error', 'Cuisine/Category is required');
-      return;
-    }
-
     setSaving(true);
     try {
       if (!token) {
-        Alert.alert('Error', 'Please log in again');
+        toast('Please log in again', 'error');
         return;
       }
 
@@ -602,7 +607,6 @@ export default function RestaurantListingScreen() {
 
       const restaurantData = {
         name: restaurantName.trim(),
-        cuisine: cuisineLine.trim(),
         description: description.trim(),
         address: address.trim(),
         category: selectedVenueType,
@@ -620,7 +624,7 @@ export default function RestaurantListingScreen() {
           restaurantData,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-        Alert.alert('Success', 'Listing saved successfully!');
+        toast('Listing saved successfully!', 'success');
       } catch (updateError: any) {
         // If restaurant doesn't exist, create it first
         if (updateError?.response?.status === 404 && updateError?.response?.data?.error?.includes('not found')) {
@@ -630,14 +634,14 @@ export default function RestaurantListingScreen() {
             restaurantData,
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          Alert.alert('Success', 'Restaurant created and saved successfully!');
+          toast('Restaurant created and saved successfully!', 'success');
         } else {
           throw updateError;
         }
       }
     } catch (error: any) {
       const msg = error?.response?.data?.error || 'Failed to save changes';
-      Alert.alert('Error', msg);
+      toast(msg, 'error');
     } finally {
       setSaving(false);
     }
@@ -645,16 +649,12 @@ export default function RestaurantListingScreen() {
 
   const handlePublish = async () => {
     // Validate all required fields before publishing
-    if (!restaurantName.trim() || !description.trim() || !address.trim() || 
-        !phone.trim() || !cuisineLine.trim()) {
-      Alert.alert('Error', 'Please fill in all required fields before publishing');
+    if (!restaurantName.trim() || !description.trim() || !address.trim() || !phone.trim()) {
+      toast('Please fill in all required fields before publishing', 'error');
       return;
     }
 
-    Alert.alert(
-      'Publish Restaurant',
-      'Make this restaurant visible to all customers for booking?',
-      [
+    confirm('Publish Restaurant', 'Make this restaurant visible to all customers for booking?', [
         { text: 'Cancel', onPress: () => {} },
         {
           text: 'Publish',
@@ -662,7 +662,7 @@ export default function RestaurantListingScreen() {
             setPublishing(true);
             try {
               if (!token) {
-                Alert.alert('Error', 'Please log in again');
+                toast('Please log in again', 'error');
                 return;
               }
 
@@ -672,7 +672,6 @@ export default function RestaurantListingScreen() {
 
               const restaurantData = {
                 name: restaurantName.trim(),
-                cuisine: cuisineLine.trim(),
                 description: description.trim(),
                 address: address.trim(),
                 category: selectedVenueType,
@@ -712,19 +711,18 @@ export default function RestaurantListingScreen() {
                 { headers: { Authorization: `Bearer ${token}` } }
               );
 
-              Alert.alert('Success', 'Your restaurant is now live for customer bookings!', [
-                { text: 'OK', onPress: () => router.back() }
-              ]);
+              confirm('Success', 'Your restaurant is now live for customer bookings!', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
             } catch (error: any) {
               const msg = error?.response?.data?.error || 'Failed to publish';
-              Alert.alert('Error', msg);
+              toast(msg, 'error');
             } finally {
               setPublishing(false);
             }
           },
         },
-      ]
-    );
+      ]);
   };
 
   if (loading) {
@@ -778,7 +776,7 @@ export default function RestaurantListingScreen() {
                 style={styles.editImageBtn}
                 onPress={() => {
                   if (!token) {
-                    Alert.alert('Error', 'Please log in first');
+                    toast('Please log in first', 'error');
                     return;
                   }
                   pickCoverImage();
@@ -803,7 +801,27 @@ export default function RestaurantListingScreen() {
 
         {/* Action buttons */}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.actionBtnOutline}>
+          <TouchableOpacity
+            style={styles.actionBtnOutline}
+            onPress={() => {
+              const openingHours = formatTime(openHour, openMinute, openPeriod);
+              router.push({
+                pathname: '/restaurant-detail',
+                params: {
+                  id: restaurantId || 'preview',
+                  name: restaurantName || 'Your Restaurant',
+                  rating: '0',
+                  reviews: '0',
+                  address: address || displayAddress || 'No address set',
+                  description: description || 'No description yet',
+                  hours: `Open Until ${formatTime(closeHour, closeMinute, closePeriod)}`,
+                  distance: '0 km',
+                  latitude: String(latitude),
+                  longitude: String(longitude),
+                },
+              } as any);
+            }}
+          >
             <Ionicons name="eye-outline" size={18} color={Colors.text} />
             <Text style={styles.actionBtnOutlineText}>Preview page</Text>
           </TouchableOpacity>
@@ -829,15 +847,6 @@ export default function RestaurantListingScreen() {
             value={restaurantName}
             onChangeText={setRestaurantName}
             placeholder="Your restaurant name"
-            placeholderTextColor={Colors.gray}
-          />
-
-          <Text style={styles.label}>Cuisine line</Text>
-          <TextInput
-            style={styles.input}
-            value={cuisineLine}
-            onChangeText={setCuisineLine}
-            placeholder="e.g. Khmer restaurant • Family dining"
             placeholderTextColor={Colors.gray}
           />
 
@@ -871,22 +880,58 @@ export default function RestaurantListingScreen() {
 
         </View>
 
-        {/* ─── Section: Location (Map Disabled for Expo Go) ─── */}
+        {/* ─── Section: Location ─── */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="map-outline" size={22} color={Colors.primary} />
             <Text style={styles.sectionTitle}>Pin your location</Text>
           </View>
 
-          <Text style={styles.label}>Location coordinates (map coming in development build)</Text>
-          
-          <TouchableOpacity
-            style={[styles.timeChip, { width: '100%', marginRight: 0, marginVertical: 12 }]}
-            onPress={getCurrentLocation}
-          >
-            <Ionicons name="locate" size={20} color={Colors.primary} />
-            <Text style={[styles.timeChipText, { marginLeft: 8 }]}>Detect current location</Text>
-          </TouchableOpacity>
+          <Text style={styles.label}>Tap the map or drag the pin to set your restaurant location</Text>
+
+          {MapView ? (
+            <View style={styles.mapContainer}>
+              <MapView
+                provider={PROVIDER_GOOGLE}
+                style={styles.map}
+                region={mapRegion}
+                onRegionChangeComplete={(region: any) => setMapRegion(region)}
+                onPress={handleMapPress}
+              >
+                <Marker
+                  coordinate={{ latitude, longitude }}
+                  draggable
+                  onDragEnd={(e: any) => {
+                    const { latitude: lat, longitude: lng } = e.nativeEvent.coordinate;
+                    setLatitude(lat);
+                    setLongitude(lng);
+                    setMapRegion({ ...mapRegion, latitude: lat, longitude: lng });
+                    getAddressFromCoordinates(lat, lng);
+                  }}
+                />
+              </MapView>
+
+              <TouchableOpacity
+                style={styles.currentLocationButton}
+                onPress={getCurrentLocation}
+              >
+                <Ionicons name="locate" size={22} color={Colors.primary} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <WebMapPicker
+              latitude={latitude}
+              longitude={longitude}
+              onLocationChange={(lat, lng) => {
+                setLatitude(lat);
+                setLongitude(lng);
+                setMapRegion({ ...mapRegion, latitude: lat, longitude: lng });
+                getAddressFromCoordinates(lat, lng);
+              }}
+              onDetectLocation={getCurrentLocation}
+              height={300}
+            />
+          )}
 
           {displayAddress ? (
             <View style={styles.addressBox}>
@@ -896,7 +941,7 @@ export default function RestaurantListingScreen() {
           ) : (
             <View style={styles.addressBox}>
               <Ionicons name="information-circle" size={18} color={Colors.gray} />
-              <Text style={styles.addressText}>Tap locate button to detect your restaurant location</Text>
+              <Text style={styles.addressText}>Tap the map or use the locate button to set your restaurant location</Text>
             </View>
           )}
 
@@ -927,10 +972,11 @@ export default function RestaurantListingScreen() {
           <TextInput
             style={styles.input}
             value={phone}
-            onChangeText={setPhone}
+            onChangeText={(t) => setPhone(t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''))}
             placeholder="Your restaurant phone number"
             placeholderTextColor={Colors.gray}
             keyboardType="phone-pad"
+            maxLength={15}
           />
 
           {/* Opening Hours */}
@@ -1080,7 +1126,7 @@ export default function RestaurantListingScreen() {
                     style={styles.photoUploadBtn}
                     onPress={() => {
                       if (!restaurantId) {
-                        Alert.alert('Error', 'Restaurant data not loaded. Please refresh the screen.');
+                        toast('Restaurant data not loaded. Please refresh the screen.', 'error');
                         return;
                       }
                       pickMenuPhoto(photoNum);
@@ -1220,6 +1266,7 @@ export default function RestaurantListingScreen() {
           </View>
         </View>
       </RNModal>
+
     </KeyboardAvoidingView>
   );
 }
