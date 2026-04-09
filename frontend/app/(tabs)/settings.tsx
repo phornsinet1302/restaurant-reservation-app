@@ -1,8 +1,10 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function SettingsScreen() {
+  const { toast } = useAppToast();
   const settingsItems = [
     { icon: 'restaurant-outline' as const, label: 'Menu Management', subtitle: 'Add and edit menu items' },
     { icon: 'people-outline' as const, label: 'Staff', subtitle: 'Manage staff accounts' },
@@ -12,10 +14,11 @@ export default function SettingsScreen() {
   ];
 
   return (
+    <View style={{ flex: 1 }}>
     <ScrollView style={styles.container}>
       <View style={styles.section}>
         {settingsItems.map((item, index) => (
-          <TouchableOpacity key={index} style={styles.settingItem}>
+          <TouchableOpacity key={index} style={styles.settingItem} onPress={() => toast(`${item.label} coming soon`, 'info')}>
             <View style={styles.iconContainer}>
               <Ionicons name={item.icon} size={22} color={Colors.primary} />
             </View>
@@ -28,6 +31,7 @@ export default function SettingsScreen() {
         ))}
       </View>
     </ScrollView>
+    </View>
   );
 }
 

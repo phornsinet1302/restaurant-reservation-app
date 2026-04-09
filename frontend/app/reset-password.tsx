@@ -7,17 +7,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
-  Alert,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import axios from 'axios';
 import { Colors } from '@/constants/Colors';
-import CustomButton from '@/components/CustomButton';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function ResetPasswordScreen() {
+  const { toast, confirm } = useAppToast();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -26,30 +28,27 @@ export default function ResetPasswordScreen() {
   const router = useRouter();
   const { email, resetCode } = useLocalSearchParams();
 
-  React.useEffect(() => {
-    console.log('✅ ResetPasswordScreen mounted');
-    console.log('   Email:', email);
-    console.log('   Reset Code:', resetCode);
-  }, [email, resetCode]);
+  // Determine if this is the forgot-password flow (has code) or settings flow
+  const isForgotFlow = !!email && !!resetCode;
 
   const validateForm = () => {
-    if (!email || !resetCode) {
-      Alert.alert('Error', 'Invalid session. Please try forgot password again.');
+    if (isForgotFlow && (!email || !resetCode)) {
+      toast('Invalid session. Please try forgot password again.', 'error');
       return false;
     }
 
     if (!newPassword || !confirmPassword) {
-      Alert.alert('Error', 'Please enter both password fields');
+      toast('Please enter both password fields', 'error');
       return false;
     }
 
     if (newPassword.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      toast('Password must be at least 6 characters', 'error');
       return false;
     }
 
     if (newPassword !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      toast('Passwords do not match', 'error');
       return false;
     }
 
@@ -57,184 +56,152 @@ export default function ResetPasswordScreen() {
   };
 
   const handleResetPassword = async () => {
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
     try {
-      console.log('🔐 Resetting password for email:', email);
-
-      const response = await axios.post(
-        `${API_CONFIG.BASE_URL}/api/auth/reset-password-with-code`,
-        {
-          email: email,
-          resetCode: resetCode,
-          newPassword: newPassword,
-        }
-      );
-
-      console.log('✅ Password reset successful:', response.data);
-
-      Alert.alert(
-        'Success',
-        'Your password has been reset successfully. Please login with your new password.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              router.replace('/login');
-            },
-          },
-        ]
-      );
-    } catch (error) {
-      let errorMessage = 'Failed to reset password. Please try again.';
-
-      if (axios.isAxiosError(error)) {
-        if (error.response?.data?.error) {
-          errorMessage = error.response.data.error;
-        }
+      if (isForgotFlow) {
+        // Forgot-password flow: use reset code
+        await axios.post(
+          `${API_CONFIG.BASE_URL}/api/auth/reset-password-with-code`,
+          { email, resetCode, newPassword }
+        );
+      } else {
+        // Settings flow: use JWT token
+        const token = await AsyncStorage.getItem('token');
+        await axios.post(
+          `${API_CONFIG.BASE_URL}/api/auth/reset-password`,
+          { password: newPassword, confirmPassword },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
       }
 
-      console.error('❌ Password reset error:', errorMessage);
-      Alert.alert('Error', errorMessage);
+      confirm('Success', 'Your password has been reset successfully. Please login with your new password.', [
+          { text: 'OK', onPress: () => router.replace('/login') }
+        ]);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || 'Failed to reset password. Please try again.';
+      toast(msg, 'error');
     } finally {
       setLoading(false);
     }
   };
+
+  const canSubmit = newPassword.length >= 6 && newPassword === confirmPassword && !loading;
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-          >
-            <Ionicons name="chevron-back" size={24} color={Colors.text} />
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color={Colors.text} />
           </TouchableOpacity>
-          <Text style={styles.title}>Create New Password</Text>
+          <Text style={styles.headerTitle}>Create New Password</Text>
           <View style={{ width: 24 }} />
         </View>
 
-        <View style={styles.content}>
-          <View style={styles.iconContainer}>
-            <View style={styles.icon}>
-              <Ionicons name="lock-closed-outline" size={48} color={Colors.primary} />
-            </View>
+        {/* Icon */}
+        <View style={styles.iconContainer}>
+          <View style={styles.iconCircle}>
+            <Ionicons name="lock-closed-outline" size={44} color={Colors.primary} />
           </View>
+        </View>
 
-          <Text style={styles.subtitle}>
-            Create a strong new password for your account
-          </Text>
+        <Text style={styles.subtitle}>
+          Create a strong new password for your account
+        </Text>
 
-          {/* New Password Input */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>New Password</Text>
-            <View style={styles.passwordInputWrapper}>
+        {/* Form */}
+        <View style={styles.form}>
+          {/* New Password */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>
+              New Password <Text style={{ color: Colors.error }}>*</Text>
+            </Text>
+            <View style={styles.inputRow}>
               <TextInput
                 style={styles.input}
                 placeholder="Enter new password"
+                placeholderTextColor={Colors.gray}
                 secureTextEntry={!showPassword}
                 value={newPassword}
                 onChangeText={setNewPassword}
-                placeholderTextColor="#999"
+                autoCapitalize="none"
                 editable={!loading}
               />
-              <TouchableOpacity
-                onPress={() => setShowPassword(!showPassword)}
-                style={styles.iconButton}
-              >
-                <Ionicons
-                  name={showPassword ? 'eye-off' : 'eye'}
-                  size={20}
-                  color={Colors.text}
-                />
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
+                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.gray} />
               </TouchableOpacity>
             </View>
-            <Text style={styles.helperText}>
-              At least 6 characters
-            </Text>
+            <Text style={styles.helperText}>At least 6 characters</Text>
           </View>
 
-          {/* Confirm Password Input */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Confirm Password</Text>
-            <View style={styles.passwordInputWrapper}>
+          {/* Confirm Password */}
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>
+              Confirm Password <Text style={{ color: Colors.error }}>*</Text>
+            </Text>
+            <View style={styles.inputRow}>
               <TextInput
                 style={styles.input}
                 placeholder="Confirm new password"
+                placeholderTextColor={Colors.gray}
                 secureTextEntry={!showConfirmPassword}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
-                placeholderTextColor="#999"
+                autoCapitalize="none"
                 editable={!loading}
               />
-              <TouchableOpacity
-                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                style={styles.iconButton}
-              >
-                <Ionicons
-                  name={showConfirmPassword ? 'eye-off' : 'eye'}
-                  size={20}
-                  color={Colors.text}
-                />
+              <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeBtn}>
+                <Ionicons name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.gray} />
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Password Match Indicator */}
-          {newPassword && confirmPassword && (
+          {/* Match Indicator */}
+          {newPassword.length > 0 && confirmPassword.length > 0 && (
             <View style={[
-              styles.matchIndicator,
-              {
-                backgroundColor: newPassword === confirmPassword
-                  ? '#D4F1D4'
-                  : '#FFE0E0'
-              }
+              styles.matchBadge,
+              { backgroundColor: newPassword === confirmPassword ? '#E8F5E9' : '#FFEBEE' },
             ]}>
               <Ionicons
                 name={newPassword === confirmPassword ? 'checkmark-circle' : 'close-circle'}
-                size={20}
+                size={18}
                 color={newPassword === confirmPassword ? '#4CAF50' : '#F44336'}
               />
               <Text style={[
                 styles.matchText,
-                {
-                  color: newPassword === confirmPassword ? '#4CAF50' : '#F44336'
-                }
+                { color: newPassword === confirmPassword ? '#4CAF50' : '#F44336' },
               ]}>
-                {newPassword === confirmPassword
-                  ? 'Passwords match'
-                  : 'Passwords do not match'}
+                {newPassword === confirmPassword ? 'Passwords match' : 'Passwords do not match'}
               </Text>
             </View>
           )}
         </View>
 
-        {/* Reset Button */}
-        <View style={styles.buttonContainer}>
-          <CustomButton
-            title={loading ? 'Saving...' : 'Save New Password'}
-            onPress={handleResetPassword}
-            disabled={loading || !newPassword || !confirmPassword || newPassword !== confirmPassword}
-            style={{
-              opacity: loading || !newPassword || !confirmPassword || newPassword !== confirmPassword ? 0.6 : 1,
-            }}
-          />
-        </View>
+        {/* Save Button */}
+        <TouchableOpacity
+          style={[styles.saveBtn, !canSubmit && { opacity: 0.5 }]}
+          onPress={handleResetPassword}
+          disabled={!canSubmit}
+          activeOpacity={0.8}
+        >
+          {loading ? (
+            <ActivityIndicator color="#000" />
+          ) : (
+            <Text style={styles.saveBtnText}>Save New Password</Text>
+          )}
+        </TouchableOpacity>
 
-        {/* Back to Login Link */}
-        <View style={styles.loginLinkContainer}>
-          <Text style={styles.loginLinkText}>
-            Remember your password?{' '}
-          </Text>
+        {/* Back to login */}
+        <View style={styles.linkRow}>
+          <Text style={styles.linkText}>Remember your password? </Text>
           <TouchableOpacity onPress={() => router.replace('/login')}>
-            <Text style={styles.loginLink}>Login here</Text>
+            <Text style={styles.linkAction}>Login here</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -245,115 +212,125 @@ export default function ResetPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: Colors.background,
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
   },
-  backButton: {
-    padding: 8,
-    marginLeft: -8,
-  },
-  title: {
+  headerTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 20,
-    fontWeight: '600',
     color: Colors.text,
-  },
-  content: {
-    padding: 24,
   },
   iconContainer: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginTop: 12,
+    marginBottom: 20,
   },
-  icon: {
+  iconCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#F0E8DC',
-    alignItems: 'center',
+    backgroundColor: '#FDF6E0',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 24,
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 15,
+    color: Colors.gray,
     textAlign: 'center',
+    marginBottom: 28,
+    paddingHorizontal: 40,
+    lineHeight: 22,
   },
-  inputContainer: {
+  form: {
+    paddingHorizontal: 20,
+  },
+  fieldGroup: {
     marginBottom: 20,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 13,
     color: Colors.text,
     marginBottom: 8,
   },
-  passwordInputWrapper: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 8,
-    paddingRight: 12,
-    backgroundColor: '#F9F9F9',
+    borderColor: Colors.border,
+    borderRadius: 12,
+    backgroundColor: '#FFF',
+    paddingRight: 4,
   },
   input: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 15,
     color: Colors.text,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
   },
-  iconButton: {
-    padding: 8,
+  eyeBtn: {
+    padding: 10,
   },
   helperText: {
+    fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 12,
-    color: '#999',
+    color: Colors.gray,
     marginTop: 6,
   },
-  matchIndicator: {
+  matchBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   matchText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 13,
     marginLeft: 8,
-    fontSize: 14,
-    fontWeight: '500',
   },
-  buttonContainer: {
-    paddingHorizontal: 24,
-    marginBottom: 16,
+  saveBtn: {
+    backgroundColor: Colors.primary,
+    marginHorizontal: 20,
+    marginTop: 12,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  loginLinkContainer: {
+  saveBtnText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 16,
+    color: '#000',
+  },
+  linkRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    marginTop: 20,
   },
-  loginLinkText: {
+  linkText: {
+    fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 14,
-    color: '#666',
+    color: Colors.gray,
   },
-  loginLink: {
+  linkAction: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 14,
     color: Colors.primary,
-    fontWeight: '600',
   },
 });
 

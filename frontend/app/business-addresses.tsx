@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, Modal,
+  TextInput, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
+import { useAppToast } from '@/components/ToastProvider';
 
 interface Address {
   id: string;
@@ -14,6 +15,7 @@ interface Address {
 }
 
 export default function BusinessAddressesScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [addresses, setAddresses] = useState<Address[]>([
     { id: '1', name: 'Main Branch', address: 'No. 136, Street 41, BKK1, Phnom Penh' },
@@ -24,7 +26,7 @@ export default function BusinessAddressesScreen() {
   const [newAddress, setNewAddress] = useState('');
 
   const handleDelete = (id: string) => {
-    Alert.alert('Delete address', 'Are you sure you want to remove this address?', [
+    confirm('Delete address', 'Are you sure you want to remove this address?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
@@ -35,7 +37,7 @@ export default function BusinessAddressesScreen() {
 
   const handleAdd = () => {
     if (!newName.trim() || !newAddress.trim()) {
-      Alert.alert('Error', 'Please fill in both fields.');
+      toast('Please fill in both fields.', 'error');
       return;
     }
     setAddresses((prev) => [

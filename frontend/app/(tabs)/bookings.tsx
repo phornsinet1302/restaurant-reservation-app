@@ -7,7 +7,6 @@ import {
   Image,
   TouchableOpacity,
   ImageSourcePropType,
-  Alert,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
@@ -21,6 +20,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useBookingUpdates } from '@/hooks/useBookingUpdates';
 import CustomButton from '@/components/CustomButton';
+import { useAppToast } from '@/components/ToastProvider';
 
 /* ── Types ── */
 
@@ -47,6 +47,7 @@ const TABS = ['Upcoming', 'Past', 'Cancelled / Modified'] as const;
 /* ── Component ── */
 
 export default function BookingsScreen() {
+  const { toast, confirm } = useAppToast();
   const [activeTab, setActiveTab] = useState(0);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,11 +62,11 @@ export default function BookingsScreen() {
     
     // Show notification
     if (update.action === 'confirmed') {
-      Alert.alert('✅ Booking Confirmed!', 'The restaurant has confirmed your booking!');
+      toast('The restaurant has confirmed your booking!', 'success');
     } else if (update.action === 'rejected') {
-      Alert.alert('❌ Booking Rejected', update.reason || 'Your booking has been rejected by the restaurant.');
+      toast(update.reason || 'Your booking has been rejected by the restaurant.', 'info');
     } else if (update.action === 'cancelled') {
-      Alert.alert('🚫 Booking Cancelled', 'Your booking has been cancelled.');
+      toast('Your booking has been cancelled.', 'info');
     }
     
     // Refresh bookings list immediately
@@ -221,10 +222,7 @@ export default function BookingsScreen() {
 
   const handleModify = (booking: Booking) => {
     if (!canModifyBooking(booking)) {
-      Alert.alert(
-        'Cannot Modify',
-        'You can only modify your booking more than 30 minutes before the reservation time.'
-      );
+      toast('You can only modify your booking more than 30 minutes before the reservation time.', 'warning');
       return;
     }
 
@@ -246,17 +244,11 @@ export default function BookingsScreen() {
 
   const handleCancel = async (booking: Booking) => {
     if (!canModifyBooking(booking)) {
-      Alert.alert(
-        'Cannot Cancel',
-        'You cannot cancel within 30 minutes of your reservation time.'
-      );
+      toast('You cannot cancel within 30 minutes of your reservation time.', 'warning');
       return;
     }
 
-    Alert.alert(
-      'Cancel Booking',
-      `Are you sure you want to cancel your booking at ${booking.name}?`,
-      [
+    confirm('Cancel Booking', `Are you sure you want to cancel your booking at ${booking.name}?`, [
         { text: 'Keep Booking', style: 'cancel' },
         {
           text: 'Cancel Booking',
@@ -265,7 +257,7 @@ export default function BookingsScreen() {
             try {
               const token = await AsyncStorage.getItem('token');
               if (!token) {
-                Alert.alert('Error', 'Authentication failed');
+                toast('Authentication failed', 'error');
                 return;
               }
 
@@ -275,16 +267,15 @@ export default function BookingsScreen() {
               });
 
               console.log('✅ Booking cancelled successfully');
-              Alert.alert('Success', 'Your booking has been cancelled');
+              toast('Your booking has been cancelled', 'success');
               loadBookings(); // Refresh the list
             } catch (error: any) {
               console.error('❌ Error cancelling booking:', error);
-              Alert.alert('Error', 'Failed to cancel booking');
+              toast('Failed to cancel booking', 'error');
             }
           },
         },
-      ]
-    );
+      ]);
   };
 
   return (
@@ -448,7 +439,7 @@ export default function BookingsScreen() {
                     )}
 
                     {booking.status === 'Past' && (
-                      <TouchableOpacity style={styles.reviewBtn}>
+                      <TouchableOpacity style={styles.reviewBtn} onPress={() => toast('Reviews coming soon', 'info')}>
                         <Text style={styles.reviewText}>Leave Review</Text>
                       </TouchableOpacity>
                     )}

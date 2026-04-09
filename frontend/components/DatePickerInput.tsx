@@ -8,6 +8,7 @@ import {
   Modal,
   ScrollView,
   Platform,
+  ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -18,6 +19,12 @@ interface DatePickerInputProps {
   placeholder?: string;
   placeholderTextColor?: string;
   editable?: boolean;
+  /** When true, hides the component's own border (use when parent already provides a border) */
+  noBorder?: boolean;
+  /** Show red error border */
+  hasError?: boolean;
+  /** Custom style for the input wrapper */
+  style?: ViewStyle;
 }
 
 // Helper function to format Date object to DD/MM/YYYY
@@ -30,15 +37,12 @@ const formatDateToDDMMYYYY = (date: Date): string => {
 
 // Helper function to parse DD/MM/YYYY to Date object
 const parseDDMMYYYY = (dateStr: string): Date | null => {
-  if (!dateStr) return new Date();
+  if (!dateStr) return null;
   
   const regex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
   const match = dateStr.match(regex);
   
-  if (!match) {
-    console.warn('❌ Invalid date format:', dateStr);
-    return new Date();
-  }
+  if (!match) return null;
   
   const day = parseInt(match[1], 10);
   const month = parseInt(match[2], 10) - 1; // Month is 0-indexed
@@ -46,10 +50,9 @@ const parseDDMMYYYY = (dateStr: string): Date | null => {
   
   const date = new Date(year, month, day);
   
-  // Validate the date
-  if (isNaN(date.getTime())) {
-    console.warn('❌ Invalid date values:', { day, month, year });
-    return new Date();
+  // Validate the date is real (e.g. not Feb 30)
+  if (isNaN(date.getTime()) || date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) {
+    return null;
   }
   
   return date;
@@ -90,30 +93,42 @@ export default function DatePickerInput({
   placeholder = 'DD/MM/YYYY',
   placeholderTextColor = Colors.border,
   editable = true,
+  noBorder = false,
+  hasError = false,
+  style,
 }: DatePickerInputProps) {
   const [showPickerModal, setShowPickerModal] = useState(false);
-  const parsedDate = parseDDMMYYYY(value) || new Date();
-  
-  const [selectedDay, setSelectedDay] = useState(parsedDate.getDate());
-  const [selectedMonth, setSelectedMonth] = useState(parsedDate.getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(parsedDate.getFullYear());
 
-  const handleDateChange = (day: number, month: number, year: number) => {
-    setSelectedDay(day);
-    setSelectedMonth(month);
-    setSelectedYear(year);
-    
-    const formatted = `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
-    onChangeText(formatted);
+  // Derive picker wheel state from value (or default to a sensible date)
+  const initFromValue = (): { day: number; month: number; year: number } => {
+    const parsed = parseDDMMYYYY(value);
+    if (parsed) {
+      return { day: parsed.getDate(), month: parsed.getMonth() + 1, year: parsed.getFullYear() };
+    }
+    return { day: 1, month: 1, year: 2000 };
   };
 
+  const [selectedDay, setSelectedDay] = useState(() => initFromValue().day);
+  const [selectedMonth, setSelectedMonth] = useState(() => initFromValue().month);
+  const [selectedYear, setSelectedYear] = useState(() => initFromValue().year);
+
+  // Auto-format with slashes: "11042000" → "11/04/2000"
   const handleManualInput = (text: string) => {
-    // Allow user to type, format as they go
-    onChangeText(text);
-    
-    // Try to parse if it looks complete
-    if (text.length === 10 && text.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-      const parsed = parseDDMMYYYY(text);
+    // Strip everything except digits and slashes
+    let digits = text.replace(/[^\d]/g, '');
+
+    // Build formatted string with auto-slashes
+    let formatted = '';
+    for (let i = 0; i < digits.length && i < 8; i++) {
+      if (i === 2 || i === 4) formatted += '/';
+      formatted += digits[i];
+    }
+
+    onChangeText(formatted);
+
+    // Sync picker wheels if we have a complete valid date
+    if (formatted.length === 10) {
+      const parsed = parseDDMMYYYY(formatted);
       if (parsed) {
         setSelectedDay(parsed.getDate());
         setSelectedMonth(parsed.getMonth() + 1);
@@ -122,12 +137,26 @@ export default function DatePickerInput({
     }
   };
 
-  const handleConfirm = () => {
-    // Validate the selected date
-    const testDate = new Date(selectedYear, selectedMonth - 1, selectedDay);
-    if (testDate.getDate() === selectedDay) {
-      setShowPickerModal(false);
+  const openPicker = () => {
+    // Sync picker state from current value before opening
+    const parsed = parseDDMMYYYY(value);
+    if (parsed) {
+      setSelectedDay(parsed.getDate());
+      setSelectedMonth(parsed.getMonth() + 1);
+      setSelectedYear(parsed.getFullYear());
     }
+    setShowPickerModal(true);
+  };
+
+  const handleConfirm = () => {
+    // Clamp day to valid range for the selected month/year
+    const maxDay = new Date(selectedYear, selectedMonth, 0).getDate();
+    const clampedDay = Math.min(selectedDay, maxDay);
+
+    const formatted = `${String(clampedDay).padStart(2, '0')}/${String(selectedMonth).padStart(2, '0')}/${selectedYear}`;
+    onChangeText(formatted);
+    setSelectedDay(clampedDay);
+    setShowPickerModal(false);
   };
 
   const years = generateYears();
@@ -136,20 +165,25 @@ export default function DatePickerInput({
 
   return (
     <View style={styles.container}>
-      <View style={styles.inputWrapper}>
+      <View style={[
+        styles.inputWrapper,
+        noBorder && styles.inputWrapperNoBorder,
+        hasError && styles.inputWrapperError,
+        style,
+      ]}>
         <TextInput
           style={styles.input}
           placeholder={placeholder}
           placeholderTextColor={placeholderTextColor}
           value={value}
           onChangeText={handleManualInput}
-          keyboardType="numbers-and-punctuation"
+          keyboardType="number-pad"
           editable={editable}
           maxLength={10}
         />
         <TouchableOpacity
           style={styles.calendarButton}
-          onPress={() => setShowPickerModal(true)}
+          onPress={openPicker}
           disabled={!editable}
         >
           <Ionicons name="calendar-outline" size={20} color={Colors.primary} />
@@ -166,7 +200,12 @@ export default function DatePickerInput({
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Date of Birth</Text>
+              <View>
+                <Text style={styles.modalTitle}>Select Date</Text>
+                <Text style={styles.modalPreview}>
+                  {String(selectedDay).padStart(2, '0')}/{String(selectedMonth).padStart(2, '0')}/{selectedYear}
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setShowPickerModal(false)}>
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
@@ -279,6 +318,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     height: 48,
   },
+  inputWrapperNoBorder: {
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+  },
+  inputWrapperError: {
+    borderColor: Colors.error,
+  },
   input: {
     flex: 1,
     fontFamily: 'PlusJakartaSans-Regular',
@@ -319,6 +366,12 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 18,
     color: Colors.text,
+  },
+  modalPreview: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 14,
+    color: Colors.primary,
+    marginTop: 2,
   },
   
   // Picker wheels

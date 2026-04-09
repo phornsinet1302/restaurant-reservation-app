@@ -7,29 +7,30 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
-  Alert,
-} from 'react-native';
+  } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import axios from 'axios';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
 export default function ForgotPasswordScreen() {
+  const { toast, confirm } = useAppToast();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleSendReset = async () => {
     if (!email) {
-      Alert.alert('Error', 'Please enter your email address');
+      toast('Please enter your email address', 'error');
       return;
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      toast('Please enter a valid email address', 'error');
       return;
     }
 
@@ -43,45 +44,31 @@ export default function ForgotPasswordScreen() {
 
       // If development mode and code is provided, show it
       if (response.data.devCode) {
-        Alert.alert(
-          'Reset Code (Development Mode)',
-          `Your reset code is:\n\n${response.data.devCode}\n\n${response.data.devMessage || ''}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
+        confirm('Reset Code (Development Mode)', `Your reset code is:\n\n${response.data.devCode}\n\n${response.data.devMessage || ''}`, [
+          { text: 'OK', onPress: () => {
                 console.log('🔄 Navigating to verify-reset-code with email:', email);
                 router.replace({
                   pathname: '/verify-reset-code',
                   params: { email }
                 });
-              }
-            }
-          ]
-        );
+              } }
+        ]);
       } else {
-        Alert.alert(
-          'Success',
-          'Reset code sent to your email. Please check your inbox.',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
+        confirm('Success', 'Reset code sent to your email. Please check your inbox.', [
+          { text: 'OK', onPress: () => {
                 console.log('🔄 Navigating to verify-reset-code with email:', email);
                 router.replace({
                   pathname: '/verify-reset-code',
                   params: { email }
                 });
-              }
-            }
-          ]
-        );
+              } }
+        ]);
       }
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 404) {
-        Alert.alert('Error', 'Email not found. Please check and try again.');
+        toast('Email not found. Please check and try again.', 'error');
       } else {
-        Alert.alert('Error', 'Failed to send reset email. Please try again.');
+        toast('Failed to send reset email. Please try again.', 'error');
       }
     } finally {
       setLoading(false);

@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import axios from 'axios';
@@ -15,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -84,6 +84,7 @@ export default function ModifyBookingScreen() {
     name: string;
     address: string;
   }>();
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
 
   /* State */
@@ -157,16 +158,9 @@ export default function ModifyBookingScreen() {
         
         if (!restaurantId) {
           console.warn('⚠️ No restaurantId provided');
-          // Use mock tables if no restaurant ID
-          const mockTables = [
-            { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
-            { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
-            { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
-            { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
-            { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
-          ];
-          setAllTablesFromAPI(mockTables);
-          setTables(mockTables);
+          setAllTablesFromAPI([]);
+          setTables([]);
+          setError('Restaurant information is missing. Please go back and try again.');
           setLoading(false);
           return;
         }
@@ -183,16 +177,9 @@ export default function ModifyBookingScreen() {
         // Store all tables - filtering by guest count will happen in separate useEffect
         if (allTables.length === 0) {
           console.warn('⚠️ No tables found for this restaurant');
-          // Use mock tables if no tables found in database
-          const mockTables = [
-            { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
-            { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
-            { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
-            { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
-            { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
-          ];
-          setAllTablesFromAPI(mockTables);
-          setTables(mockTables); // Initial state before filtering
+          setAllTablesFromAPI([]);
+          setTables([]);
+          setError('This restaurant has no tables set up yet. Please contact the restaurant.');
         } else {
           setAllTablesFromAPI(allTables);
           // Will be filtered by second useEffect based on guest count
@@ -201,17 +188,9 @@ export default function ModifyBookingScreen() {
         console.error('❌ Error fetching tables:', err.message);
         console.error('   Response:', err.response?.data);
         
-        // Silently use mock tables as fallback
-        const mockTables = [
-          { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
-          { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
-          { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
-          { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
-          { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
-        ];
-        setAllTablesFromAPI(mockTables);
-        setTables(mockTables);
-        console.log('⚠️ Using fallback mock tables');
+        setAllTablesFromAPI([]);
+        setTables([]);
+        setError('Could not load tables. Please check your connection and try again.');
       } finally {
         setLoading(false);
       }
@@ -220,17 +199,9 @@ export default function ModifyBookingScreen() {
     if (restaurantId.trim()) {
       fetchTables();
     } else {
-      // No restaurantId, use mock tables
-      const mockTables = [
-        { id: 'table-1', table_number: 1, capacity: 2, status: 'available' },
-        { id: 'table-2', table_number: 2, capacity: 4, status: 'available' },
-        { id: 'table-3', table_number: 3, capacity: 6, status: 'available' },
-        { id: 'table-4', table_number: 4, capacity: 2, status: 'available' },
-        { id: 'table-5', table_number: 5, capacity: 4, status: 'available' },
-      ];
-      setTables(mockTables);
-      setAllTablesFromAPI(mockTables);
-      setSelectedTableId(mockTables[0].id);
+      setAllTablesFromAPI([]);
+      setTables([]);
+      setError('Restaurant information is missing. Please go back and try again.');
       setLoading(false);
     }
   }, [restaurantId]);
@@ -291,16 +262,9 @@ export default function ModifyBookingScreen() {
     // CRITICAL: Check if we have required data
     if (!isUpdating && (!restaurantId || restaurantId.trim() === '')) {
       console.error('❌ CRITICAL: restaurantId is empty!');
-      Alert.alert(
-        'Missing Restaurant Info',
-        'Restaurant information was not passed correctly. Please go back to the restaurant detail page and try clicking "Book a Table" again.',
-        [
-          {
-            text: 'Go Back',
-            onPress: () => router.back(),
-          },
-        ]
-      );
+      confirm('Missing Restaurant Info', 'Restaurant information was not passed correctly. Please go back to the restaurant detail page and try clicking "Book a Table" again.', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
       return;
     }
     
@@ -308,46 +272,46 @@ export default function ModifyBookingScreen() {
     if (!isUpdating) {
       // 1. Validate Name (only for new bookings)
       if (!bookingName.trim()) {
-        Alert.alert('Name Required', 'Please enter your full name for the booking');
+        toast('Please enter your full name for the booking', 'warning');
         return;
       }
       if (bookingName.trim().length < 2) {
-        Alert.alert('Invalid Name', 'Name must be at least 2 characters long');
+        toast('Name must be at least 2 characters long', 'warning');
         return;
       }
 
       // 2. Validate Email (only for new bookings)
       if (!bookingEmail.trim()) {
-        Alert.alert('Email Required', 'Please enter your email address');
+        toast('Please enter your email address', 'warning');
         return;
       }
       if (!isValidEmail(bookingEmail.trim())) {
-        Alert.alert('Invalid Email', 'Please enter a valid email address (e.g., user@example.com)');
+        toast('Please enter a valid email address (e.g., user@example.com)', 'warning');
         return;
       }
     }
 
     // 3. Validate Guests
     if (guests < 1 || guests > 20) {
-      Alert.alert('Invalid Party Size', 'Please select between 1 and 20 guests');
+      toast('Please select between 1 and 20 guests', 'warning');
       return;
     }
 
     // 4. Validate Date
     if (!selectedDate) {
-      Alert.alert('Date Required', 'Please select a date for your reservation');
+      toast('Please select a date for your reservation', 'warning');
       return;
     }
 
     // 5. Validate Time
     if (!selectedTime) {
-      Alert.alert('Time Required', 'Please select a time for your reservation');
+      toast('Please select a time for your reservation', 'warning');
       return;
     }
 
     // 6. Validate Table Selection
     if (!selectedTableId) {
-      Alert.alert('Table Required', 'Please select a table from the available options');
+      toast('Please select a table from the available options', 'warning');
       return;
     }
 

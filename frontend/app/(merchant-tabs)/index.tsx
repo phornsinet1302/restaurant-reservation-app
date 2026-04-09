@@ -15,6 +15,7 @@ import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useNotifications } from '@/hooks/useNotifications';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 14;
@@ -22,8 +23,24 @@ const CARD_WIDTH = (width - 40 - CARD_GAP) / 2;
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+type WeekDay = {
+  date: string;
+  total: number;
+  pending: number;
+  confirmed: number;
+  arrived: number;
+  completed: number;
+};
+
+// Get today's day index (0=Mon ... 6=Sun)
+function getTodayIndex() {
+  const d = new Date().getDay(); // 0=Sun ... 6=Sat
+  return d === 0 ? 6 : d - 1;
+}
+
 export default function MerchantDashboard() {
   const router = useRouter();
+  const { unreadCount } = useNotifications();
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
   const [restaurantAddress, setRestaurantAddress] = useState('');
   const [availableDishes, setAvailableDishes] = useState(0);
@@ -31,16 +48,14 @@ export default function MerchantDashboard() {
   const [confirmedBookings, setConfirmedBookings] = useState(0);
   const [arrivedBookings, setArrivedBookings] = useState(0);
   const [completedBookings, setCompletedBookings] = useState(0);
-  const [weeklyData, setWeeklyData] = useState([30, 15, 20, 18, 22, 25, 20]);
-  const [activeDay, setActiveDay] = useState(0); // Monday = 0
+  const [weeklyOverview, setWeeklyOverview] = useState<WeekDay[]>([]);
+  const [activeDay, setActiveDay] = useState(getTodayIndex());
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
     
-    // Auto-refresh every 30 seconds
     const interval = setInterval(() => {
-      console.log('🔄 [MerchantDashboard] Auto-refreshing...');
       loadDashboardData();
     }, 30000);
 
@@ -50,54 +65,52 @@ export default function MerchantDashboard() {
   const loadDashboardData = async () => {
     try {
       const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        console.warn('❌ No token found');
-        return;
-      }
-
-      console.log('📊 [MerchantDashboard] Fetching dashboard data from:', `${API_CONFIG.BASE_URL}/api/merchant/dashboard`);
+      if (!token) return;
 
       const res = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      console.log('✅ [MerchantDashboard] Full response received:', res.data);
-
       if (res.data) {
         setRestaurantName(res.data.restaurant_name || 'My Restaurant');
         setRestaurantAddress(res.data.address || '');
-        setAvailableDishes(res.data.total_menu_items || 0);
+        setAvailableDishes(res.data.available_dishes ?? res.data.total_menu_items ?? 0);
         setPendingBookings(res.data.pending_bookings || 0);
         setConfirmedBookings(res.data.confirmed_bookings || 0);
         setArrivedBookings(res.data.arrived_bookings || 0);
         setCompletedBookings(res.data.completed_bookings || 0);
 
-        console.log('📈 ALL Dashboard stats updated:', {
-          restaurant: res.data.restaurant_name,
-          address: res.data.address,
-          dishes: res.data.total_menu_items,
-          pending: res.data.pending_bookings,
-          confirmed: res.data.confirmed_bookings,
-          arrived: res.data.arrived_bookings,
-          completed: res.data.completed_bookings,
-        });
-      } else {
-        console.warn('⚠️ No data returned from endpoint');
+        if (res.data.weekly && res.data.weekly.length === 7) {
+          setWeeklyOverview(res.data.weekly);
+        }
       }
-    } catch (error) {
-      console.error('❌ [MerchantDashboard] Error loading dashboard:', error.response?.data || error.message);
-      console.error('   Full error:', error);
+    } catch (error: any) {
+      console.error('❌ [MerchantDashboard] Error:', error.response?.data || error.message);
     } finally {
       setRefreshing(false);
     }
   };
 
+  // When user taps a day in weekly overview, update the stat cards
+  const handleDayPress = (dayIndex: number) => {
+    setActiveDay(dayIndex);
+    const dayData = weeklyOverview[dayIndex];
+    if (dayData) {
+      setPendingBookings(dayData.pending);
+      setConfirmedBookings(dayData.confirmed);
+      setArrivedBookings(dayData.arrived);
+      setCompletedBookings(dayData.completed);
+    }
+  };
+
   const handleRefresh = () => {
     setRefreshing(true);
+    setActiveDay(getTodayIndex());
     loadDashboardData();
   };
 
-  const maxVal = Math.max(...weeklyData, 1);
+  const weeklyTotals = weeklyOverview.map(d => d?.total ?? 0);
+  const maxVal = Math.max(...weeklyTotals, 1);
 
   return (
     <View style={styles.container}>
@@ -122,6 +135,11 @@ export default function MerchantDashboard() {
               onPress={() => router.push('../notifications' as any)}
             >
               <Ionicons name="notifications-outline" size={20} color={Colors.text} />
+              {unreadCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -183,17 +201,25 @@ export default function MerchantDashboard() {
         <View style={styles.weeklyCard}>
           <View style={styles.weeklyHeader}>
             <Text style={styles.weeklyTitle}>Weekly Overview</Text>
-            <Ionicons name="trending-up" size={22} color="#2BA15C" />
+            <Text style={styles.weeklySubtitle}>
+              {weeklyOverview[activeDay]?.date
+                ? new Date(weeklyOverview[activeDay].date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : ''}
+              {' · '}{weeklyTotals[activeDay] || 0} booking{weeklyTotals[activeDay] !== 1 ? 's' : ''}
+            </Text>
           </View>
           <View style={styles.chartContainer}>
             {DAYS.map((day, i) => {
-              const barHeight = (weeklyData[i] / maxVal) * 100;
+              const barHeight = weeklyTotals.length > 0
+                ? Math.max((weeklyTotals[i] / maxVal) * 100, 4)
+                : 4;
               const isActive = i === activeDay;
+              const isToday = i === getTodayIndex();
               return (
                 <TouchableOpacity
                   key={day}
                   style={styles.chartColumn}
-                  onPress={() => setActiveDay(i)}
+                  onPress={() => handleDayPress(i)}
                   activeOpacity={0.7}
                 >
                   <View style={styles.barWrapper}>
@@ -210,6 +236,7 @@ export default function MerchantDashboard() {
                   <Text style={[styles.dayLabel, isActive && styles.dayLabelActive]}>
                     {day}
                   </Text>
+                  {isToday && <View style={styles.todayDot} />}
                 </TouchableOpacity>
               );
             })}
@@ -295,6 +322,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  notifBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FF2424',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  notifBadgeText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 10,
+    color: '#fff',
+  },
   restaurantName: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 26,
@@ -364,6 +408,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.text,
   },
+  weeklySubtitle: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.gray,
+  },
   chartContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -393,6 +442,13 @@ const styles = StyleSheet.create({
   dayLabelActive: {
     color: Colors.primary,
     fontFamily: 'PlusJakartaSans-Bold',
+  },
+  todayDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: Colors.primary,
+    marginTop: 4,
   },
 
   /* Quick Actions */

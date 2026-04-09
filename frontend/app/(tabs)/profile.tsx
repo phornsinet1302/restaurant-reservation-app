@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  Alert,
   Image,
   ActivityIndicator,
 } from 'react-native';
@@ -14,12 +13,13 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import CustomButton from '@/components/CustomButton';
 import DatePickerInput from '@/components/DatePickerInput';
+import { useAppToast } from '@/components/ToastProvider';
 
 /* ── Data ── */
 
@@ -33,6 +33,7 @@ const MENU_ITEMS = [
 /* ── Component ── */
 
 export default function ProfileScreen() {
+  const { toast, confirm } = useAppToast();
   const [isEditing, setIsEditing] = useState(false);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -50,6 +51,13 @@ export default function ProfileScreen() {
     loadUserProfile();
     loadProfileImage();
   }, []);
+
+  // Reload profile image when screen comes back into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadProfileImage();
+    }, [])
+  );
 
   // Load user profile data from AsyncStorage
   const loadUserProfile = async () => {
@@ -82,16 +90,14 @@ export default function ProfileScreen() {
     }
   };
 
-  // Load saved profile image from AsyncStorage - use user-specific key
+  // Load saved profile image from AsyncStorage user object
   const loadProfileImage = async () => {
     try {
       const userData = await AsyncStorage.getItem('user');
       if (userData) {
         const parsedUser = JSON.parse(userData);
-        const userIdKey = parsedUser.id || parsedUser.email || 'default';
-        const savedImage = await AsyncStorage.getItem(`profileImage_${userIdKey}`);
-        if (savedImage) {
-          setProfileImageUri(savedImage);
+        if (parsedUser.profile_picture_url) {
+          setProfileImageUri(parsedUser.profile_picture_url);
         }
       }
     } catch (error) {
@@ -101,10 +107,7 @@ export default function ProfileScreen() {
 
   // Pick image from camera or gallery
   const handlePickImage = async () => {
-    Alert.alert(
-      'Upload Profile Picture',
-      'Choose a source',
-      [
+    confirm('Upload Profile Picture', 'Choose a source', [
         {
           text: 'Camera',
           onPress: () => pickImageFromCamera(),
@@ -117,15 +120,14 @@ export default function ProfileScreen() {
           text: 'Cancel',
           style: 'cancel',
         },
-      ]
-    );
+      ]);
   };
 
   const pickImageFromCamera = async () => {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission Required', 'Camera access is required to take a photo.');
+        toast('Camera access is required to take a photo.', 'warning');
         return;
       }
 
@@ -139,7 +141,7 @@ export default function ProfileScreen() {
         uploadImage(result.assets[0].uri);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to access camera.');
+      toast('Failed to access camera.', 'error');
       console.error(error);
     }
   };
@@ -148,7 +150,7 @@ export default function ProfileScreen() {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission Required', 'Gallery access is required to select a photo.');
+        toast('Gallery access is required to select a photo.', 'warning');
         return;
       }
 
@@ -163,7 +165,7 @@ export default function ProfileScreen() {
         uploadImage(result.assets[0].uri);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to access gallery.');
+      toast('Failed to access gallery.', 'error');
       console.error(error);
     }
   };
@@ -172,22 +174,45 @@ export default function ProfileScreen() {
     try {
       setUploading(true);
 
-      // Get user ID/email for unique storage key
-      const userData = await AsyncStorage.getItem('user');
-      let userIdKey = 'default';
-      if (userData) {
-        const parsedUser = JSON.parse(userData);
-        userIdKey = parsedUser.id || parsedUser.email || 'default';
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        toast('Please log in to update your profile picture.', 'error');
+        return;
       }
 
-      // Save the image URI with user-specific key
-      await AsyncStorage.setItem(`profileImage_${userIdKey}`, imageUri);
-      setProfileImageUri(imageUri);
+      // Upload to backend
+      const formData = new FormData();
+      formData.append('file', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: `profile_${Date.now()}.jpg`,
+      } as any);
 
-      Alert.alert('Success', 'Profile picture updated successfully!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update profile picture.');
-      console.error(error);
+      const uploadRes = await axios.post(
+        `${API_CONFIG.BASE_URL}/api/auth/upload-profile-picture`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+          timeout: 60000,
+        }
+      );
+
+      const newUrl = uploadRes.data.profile_picture_url;
+      setProfileImageUri(newUrl);
+
+      // Update user in AsyncStorage
+      const userStr = await AsyncStorage.getItem('user');
+      const user = userStr ? JSON.parse(userStr) : {};
+      user.profile_picture_url = newUrl;
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+
+      toast('Profile picture updated!', 'success');
+    } catch (error: any) {
+      toast(error.response?.data?.error || 'Failed to upload profile picture.', 'error');
+      console.error('Upload error:', error.message);
     } finally {
       setUploading(false);
     }
@@ -249,7 +274,7 @@ export default function ProfileScreen() {
       if (dateOfBirth) {
         formattedDate = formatDateForSave(dateOfBirth);
         if (!formattedDate) {
-          Alert.alert('Invalid Date', 'Please enter date in DD/MM/YYYY format (e.g., 15/03/1990)');
+          toast('Please enter date in DD/MM/YYYY format (e.g., 15/03/1990)', 'warning');
           console.log('=== SAVE PROFILE END (DATE VALIDATION FAILED) ===\n');
           return;
         }
@@ -260,7 +285,7 @@ export default function ProfileScreen() {
       console.log('🔐 Token retrieved:', token ? `${token.slice(0, 30)}...` : 'NO TOKEN');
       
       if (!token) {
-        Alert.alert('Error', 'Authentication required. Please login again.');
+        toast('Authentication required. Please login again.', 'error');
         return;
       }
 
@@ -310,7 +335,7 @@ export default function ProfileScreen() {
 
       setIsEditing(false);
       console.log('=== SAVE PROFILE END (SUCCESS) ===\n');
-      Alert.alert('Success', 'Your profile has been updated successfully!');
+      toast('Your profile has been updated successfully!', 'success');
     } catch (error) {
       console.error('\n❌ Error saving profile');
       console.error('Error type:', typeof error);
@@ -324,15 +349,12 @@ export default function ProfileScreen() {
       }
       
       console.log('=== SAVE PROFILE END (ERROR) ===\n');
-      Alert.alert('Error', errorMessage);
+      toast(errorMessage, 'error');
     }
   };
 
   const handleLogout = async () => {
-    Alert.alert(
-      'Log Out?',
-      'Are you sure you want to log out?',
-      [
+    confirm('Log Out?', 'Are you sure you want to log out?', [
         {
           text: 'Cancel',
           onPress: () => {},
@@ -350,14 +372,13 @@ export default function ProfileScreen() {
               // Route to login page
               router.replace('/login');
             } catch (error) {
-              Alert.alert('Error', 'Failed to log out. Please try again.');
+              toast('Failed to log out. Please try again.', 'error');
               console.error('Logout error:', error);
             }
           },
           style: 'destructive',
         },
-      ]
-    );
+      ]);
   };
 
   return (
@@ -498,10 +519,11 @@ export default function ProfileScreen() {
               <TextInput
                 style={styles.fieldTextInput}
                 value={phone}
-                onChangeText={setPhone}
+                onChangeText={(t) => setPhone(t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''))}
                 placeholder="Enter phone number"
                 placeholderTextColor={Colors.border}
                 keyboardType="phone-pad"
+                maxLength={15}
               />
             ) : (
               <Text style={phone ? styles.fieldValue : styles.fieldPlaceholder}>
@@ -524,6 +546,7 @@ export default function ProfileScreen() {
                 onChangeText={setDateOfBirth}
                 placeholder="DD/MM/YYYY"
                 editable={true}
+                noBorder={true}
               />
             ) : (
               <Text style={dateOfBirth ? styles.fieldValue : styles.fieldPlaceholder}>

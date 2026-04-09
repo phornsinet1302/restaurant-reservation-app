@@ -9,7 +9,6 @@ import {
   ImageSourcePropType,
   TouchableOpacity,
   FlatList,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +21,8 @@ import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
 import StoryRow from '@/components/StoryRow';
 import * as Location from 'expo-location';
+import { useNotifications } from '@/hooks/useNotifications';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -86,6 +87,7 @@ const formatDistance = (distanceKm: number): string => {
 /* ── Component ── */
 
 export default function HomeScreen() {
+  const { toast } = useAppToast();
   const router = useRouter();
   const [favorites, setFavorites] = useState<string[]>([]);
   const [token, setToken] = useState<string>('');
@@ -103,6 +105,7 @@ export default function HomeScreen() {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [userLocationAddress, setUserLocationAddress] = useState<string>('Phnom Penh');
+  const { unreadCount } = useNotifications();
 
   useEffect(() => {
     loadUserData();
@@ -358,7 +361,7 @@ export default function HomeScreen() {
     }
 
     if (!token) {
-      Alert.alert('Error', 'You must be logged in to favorite restaurants');
+      toast('You must be logged in to favorite restaurants', 'error');
       return;
     }
 
@@ -372,7 +375,7 @@ export default function HomeScreen() {
           headers: { Authorization: `Bearer ${token}` },
         });
         setFavorites((prev) => prev.filter((id) => id !== restaurantId));
-        Alert.alert('Removed', `${restaurantName} removed from favorites`);
+        toast(`${restaurantName} removed from favorites`, 'success');
       } else {
         // Add to favorites
         await axios.post(
@@ -381,11 +384,11 @@ export default function HomeScreen() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setFavorites((prev) => [...prev, restaurantId]);
-        Alert.alert('Added', `${restaurantName} added to favorites`);
+        toast(`${restaurantName} added to favorites`, 'success');
       }
     } catch (error: any) {
       console.error('Favorite toggle error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Failed to update favorite. Please try again.');
+      toast('Failed to update favorite. Please try again.', 'error');
     } finally {
       setLoading(false);
     }
@@ -427,6 +430,11 @@ export default function HomeScreen() {
         </View>
         <TouchableOpacity style={styles.bellButton} onPress={() => router.push('../notifications' as any)}>
           <Ionicons name="notifications-outline" size={22} color={Colors.text} />
+          {unreadCount > 0 && (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -452,7 +460,7 @@ export default function HomeScreen() {
       {/* ── Categories ── */}
       <View style={styles.categoriesRow}>
         {CATEGORIES.map((cat) => (
-          <TouchableOpacity key={cat.id} style={styles.categoryPill}>
+          <TouchableOpacity key={cat.id} style={styles.categoryPill} onPress={() => toast('Category filter coming soon', 'info')}>
             <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
             <Text style={styles.categoryLabel}>{cat.label}</Text>
           </TouchableOpacity>
@@ -462,7 +470,7 @@ export default function HomeScreen() {
       {/* ── Top Restaurants ── */}
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionTitle}>Top restaurants in London</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => toast('Coming soon', 'info')}>
           <Text style={styles.seeAll}>See all</Text>
         </TouchableOpacity>
       </View>
@@ -486,10 +494,12 @@ export default function HomeScreen() {
                 name: restaurant.name,
                 rating: restaurant.rating,
                 reviews: '3.2k',
-                address: '42 Fleet Street, City',
-                description: 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                address: restaurant.address || '42 Fleet Street, City',
+                description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
                 hours: restaurant.hours,
                 distance: restaurant.distance,
+                latitude: restaurant.latitude || '',
+                longitude: restaurant.longitude || '',
               },
             } as any)
           }
@@ -523,7 +533,25 @@ export default function HomeScreen() {
                   color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
                 />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.detailsButton}>
+              <TouchableOpacity style={styles.detailsButton}
+                onPress={() =>
+                  router.push({
+                    pathname: '../restaurant-detail',
+                    params: {
+                      id: restaurant.id,
+                      name: restaurant.name,
+                      rating: restaurant.rating,
+                      reviews: '3.2k',
+                      address: restaurant.address || '42 Fleet Street, City',
+                      description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                      hours: restaurant.hours,
+                      distance: restaurant.distance,
+                      latitude: restaurant.latitude || '',
+                      longitude: restaurant.longitude || '',
+                    },
+                  } as any)
+                }
+              >
                 <Text style={styles.detailsText}>Details</Text>
                 <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
               </TouchableOpacity>
@@ -638,6 +666,23 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FF2424',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  notifBadgeText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 10,
+    color: '#fff',
   },
 
   /* Search */

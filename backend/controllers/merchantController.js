@@ -150,11 +150,13 @@ const autoRejectConflictingBookings = async (confirmedReservation, io) => {
   }
 };
 
-// 1. Get Dashboard Overview (Total stats for the merchant)
+// 1. Get Dashboard Overview (Daily stats + weekly overview for the merchant)
 exports.getDashboardOverview = async (req, res) => {
   try {
-    const merchant_id = req.user.id; // From the logged-in user token
-    console.log(`\n📊 [getDashboardOverview] Merchant ID: ${merchant_id}`);
+    const merchant_id = req.user.id;
+    // Optional query param: ?date=2026-04-08  (defaults to today)
+    const queryDate = req.query.date || new Date().toISOString().slice(0, 10);
+    console.log(`\n📊 [getDashboardOverview] Merchant ID: ${merchant_id}, Date: ${queryDate}`);
 
     // A. Find the restaurant owned by this merchant
     const { data: restaurant, error: restErr } = await supabase
@@ -170,51 +172,95 @@ exports.getDashboardOverview = async (req, res) => {
 
     console.log(`🏪 Restaurant found: ${restaurant.name} (ID: ${restaurant.id})`);
 
-    // B. Get total number of menu items
-    const { count: menuCount, error: menuErr } = await supabase
+    // B. Get available dishes count (items with availability = 'available')
+    const { count: availableCount, error: availErr } = await supabase
+      .from('menu_items')
+      .select('*', { count: 'exact', head: true })
+      .eq('restaurant_id', restaurant.id)
+      .eq('availability', 'available');
+
+    // Also get total menu items
+    const { count: totalMenuCount } = await supabase
       .from('menu_items')
       .select('*', { count: 'exact', head: true })
       .eq('restaurant_id', restaurant.id);
 
-    console.log(`📋 Menu items count: ${menuCount || 0}`);
+    console.log(`📋 Available dishes: ${availableCount || 0}, Total menu items: ${totalMenuCount || 0}`);
 
-    // C. Get pending bookings count
-    const { data: allReservations, error: allResErr } = await supabase
+    // C. Get reservations for the requested date
+    const { data: dayReservations, error: dayResErr } = await supabase
       .from('reservations')
       .select('id, status')
-      .eq('restaurant_id', restaurant.id);
+      .eq('restaurant_id', restaurant.id)
+      .eq('reservation_date', queryDate);
 
-    console.log(`📊 Total reservations: ${allReservations?.length || 0}`);
+    if (dayResErr) {
+      console.error('❌ Error fetching day reservations:', dayResErr.message);
+    }
 
-    // Group by status to see distribution
-    const statusDistribution = {};
-    allReservations?.forEach(res => {
-      statusDistribution[res.status] = (statusDistribution[res.status] || 0) + 1;
+    // Count by status for the requested day
+    let pendingCount = 0, confirmedCount = 0, arrivedCount = 0, completedCount = 0;
+    dayReservations?.forEach(r => {
+      if (r.status === 'pending') pendingCount++;
+      else if (r.status === 'confirmed') confirmedCount++;
+      else if (r.status === 'arrived') arrivedCount++;
+      else if (r.status === 'completed') completedCount++;
     });
 
-    console.log(`📈 Status distribution:`, statusDistribution);
+    console.log(`📅 Stats for ${queryDate}: Pending=${pendingCount} Confirmed=${confirmedCount} Arrived=${arrivedCount} Completed=${completedCount}`);
 
-    // Count all status types
-    let confirmedCount = 0, arrivedCount = 0, completedCount = 0, pendingCount = 0;
-    
-    allReservations?.forEach(res => {
-      if (res.status === 'pending') pendingCount++;
-      else if (res.status === 'confirmed') confirmedCount++;
-      else if (res.status === 'arrived') arrivedCount++;
-      else if (res.status === 'completed') completedCount++;
+    // D. Build weekly overview (Mon-Sun of current week)
+    // Find Monday of the week containing queryDate
+    const dateObj = new Date(queryDate + 'T00:00:00');
+    const dayOfWeek = dateObj.getDay(); // 0=Sun ... 6=Sat
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(dateObj);
+    monday.setDate(dateObj.getDate() + mondayOffset);
+
+    const weekDates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      weekDates.push(d.toISOString().slice(0, 10));
+    }
+
+    console.log(`📆 Week dates: ${weekDates.join(', ')}`);
+
+    // Fetch all reservations for this week
+    const { data: weekReservations, error: weekErr } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, status')
+      .eq('restaurant_id', restaurant.id)
+      .gte('reservation_date', weekDates[0])
+      .lte('reservation_date', weekDates[6]);
+
+    // Build per-day totals
+    const weeklyData = weekDates.map(date => {
+      const dayBookings = weekReservations?.filter(r => r.reservation_date === date) || [];
+      return {
+        date,
+        total: dayBookings.length,
+        pending: dayBookings.filter(r => r.status === 'pending').length,
+        confirmed: dayBookings.filter(r => r.status === 'confirmed').length,
+        arrived: dayBookings.filter(r => r.status === 'arrived').length,
+        completed: dayBookings.filter(r => r.status === 'completed').length,
+      };
     });
 
-    console.log(`⏳ Pending: ${pendingCount} | ✅ Confirmed: ${confirmedCount} | 👤 Arrived: ${arrivedCount} | 🚩 Completed: ${completedCount}\n`);
+    console.log(`📈 Weekly overview:`, weeklyData.map(d => `${d.date}:${d.total}`).join(' | '));
 
-    // D. Send back a beautiful summary package
+    // E. Send response
     res.status(200).json({
       restaurant_name: restaurant.name,
       address: restaurant.address,
-      total_menu_items: menuCount || 0,
+      date: queryDate,
+      available_dishes: availableCount || 0,
+      total_menu_items: totalMenuCount || 0,
       pending_bookings: pendingCount,
       confirmed_bookings: confirmedCount,
       arrived_bookings: arrivedCount,
-      completed_bookings: completedCount
+      completed_bookings: completedCount,
+      weekly: weeklyData,
     });
 
   } catch (error) {

@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function DebugTokenScreen() {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
+  const { toast } = useAppToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -32,17 +34,17 @@ export default function DebugTokenScreen() {
     try {
       await AsyncStorage.removeItem('token');
       await AsyncStorage.removeItem('user');
-      Alert.alert('Success', 'Token and user data cleared');
+      toast('Token and user data cleared', 'success');
       loadTokenInfo();
     } catch (err) {
-      Alert.alert('Error', 'Failed to clear storage');
+      toast('Failed to clear storage', 'error');
     }
   };
 
   const copyToken = () => {
     if (token) {
       // Can't actually copy to clipboard in React Native easily, but show it
-      Alert.alert('Token', token.substring(0, 50) + '...');
+      toast(token.substring(0, 50) + '...', 'info');
     }
   };
 

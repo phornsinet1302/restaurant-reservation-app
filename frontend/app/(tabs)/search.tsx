@@ -11,8 +11,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
-} from 'react-native';
+  } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
@@ -27,6 +26,7 @@ const FILTERS = [
 ];
 
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -45,6 +45,7 @@ type Restaurant = {
 };
 
 export default function SearchScreen() {
+  const { toast } = useAppToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -153,7 +154,7 @@ export default function SearchScreen() {
     }
 
     if (!token) {
-      Alert.alert('Error', 'You must be logged in to favorite restaurants');
+      toast('You must be logged in to favorite restaurants', 'error');
       return;
     }
 
@@ -178,7 +179,7 @@ export default function SearchScreen() {
       }
     } catch (error: any) {
       console.error('Favorite toggle error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Failed to update favorite. Please try again.');
+      toast('Failed to update favorite. Please try again.', 'error');
     } finally {
       setToggleLoading(false);
     }
@@ -397,6 +398,8 @@ export default function SearchScreen() {
                 description: r.description || 'No description',
                 hours: r.hours || 'Check hours',
                 distance: r.distance || 'Unknown',
+                latitude: r.latitude || '',
+                longitude: r.longitude || '',
               },
             } as any)
           }
@@ -432,7 +435,25 @@ export default function SearchScreen() {
                   color={favorites.includes(r.id) ? Colors.accent : Colors.text}
                 />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.detailsBtn}>
+              <TouchableOpacity style={styles.detailsBtn}
+                onPress={() =>
+                  router.push({
+                    pathname: '../restaurant-detail',
+                    params: {
+                      id: r.id,
+                      name: r.name,
+                      rating: r.rating || '4.5',
+                      reviews: '3.2k',
+                      address: r.address || 'No address provided',
+                      description: r.description || 'No description',
+                      hours: r.hours || 'Check hours',
+                      distance: r.distance || 'Unknown',
+                      latitude: r.latitude || '',
+                      longitude: r.longitude || '',
+                    },
+                  } as any)
+                }
+              >
                 <Text style={styles.detailsBtnText}>Details</Text>
                 <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
               </TouchableOpacity>

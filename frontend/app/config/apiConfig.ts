@@ -3,10 +3,19 @@
  * 
  * For Expo testing:
  * - Simulator: use 'http://localhost:3000'
- * - Physical device: use 'http://10.0.34.15:3000' (your machine's local IP)
+ * - Physical device: use 'http://YOUR_LOCAL_IP:3000' (your machine's local IP)
  */
 
+import axios from 'axios';
+
 const API_BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3000';
+
+// Shared axios instance with reasonable timeout
+export const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 15000, // 15 seconds
+  headers: { 'Content-Type': 'application/json' },
+});
 
 export const API_CONFIG = {
   BASE_URL: API_BASE_URL,

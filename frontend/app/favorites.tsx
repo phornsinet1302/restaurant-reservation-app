@@ -7,7 +7,6 @@ import {
   Image,
   TouchableOpacity,
   ImageSourcePropType,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -37,6 +37,7 @@ type FavoriteRestaurant = {
 /* ── Component ── */
 
 export default function FavoritesScreen() {
+  const { toast } = useAppToast();
   const router = useRouter();
   const [favorites, setFavorites] = useState<FavoriteRestaurant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,7 +70,7 @@ export default function FavoritesScreen() {
       
       if (!storedToken) {
         console.log('❌ No token found in AsyncStorage');
-        Alert.alert('Error', 'You must be logged in to view favorites. Please sign up or login first.');
+        toast('You must be logged in to view favorites. Please sign up or login first.', 'error');
         setLoading(false);
         return;
       }
@@ -113,7 +114,7 @@ export default function FavoritesScreen() {
       setFavorites(restaurantList);
     } catch (error: any) {
       console.error('Failed to load favorites:', error.response?.data || error.message);
-      Alert.alert('Error', 'Failed to load favorites');
+      toast('Failed to load favorites', 'error');
     } finally {
       setLoading(false);
     }
@@ -126,10 +127,10 @@ export default function FavoritesScreen() {
       });
 
       setFavorites((prev) => prev.filter((f) => f.restaurant_id !== restaurantId));
-      Alert.alert('Removed', `${restaurantName} removed from favorites`);
+      toast(`${restaurantName} removed from favorites`, 'success');
     } catch (error: any) {
       console.error('Remove favorite error:', error.response?.data || error.message);
-      Alert.alert('Error', 'Failed to remove favorite');
+      toast('Failed to remove favorite', 'error');
     }
   };
 
@@ -179,6 +180,8 @@ export default function FavoritesScreen() {
                         'Fresh, handmade food and organic coffee, served quickly and with a smile.',
                       hours: 'Open Until 11:00pm',
                       distance: item.distance,
+                      latitude: item.latitude || '',
+                      longitude: item.longitude || '',
                     },
                   } as any)
                 }

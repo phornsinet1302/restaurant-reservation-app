@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -8,11 +8,48 @@ import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function PrivacySecurityScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [restaurantName, setRestaurantName] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword.trim()) {
+      toast('Please enter your password to confirm.', 'error');
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await axios.delete(`${API_CONFIG.BASE_URL}/api/auth/delete-account`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { password: deletePassword },
+      });
+      setShowDeleteModal(false);
+      await AsyncStorage.clear();
+      confirm('Account Deleted', 'Your account has been permanently deleted.', [
+          { text: 'OK', onPress: () => {
+            // Dismiss all screens in the stack so back arrow can't return to deleted account
+            while (router.canGoBack()) {
+              router.back();
+            }
+            router.replace('/login' as any);
+          } }
+        ]);
+    } catch (error: any) {
+      const msg = error?.response?.data?.error || 'Failed to delete account. Please try again.';
+      toast(msg, 'error');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -121,6 +158,75 @@ export default function PrivacySecurityScreen() {
             If the restaurant changes ownership or team access needs to be transferred, update your owner profile and contact support before sharing login credentials.
           </Text>
         </View>
+
+        {/* Delete Account */}
+        <View style={[styles.card, { marginTop: 16, borderColor: '#FF2424' }]}>
+          <View style={styles.row}>
+            <View style={[styles.iconCircle, { backgroundColor: '#FFF0F0' }]}>
+              <Ionicons name="trash-outline" size={20} color="#FF2424" />
+            </View>
+            <View style={styles.rowContent}>
+              <Text style={[styles.rowValue, { color: '#FF2424' }]}>Delete account</Text>
+              <Text style={styles.rowDesc}>
+                Permanently delete your account and all associated data. This action cannot be undone.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.resetBtn, { borderColor: '#FF2424' }]}
+              onPress={() => {
+                confirm('Delete Account', 'Are you sure you want to permanently delete your account? All your data will be lost and this cannot be undone.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Continue', style: 'destructive', onPress: () => setShowDeleteModal(true) },
+                  ]);
+              }}
+            >
+              <Text style={[styles.resetBtnText, { color: '#FF2424' }]}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Delete Account Verification Modal */}
+        <Modal visible={showDeleteModal} transparent animationType="fade" onRequestClose={() => setShowDeleteModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Verify your identity</Text>
+              <Text style={styles.modalDesc}>Enter your password to permanently delete your account.</Text>
+              <View style={styles.passwordInputWrapper}>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Enter your password"
+                  placeholderTextColor={Colors.gray}
+                  secureTextEntry={!showDeletePassword}
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowDeletePassword(!showDeletePassword)}>
+                  <Ionicons name={showDeletePassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={Colors.gray} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalCancelBtn}
+                  onPress={() => { setShowDeleteModal(false); setDeletePassword(''); }}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalDeleteBtn, deleteLoading && { opacity: 0.6 }]}
+                  onPress={handleDeleteAccount}
+                  disabled={deleteLoading}
+                >
+                  {deleteLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalDeleteText}>Delete Account</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </View>
   );
@@ -230,5 +336,82 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: Colors.gray,
+  },
+
+  /* Delete account modal */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+  },
+  modalTitle: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 20,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  modalDesc: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  passwordInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    backgroundColor: '#FEFCF4',
+    marginBottom: 20,
+  },
+  modalInput: {
+    flex: 1,
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 15,
+    color: Colors.text,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  eyeBtn: {
+    paddingHorizontal: 14,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 15,
+    color: Colors.text,
+  },
+  modalDeleteBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#FF2424',
+    alignItems: 'center',
+  },
+  modalDeleteText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 15,
+    color: '#fff',
   },
 });

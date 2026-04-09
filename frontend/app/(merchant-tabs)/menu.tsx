@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator, RefreshControl,
+  TextInput, Image, ActivityIndicator, RefreshControl, Modal,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -9,6 +10,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import * as ImagePicker from 'expo-image-picker';
+import { useAppToast } from '@/components/ToastProvider';
 
 interface MenuItem {
   id: string;
@@ -18,11 +21,11 @@ interface MenuItem {
   category: string;
   image_url: string | null;
   is_available: boolean;
-  is_time_based?: boolean;
   restaurant_id: string;
 }
 
 export default function MerchantMenuScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
@@ -30,6 +33,16 @@ export default function MerchantMenuScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Edit modal state
+  const [editItem, setEditItem] = useState<MenuItem | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editPrice, setEditPrice] = useState('');
+  const [editAvailability, setEditAvailability] = useState<'available' | 'sold_out'>('available');
+  const [editImageUri, setEditImageUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -110,8 +123,116 @@ export default function MerchantMenuScreen() {
     loadData();
   };
 
+  const openEditModal = (item: MenuItem) => {
+    setEditItem(item);
+    setEditName(item.name);
+    setEditDescription(item.description || '');
+    setEditCategory(item.category || '');
+    setEditPrice(item.price?.toString() || '0');
+    setEditAvailability(
+      item.is_available === false ? 'sold_out' : 'available'
+    );
+    setEditImageUri(null);
+  };
+
+  const closeEditModal = () => {
+    setEditItem(null);
+    setEditImageUri(null);
+  };
+
+  const pickEditImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      toast('Please allow access to your photo library.', 'warning');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setEditImageUri(result.assets[0].uri);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editItem) return;
+    if (!editName.trim()) {
+      toast('Dish name is required', 'error');
+      return;
+    }
+    if (!editCategory.trim()) {
+      toast('Category is required', 'error');
+      return;
+    }
+    const parsedPrice = parseFloat(editPrice);
+    if (isNaN(parsedPrice) || parsedPrice <= 0) {
+      toast('Please enter a valid price', 'error');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const token = await AsyncStorage.getItem('token');
+
+      let imageUrl = editItem.image_url;
+
+      // Upload new image if one was picked
+      if (editImageUri) {
+        const formData = new FormData();
+        formData.append('file', {
+          uri: editImageUri,
+          type: 'image/jpeg',
+          name: `menu-${Date.now()}.jpg`,
+        } as any);
+        try {
+          const uploadRes = await axios.post(
+            `${API_CONFIG.BASE_URL}/api/media/upload-image`,
+            formData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'multipart/form-data',
+              },
+            }
+          );
+          imageUrl = uploadRes.data?.image_url;
+        } catch {
+          toast('Image upload failed, keeping current photo', 'warning');
+        }
+      }
+
+      const updates: any = {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        category: editCategory.trim(),
+        price: parsedPrice,
+        image_url: imageUrl,
+        is_available: editAvailability !== 'sold_out',
+      };
+
+      await axios.put(`${API_CONFIG.BASE_URL}/api/menu/${editItem.id}`, updates, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // Update local state immediately
+      setMenuItems(prev =>
+        prev.map(m => m.id === editItem.id ? { ...m, ...updates } : m)
+      );
+
+      closeEditModal();
+      toast('Menu item updated successfully', 'success');
+    } catch (error: any) {
+      toast(error.response?.data?.error || 'Failed to update menu item', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDelete = (item: MenuItem) => {
-    Alert.alert('Delete Item', `Are you sure you want to delete "${item.name}"?`, [
+    confirm('Delete Item', `Are you sure you want to delete "${item.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
@@ -122,7 +243,7 @@ export default function MerchantMenuScreen() {
             });
             setMenuItems(prev => prev.filter(m => m.id !== item.id));
           } catch {
-            Alert.alert('Error', 'Failed to delete item');
+            toast('Failed to delete item', 'error');
           }
         },
       },
@@ -135,10 +256,8 @@ export default function MerchantMenuScreen() {
 
   const availableCount = menuItems.filter(i => i.is_available !== false).length;
   const soldOutCount = menuItems.filter(i => i.is_available === false).length;
-  const timeBasedCount = menuItems.filter(i => i.is_time_based).length;
 
   const getStatusBadge = (item: MenuItem) => {
-    if (item.is_time_based) return { label: 'Time Based', color: '#B8960C', bg: '#FFF8DC' };
     if (item.is_available === false) return { label: 'Sold Out', color: '#E74C3C', bg: '#FDEDEC' };
     return { label: 'Available', color: '#2BA15C', bg: '#E8F8EF' };
   };
@@ -184,10 +303,6 @@ export default function MerchantMenuScreen() {
             <View style={styles.syncStatItem}>
               <Text style={styles.syncStatValue}>{soldOutCount}</Text>
               <Text style={styles.syncStatLabel}>Sold out</Text>
-            </View>
-            <View style={styles.syncStatItem}>
-              <Text style={styles.syncStatValue}>{timeBasedCount}</Text>
-              <Text style={styles.syncStatLabel}>Time based</Text>
             </View>
           </View>
         </View>
@@ -238,7 +353,7 @@ export default function MerchantMenuScreen() {
                     <View style={styles.menuBottomRow}>
                       <Text style={styles.menuPrice}>${item.price?.toFixed(2)}</Text>
                       <View style={styles.menuActions}>
-                        <TouchableOpacity style={styles.actionBtn}>
+                        <TouchableOpacity style={styles.actionBtn} onPress={() => openEditModal(item)}>
                           <Ionicons name="pencil-outline" size={20} color={Colors.primary} />
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.actionBtn} onPress={() => handleDelete(item)}>
@@ -254,6 +369,126 @@ export default function MerchantMenuScreen() {
         )}
         <View style={{ height: 30 }} />
       </ScrollView>
+
+      {/* Edit Menu Item Modal */}
+      <Modal visible={!!editItem} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalContent}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Dish</Text>
+              <TouchableOpacity onPress={closeEditModal}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Photo */}
+              <TouchableOpacity style={styles.editPhotoArea} onPress={pickEditImage}>
+                {editImageUri ? (
+                  <Image source={{ uri: editImageUri }} style={styles.editPhotoPreview} />
+                ) : editItem?.image_url ? (
+                  <Image source={{ uri: editItem.image_url }} style={styles.editPhotoPreview} />
+                ) : (
+                  <View style={styles.editPhotoPlaceholder}>
+                    <Ionicons name="camera-outline" size={24} color={Colors.gray} />
+                  </View>
+                )}
+                <View style={styles.editPhotoOverlay}>
+                  <Ionicons name="camera" size={16} color={Colors.white} />
+                </View>
+              </TouchableOpacity>
+
+              {/* Name */}
+              <Text style={styles.editLabel}>Dish Name *</Text>
+              <TextInput
+                style={styles.editInput}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Dish name"
+                placeholderTextColor={Colors.gray}
+              />
+
+              {/* Description */}
+              <Text style={styles.editLabel}>Description</Text>
+              <TextInput
+                style={[styles.editInput, { height: 80, textAlignVertical: 'top' }]}
+                value={editDescription}
+                onChangeText={setEditDescription}
+                placeholder="Brief description"
+                placeholderTextColor={Colors.gray}
+                multiline
+              />
+
+              {/* Category & Price */}
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editLabel}>Category *</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editCategory}
+                    onChangeText={setEditCategory}
+                    placeholder="e.g. Main"
+                    placeholderTextColor={Colors.gray}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editLabel}>Price *</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editPrice}
+                    onChangeText={(t) => setEditPrice(t.replace(/[^0-9.]/g, ''))}
+                    placeholder="0.00"
+                    placeholderTextColor={Colors.gray}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+
+              {/* Availability */}
+              <Text style={styles.editLabel}>Availability</Text>
+              <View style={styles.editAvailRow}>
+                {([
+                  { key: 'available' as const, label: 'Available', bg: '#4A6741' },
+                  { key: 'sold_out' as const, label: 'Sold Out', bg: '#E74C3C' },
+                ]).map(opt => (
+                  <TouchableOpacity
+                    key={opt.key}
+                    style={[
+                      styles.editAvailChip,
+                      editAvailability === opt.key && { backgroundColor: opt.bg, borderColor: opt.bg },
+                    ]}
+                    onPress={() => setEditAvailability(opt.key)}
+                  >
+                    <Text style={[
+                      styles.editAvailText,
+                      editAvailability === opt.key && { color: Colors.white },
+                    ]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Save Button */}
+              <TouchableOpacity
+                style={[styles.editSaveBtn, saving && { opacity: 0.6 }]}
+                onPress={handleSaveEdit}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator color={Colors.white} />
+                ) : (
+                  <Text style={styles.editSaveBtnText}>Save Changes</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -332,5 +567,60 @@ const styles = StyleSheet.create({
   actionBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: '#F5F0E0', alignItems: 'center', justifyContent: 'center',
+  },
+
+  /* Edit Modal */
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20,
+  },
+  modalTitle: {
+    fontFamily: 'PlusJakartaSans-Bold', fontSize: 20, color: Colors.text,
+  },
+  editPhotoArea: {
+    width: 80, height: 80, borderRadius: 40, alignSelf: 'center', marginBottom: 20, position: 'relative',
+  },
+  editPhotoPreview: {
+    width: 80, height: 80, borderRadius: 40,
+  },
+  editPhotoPlaceholder: {
+    width: 80, height: 80, borderRadius: 40, backgroundColor: '#F0EFDF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  editPhotoOverlay: {
+    position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14,
+    backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Colors.background,
+  },
+  editLabel: {
+    fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 13, color: Colors.text, marginBottom: 6,
+  },
+  editInput: {
+    backgroundColor: Colors.white, borderRadius: 12, borderWidth: 1, borderColor: Colors.border,
+    paddingHorizontal: 14, paddingVertical: 12, fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14, color: Colors.text, marginBottom: 14,
+  },
+  editAvailRow: {
+    flexDirection: 'row', gap: 10, marginBottom: 20,
+  },
+  editAvailChip: {
+    flex: 1, paddingVertical: 10, borderRadius: 20, alignItems: 'center',
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.white,
+  },
+  editAvailText: {
+    fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 13, color: Colors.text,
+  },
+  editSaveBtn: {
+    backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 16,
+    alignItems: 'center', marginBottom: 20,
+  },
+  editSaveBtnText: {
+    fontFamily: 'PlusJakartaSans-Bold', fontSize: 15, color: Colors.text,
   },
 });
