@@ -1,8 +1,8 @@
 const supabase = require('../config/supabase');
 const { supabaseAdmin } = require('../config/supabase');
 const jwt = require('jsonwebtoken');
-
-// ❌ REMOVED AsyncStorage import from here
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 exports.registerUser = async (req, res) => {
   try {
@@ -42,11 +42,9 @@ exports.registerUser = async (req, res) => {
     console.log('✅ Email is unique, proceeding with registration...');
 
     // 1. Hash password with bcrypt
-    const bcrypt = require('bcrypt');
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 2. Create user directly in database (bypass Supabase Auth)
-    const crypto = require('crypto');
     const userId = crypto.randomUUID();
 
     const userData = {
@@ -165,7 +163,7 @@ exports.loginUser = async (req, res) => {
     // 1. Fetch all users with this email
     const { data: users, error: userError } = await supabase
       .from('users')
-      .select('id, email, role, name, phone, date_of_birth, bio, password_hash')
+      .select('id, email, role, name, phone, date_of_birth, bio, password_hash, profile_picture_url')
       .eq('email', email);
 
     if (userError || !users || users.length === 0) {
@@ -191,9 +189,6 @@ exports.loginUser = async (req, res) => {
     }
 
     // 3. Compare password with stored hash
-    const bcrypt = require('bcrypt');
-    
-    console.log('🔑 Comparing password...');
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     
     if (!passwordMatch) {
@@ -221,7 +216,8 @@ exports.loginUser = async (req, res) => {
         phone: user.phone,
         dateOfBirth: user.date_of_birth,
         bio: user.bio,
-        role: user.role
+        role: user.role,
+        profile_picture_url: user.profile_picture_url || null
       }
     });
 
@@ -381,7 +377,7 @@ exports.updateProfile = async (req, res) => {
     console.log('📚 Fetching updated profile from database...');
     const { data: profile, error: profileError } = await supabase
       .from('users')
-      .select('role, name, phone, date_of_birth, bio, email')
+      .select('role, name, phone, date_of_birth, bio, email, profile_picture_url')
       .eq('id', userId)
       .single();
 
@@ -403,7 +399,8 @@ exports.updateProfile = async (req, res) => {
         fullName: profile.name,
         phone: profile.phone,
         dateOfBirth: profile.date_of_birth,
-        bio: profile.bio
+        bio: profile.bio,
+        profile_picture_url: profile.profile_picture_url || null
       }
     });
   } catch (error) {
@@ -424,21 +421,19 @@ exports.uploadProfilePicture = async (req, res) => {
     const userId = req.user.id;
     const fileName = `profile_${userId}_${Date.now()}.jpg`;
 
-    console.log('📸 [uploadProfilePicture] Uploading for user:', userId);
-    console.log('   File name:', req.file.originalname);
-    console.log('   File size:', req.file.size, 'bytes');
+    console.log('📸 Uploading profile picture for user:', userId);
 
-    // Upload to Supabase Storage - user-profiles bucket
+    // Upload to Supabase Storage
     const { data, error } = await supabaseAdmin.storage
       .from('user-profiles')
       .upload(fileName, req.file.buffer, {
         cacheControl: '3600',
         upsert: false,
-        contentType: 'image/jpeg',
+        contentType: req.file.mimetype || 'image/jpeg',
       });
 
     if (error) {
-      console.error('❌ Upload failed:', error);
+      console.error('❌ Storage upload failed:', error.message);
       return res.status(400).json({ error: error.message });
     }
 
@@ -448,103 +443,27 @@ exports.uploadProfilePicture = async (req, res) => {
       .getPublicUrl(fileName);
 
     const profilePictureUrl = publicData.publicUrl;
-    console.log('✅ Image uploaded successfully');
-    console.log('   Public URL:', profilePictureUrl.substring(0, 60) + '...');
+    console.log('✅ Uploaded to storage:', profilePictureUrl.substring(0, 80));
 
-    // Update user record with profile picture URL - TRY RAW SQL
-    console.log('\n' + '='.repeat(70));
-    console.log('💾 SAVING TO DATABASE - RAW SQL APPROACH');
-    console.log('='.repeat(70));
-    console.log('   User ID:', userId);
-    console.log('   URL:', profilePictureUrl);
-    
-    // Try raw SQL query directly
-    console.log('\n🔄 Attempting raw SQL update...');
-    
-    try {
-      // Use supabaseAdmin to execute raw SQL
-      const { data: sqlResult, error: sqlError } = await supabaseAdmin.rpc('exec_sql', {
-        sql: `UPDATE public.users SET profile_picture_url = '${profilePictureUrl.replace(/'/g, "''")}' WHERE id = '${userId}' RETURNING id, email, profile_picture_url;`
-      }).catch(err => {
-        console.log('   RPC method not available, trying alternative...');
-        return null;
-      });
-
-      if (sqlResult) {
-        console.log('✅ Raw SQL executed');
-        console.log('   Result:', JSON.stringify(sqlResult));
-      }
-    } catch (err) {
-      console.log('   Raw SQL not available:', err.message);
-    }
-
-    // FALLBACK: Try simple update without select
-    console.log('\n🔄 Fallback: Simple UPDATE (no select)...');
-    const { error: simpleError } = await supabaseAdmin
+    // Save URL to database
+    const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ profile_picture_url: profilePictureUrl })
       .eq('id', userId);
 
-    if (simpleError) {
-      console.error('❌ Simple update failed:', simpleError.message);
-    } else {
-      console.log('✅ Simple update executed (no error)');
+    if (updateError) {
+      console.error('❌ DB update failed:', updateError.message);
+      return res.status(400).json({ error: 'Failed to save profile picture URL: ' + updateError.message });
     }
 
-    // VERIFY with direct fetch
-    console.log('\n🔍 VERIFICATION - Fetching user...');
-    const { data: verifyData, error: verifyError } = await supabaseAdmin
-      .from('users')
-      .select('id, email, profile_picture_url')
-      .eq('id', userId)
-      .single();
-
-    if (verifyError) {
-      console.error('❌ Verification failed:', verifyError.message);
-      console.error('='.repeat(70));
-      return res.status(400).json({ error: 'User fetch failed: ' + verifyError.message });
-    }
-
-    console.log('✅ User fetched:');
-    console.log('   ID:', verifyData.id);
-    console.log('   Email:', verifyData.email);
-    console.log('   Current profile_picture_url:', verifyData.profile_picture_url || 'NULL ❌');
-    
-    if (verifyData.profile_picture_url === profilePictureUrl) {
-      console.log('\n✅ SUCCESS! Profile picture saved!');
-    } else {
-      console.log('\n❌ FAILED! URL not saved!');
-      console.log('   Expected:', profilePictureUrl);
-      console.log('   Got:', verifyData.profile_picture_url);
-      
-      // Debug: check if column even exists
-      console.log('\n🔍 COLUMN CHECK:');
-      try {
-        const { data: columnCheck } = await supabaseAdmin
-          .from('information_schema.columns')
-          .select('column_name, data_type')
-          .match({ table_name: 'users', column_name: 'profile_picture_url' });
-        
-        if (columnCheck && columnCheck.length > 0) {
-          console.log('   ✅ Column exists:', JSON.stringify(columnCheck[0]));
-        } else {
-          console.log('   ❌ Column NOT FOUND in schema!');
-        }
-      } catch (err) {
-        console.log('   Could not verify column:', err.message);
-      }
-    }
-    
-    console.log('='.repeat(70) + '\n');
+    console.log('✅ Profile picture saved to DB for user:', userId);
 
     res.status(200).json({
       message: 'Profile picture uploaded successfully',
       profile_picture_url: profilePictureUrl,
-      verified: verifyData?.profile_picture_url === profilePictureUrl,
     });
   } catch (error) {
-    console.error('\n❌ Profile picture upload error:', error.message);
-    console.error('   Full error:', error);
+    console.error('❌ Profile picture upload error:', error.message);
     res.status(500).json({ error: error.message });
   }
 };
@@ -825,61 +744,31 @@ exports.googleLogin = async (req, res) => {
       return res.status(404).json({ error: "User not found. Please sign up first." });
     }
 
-    // Sign in with password (same password as signup)
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: googleId + email + 'google'
-    });
-
-    if (authError) {
-      console.error("Google Login SignIn Error:", authError.message);
-      // If password doesn't match, user may have signed up differently
-      // Create a JWT token instead
-      const jwt = require('jsonwebtoken');
-      const jwtToken = jwt.sign(
-        { sub: existingUser.id, email: email },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '7d' }
-      );
-
-      const { data: profile } = await supabase
-        .from('users')
-        .select('role, name, phone, date_of_birth, bio')
-        .eq('id', existingUser.id)
-        .single();
-
-      return res.status(200).json({
-        message: "Google login successful",
-        session: { access_token: jwtToken },
-        user: {
-          id: existingUser.id,
-          email: email,
-          role: profile?.role || 'customer',
-          fullName: profile?.name,
-          phone: profile?.phone,
-          dateOfBirth: profile?.date_of_birth,
-          bio: profile?.bio
-        }
-      });
-    }
-
-    // Fetch user profile
+    // Fetch user profile and issue JWT directly (no Supabase Auth round-trip)
     const { data: profile } = await supabase
       .from('users')
-      .select('role, name, phone, date_of_birth, bio')
-      .eq('id', authData.user.id)
+      .select('role, name, phone, date_of_birth, bio, profile_picture_url')
+      .eq('id', existingUser.id)
       .single();
+
+    const jwtToken = jwt.sign(
+      { id: existingUser.id, email: email, role: profile?.role || 'customer' },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '7d' }
+    );
 
     return res.status(200).json({
       message: "Google login successful",
-      session: authData.session,
+      session: { access_token: jwtToken },
       user: {
-        ...authData.user,
+        id: existingUser.id,
+        email: email,
         role: profile?.role || 'customer',
         fullName: profile?.name,
         phone: profile?.phone,
         dateOfBirth: profile?.date_of_birth,
-        bio: profile?.bio
+        bio: profile?.bio,
+        profile_picture_url: profile?.profile_picture_url || null
       }
     });
   } catch (error) {
@@ -1034,55 +923,31 @@ exports.appleLogin = async (req, res) => {
       return res.status(404).json({ error: "User not found. Please sign up first." });
     }
 
-    // Sign in with password (same password as signup)
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: appleId + email + 'apple'
-    });
-
-    if (authError) {
-      console.error("Apple Login SignIn Error:", authError.message);
-      // If password doesn't match, user may have signed up differently
-      // Create a JWT token instead
-      const jwt = require('jsonwebtoken');
-      const jwtToken = jwt.sign(
-        { sub: existingUser.id, email: email },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '7d' }
-      );
-
-      const { data: profile } = await supabase
-        .from('users')
-        .select('role, name')
-        .eq('id', existingUser.id)
-        .single();
-
-      return res.status(200).json({
-        message: "Apple login successful",
-        session: { access_token: jwtToken },
-        user: {
-          id: existingUser.id,
-          email: email,
-          role: profile?.role || 'customer',
-          fullName: profile?.name,
-        }
-      });
-    }
-
-    // Fetch user profile
+    // Fetch user profile and issue JWT directly
     const { data: profile } = await supabase
       .from('users')
-      .select('role, name')
-      .eq('id', authData.user.id)
+      .select('role, name, phone, date_of_birth, bio, profile_picture_url')
+      .eq('id', existingUser.id)
       .single();
+
+    const jwtToken = jwt.sign(
+      { id: existingUser.id, email: email, role: profile?.role || 'customer' },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '7d' }
+    );
 
     return res.status(200).json({
       message: "Apple login successful",
-      session: authData.session,
+      session: { access_token: jwtToken },
       user: {
-        ...authData.user,
+        id: existingUser.id,
+        email: email,
         role: profile?.role || 'customer',
         fullName: profile?.name,
+        phone: profile?.phone,
+        dateOfBirth: profile?.date_of_birth,
+        bio: profile?.bio,
+        profile_picture_url: profile?.profile_picture_url || null
       }
     });
   } catch (error) {
@@ -1238,18 +1103,27 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
 
-    // Update password in Supabase Auth
-    const { data, error } = await supabase.auth.updateUser({
-      password: password
-    });
+    // Update password_hash in users table
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    if (error) {
-      return res.status(400).json({ error: error.message });
+    const { error: dbError } = await supabaseAdmin
+      .from('users')
+      .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    if (dbError) {
+      console.error("Password update DB error:", dbError);
+      return res.status(400).json({ error: "Failed to update password" });
+    }
+
+    // Also update in Supabase Auth (admin client, no session needed)
+    if (supabaseAdmin !== supabase) {
+      await supabaseAdmin.auth.admin.updateUserById(userId, { password: password });
     }
 
     res.status(200).json({ 
-      message: "Password reset successfully",
-      user: data.user
+      message: "Password reset successfully"
     });
   } catch (error) {
     console.error("Reset Password Error:", error);
@@ -1388,7 +1262,6 @@ exports.resetPasswordWithCode = async (req, res) => {
     console.log(`📊 Total users with this email: ${users.length}, Using user:`, userData.id);
 
     // Hash new password
-    const bcrypt = require('bcrypt');
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(newPassword, saltRounds);
 
@@ -1442,5 +1315,68 @@ exports.checkProfileCompletion = async (req, res) => {
   } catch (error) {
     console.error("Check Profile Error:", error);
     res.status(500).json({ error: "Failed to check profile: " + error.message });
+  }
+};
+
+// @desc    Delete user account permanently
+// @route   DELETE /api/auth/delete-account
+// @access  Private
+exports.deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required to confirm account deletion' });
+    }
+
+    // Verify password
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !userData) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const isMatch = await bcrypt.compare(password, userData.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    // Delete related data (order matters for foreign keys)
+    const tablesToClean = [
+      'favorites',
+      'notifications',
+      'reservations',
+      'restaurants',
+    ];
+
+    for (const table of tablesToClean) {
+      await supabaseAdmin.from(table).delete().eq('user_id', userId);
+    }
+
+    // Delete from users table
+    const { error: deleteUserError } = await supabaseAdmin
+      .from('users')
+      .delete()
+      .eq('id', userId);
+
+    if (deleteUserError) {
+      console.error('Delete user row error:', deleteUserError);
+      return res.status(500).json({ error: 'Failed to delete account data' });
+    }
+
+    // Delete from Supabase Auth
+    if (supabaseAdmin !== supabase) {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+    }
+
+    res.status(200).json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error('Delete Account Error:', error);
+    res.status(500).json({ error: 'Failed to delete account: ' + error.message });
   }
 };

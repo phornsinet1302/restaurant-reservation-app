@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, Image, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -10,10 +10,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
-type Availability = 'available' | 'sold_out' | 'time_based';
+type Availability = 'available' | 'sold_out';
 
 export default function AddMenuItemScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -51,13 +53,13 @@ export default function AddMenuItemScreen() {
         setRestaurantId(response.data.data.id);
       } else {
         console.error('❌ No restaurant ID in response:', response.data);
-        Alert.alert('Error', 'Could not find your restaurant. Please create one first.');
+        toast('Could not find your restaurant. Please create one first.', 'error');
       }
     } catch (error: any) {
       console.error('❌ [loadRestaurantId] Error:', error.message);
       console.error('   Status:', error.response?.status);
       console.error('   Data:', error.response?.data);
-      Alert.alert('Error', 'Failed to load your restaurant');
+      toast('Failed to load your restaurant', 'error');
     }
   };
 
@@ -70,7 +72,7 @@ export default function AddMenuItemScreen() {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      toast('Please allow access to your photo library.', 'warning');
       return;
     }
 
@@ -87,16 +89,24 @@ export default function AddMenuItemScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!name.trim()) {
-      Alert.alert('Error', 'Please enter a dish name');
+    if (!imageUri) {
+      toast('Please add a photo of the dish', 'error');
       return;
     }
-    if (!price.trim() || isNaN(parseFloat(price))) {
-      Alert.alert('Error', 'Please enter a valid price');
+    if (!name.trim()) {
+      toast('Please enter a dish name', 'error');
+      return;
+    }
+    if (!category.trim()) {
+      toast('Please enter a category (e.g. Main, Starter, Dessert)', 'error');
+      return;
+    }
+    if (!price.trim() || isNaN(parseFloat(price)) || parseFloat(price) <= 0) {
+      toast('Please enter a valid price', 'error');
       return;
     }
     if (!restaurantId) {
-      Alert.alert('Error', 'Restaurant not found. Please try again.');
+      toast('Restaurant not found. Please try again.', 'error');
       return;
     }
 
@@ -145,7 +155,6 @@ export default function AddMenuItemScreen() {
         price: parseFloat(price),
         image_url: imageUrl,
         is_available: availability !== 'sold_out',
-        is_time_based: availability === 'time_based',
       };
 
       console.log('📤 [handleSubmit] Submitting menu item:', payload);
@@ -156,13 +165,12 @@ export default function AddMenuItemScreen() {
 
       console.log('✅ [handleSubmit] Success:', response.data);
 
-      Alert.alert('Success', 'Menu item added successfully!', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      toast('Menu item added successfully!', 'success');
+      router.back();
     } catch (error: any) {
       console.error('❌ [handleSubmit] Error:', error.response?.data || error.message);
       const msg = error?.response?.data?.error || 'Failed to add menu item';
-      Alert.alert('Error', msg);
+      toast(msg, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -171,7 +179,6 @@ export default function AddMenuItemScreen() {
   const availabilityOptions: { key: Availability; label: string; activeColor: string; activeBg: string }[] = [
     { key: 'available', label: 'Available', activeColor: Colors.white, activeBg: '#4A6741' },
     { key: 'sold_out', label: 'Sold Out', activeColor: Colors.white, activeBg: '#E74C3C' },
-    { key: 'time_based', label: 'Time Based', activeColor: Colors.text, activeBg: Colors.primary },
   ];
 
   return (

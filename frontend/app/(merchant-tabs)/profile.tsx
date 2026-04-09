@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator,
+  ActivityIndicator, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import * as ImagePicker from 'expo-image-picker';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function MerchantProfileScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [restaurantName, setRestaurantName] = useState('');
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
@@ -30,6 +35,9 @@ export default function MerchantProfileScreen() {
       if (user) {
         setUserName(user.fullName || user.name || '');
         setUserEmail(user.email || '');
+        if (user.profile_picture_url) {
+          setProfileImageUri(user.profile_picture_url);
+        }
       }
 
       const storedToken = await AsyncStorage.getItem('token');
@@ -52,7 +60,7 @@ export default function MerchantProfileScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
+    confirm('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log Out', style: 'destructive', onPress: async () => {
@@ -67,11 +75,67 @@ export default function MerchantProfileScreen() {
     return userName ? userName.charAt(0).toUpperCase() : 'R';
   };
 
+  const handlePickAndUploadImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        toast('Please allow access to your photo library.', 'warning');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setUploadingImage(true);
+        const token = await AsyncStorage.getItem('token');
+
+        const formData = new FormData();
+        formData.append('file', {
+          uri: result.assets[0].uri,
+          type: 'image/jpeg',
+          name: `profile_${Date.now()}.jpg`,
+        } as any);
+
+        const uploadRes = await axios.post(
+          `${API_CONFIG.BASE_URL}/api/auth/upload-profile-picture`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'multipart/form-data',
+            },
+            timeout: 60000,
+          }
+        );
+
+        const newUrl = uploadRes.data.profile_picture_url;
+        setProfileImageUri(newUrl);
+
+        // Update AsyncStorage
+        const userStr = await AsyncStorage.getItem('user');
+        const user = userStr ? JSON.parse(userStr) : {};
+        user.profile_picture_url = newUrl;
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+
+        toast('Profile picture updated!', 'success');
+      }
+    } catch (error: any) {
+      toast(error.response?.data?.error || 'Failed to upload.', 'error');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const menuItems = [
     { icon: 'notifications-outline' as const, label: 'Notifications', route: '../notifications' },
     { icon: 'star-outline' as const, label: 'Reviews', route: null },
     { icon: 'shield-outline' as const, label: 'Privacy & Security', route: '../privacy-security' },
-    { icon: 'help-circle-outline' as const, label: 'Help & Support', route: '../help-support' },
+    { icon: 'help-circle-outline' as const, label: 'Help & Support', route: '../merchant-help-support' },
     { icon: 'settings-outline' as const, label: 'Settings', route: '../merchant-settings' },
   ];
 
@@ -90,10 +154,14 @@ export default function MerchantProfileScreen() {
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitial()}</Text>
+              {profileImageUri ? (
+                <Image source={{ uri: profileImageUri }} style={{ width: '100%', height: '100%', borderRadius: 40 }} />
+              ) : (
+                <Text style={styles.avatarText}>{getInitial()}</Text>
+              )}
             </View>
-            <TouchableOpacity style={styles.cameraBtn}>
-              <Ionicons name="camera-outline" size={14} color={Colors.text} />
+            <TouchableOpacity style={styles.cameraBtn} onPress={handlePickAndUploadImage} disabled={uploadingImage}>
+              <Ionicons name={uploadingImage ? "hourglass" : "camera-outline"} size={14} color={Colors.text} />
             </TouchableOpacity>
           </View>
           <View style={styles.profileInfo}>

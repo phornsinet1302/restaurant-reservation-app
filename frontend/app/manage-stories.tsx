@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator, Animated,
+  TextInput, Image, ActivityIndicator, Animated,
   LayoutAnimation, Platform, UIManager, FlatList, Modal as RNModal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +12,7 @@ import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
 import { Video } from 'expo-av';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -30,6 +31,7 @@ interface Story {
 }
 
 export default function ManageStoriesScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [restaurantName, setRestaurantName] = useState('');
@@ -84,9 +86,8 @@ export default function ManageStoriesScreen() {
         console.warn('❌ No token or user found - user must be logged in as merchant');
         console.warn('   Redirecting to login...');
         setLoading(false);
-        Alert.alert('Login Required', 'Please log in as a merchant to manage stories', [
-          { text: 'OK', onPress: () => router.replace('/login' as any) }
-        ]);
+        toast('Please log in as a merchant to manage stories', 'warning');
+        router.replace('/login' as any);
         return;
       }
 
@@ -170,7 +171,7 @@ export default function ManageStoriesScreen() {
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      toast('Please allow access to your photo library.', 'warning');
       return;
     }
 
@@ -191,31 +192,37 @@ export default function ManageStoriesScreen() {
   const pickVideo = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      toast('Please allow access to your photo library.', 'warning');
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['videos'],
       allowsEditing: true,
-      quality: 0.8,
+      quality: 0.5,
+      videoMaxDuration: 60,
     });
 
     if (!result.canceled && result.assets[0]) {
       const video = result.assets[0];
       // Duration from ImagePicker is in milliseconds, convert to seconds
       const durationInSeconds = video.duration ? Math.round(video.duration / 1000) : 0;
+      const fileSizeMB = video.fileSize ? (video.fileSize / 1024 / 1024).toFixed(1) : 'unknown';
       console.log('🎥 [pickVideo] Selected video:');
       console.log('   Duration:', durationInSeconds, 'seconds (raw:', video.duration, 'ms)');
+      console.log('   File size:', fileSizeMB, 'MB');
       
       // Validate video duration (max 1 minute = 60 seconds)
       if (durationInSeconds > 60) {
-        Alert.alert(
-          'Video too long',
-          `Video must be under 1 minute (60 seconds). Your video is ${durationInSeconds} seconds.`,
-          [{ text: 'OK' }]
-        );
+        toast(`Video must be under 1 minute. Yours is ${durationInSeconds}s.`, 'warning');
         console.log('   ❌ Video rejected: too long');
+        return;
+      }
+
+      // Validate file size (max 50MB)
+      if (video.fileSize && video.fileSize > 50 * 1024 * 1024) {
+        toast(`Video is too large (${fileSizeMB}MB). Please use a shorter or lower quality video (max 50MB).`, 'warning');
+        console.log('   ❌ Video rejected: too large');
         return;
       }
 
@@ -232,12 +239,16 @@ export default function ManageStoriesScreen() {
   };
 
   const publishStory = async () => {
+    if (!imageUri && !videoUri) {
+      toast('Please add a photo or video for your story.', 'warning');
+      return;
+    }
     if (!headline.trim()) {
-      Alert.alert('Missing headline', 'Please add a headline for your story.');
+      toast('Please add a headline for your story.', 'warning');
       return;
     }
     if (!restaurantId) {
-      Alert.alert('Error', 'No restaurant found.');
+      toast('No restaurant found.', 'error');
       return;
     }
 
@@ -284,10 +295,7 @@ export default function ManageStoriesScreen() {
           console.error('   ❌ Image upload failed:', uploadError.message);
           console.error('   Response:', uploadError.response?.data);
           
-          Alert.alert(
-            'Image Upload Failed',
-            `Could not upload image to cloud storage: ${uploadError.response?.data?.error || uploadError.message}. Please try again.`
-          );
+          toast(`Could not upload image to cloud storage: ${uploadError.response?.data?.error || uploadError.message}. Please try again.`, 'error');
           
           setPublishing(false);
           return;
@@ -339,10 +347,7 @@ export default function ManageStoriesScreen() {
           console.error('   Response:', uploadError.response?.data);
           
           // Fail with error message - don't use local paths
-          Alert.alert(
-            'Video Upload Failed',
-            `Could not upload video to cloud storage: ${uploadError.response?.data?.error || uploadError.message}. Please try again or use a smaller video file.`
-          );
+          toast(`Could not upload video to cloud storage: ${uploadError.response?.data?.error || uploadError.message}. Please try again or use a smaller video file.`, 'error');
           
           // Stop processing - require successful upload
           setPublishing(false);
@@ -375,7 +380,7 @@ export default function ManageStoriesScreen() {
       );
 
       console.log('✅ Story created successfully:', response.data);
-      Alert.alert('Published!', 'Your story is now live for customers.');
+      toast('Your story is now live for customers.', 'success');
       
       // Reset form
       setImageUri(null);
@@ -383,25 +388,20 @@ export default function ManageStoriesScreen() {
       setMediaType('image');
       setHeadline('');
       setCaption('');
-      toggleCreateForm();
+      setShowCreateForm(false);
       
-      // Refresh stories list
-      console.log('🔄 Refreshing stories list...');
-      await loadData();
-      console.log('✅ Stories refreshed');
+      // Refresh stories list after a short delay to let UI settle
+      setTimeout(() => loadData(), 500);
     } catch (error: any) {
       console.error('❌ Story creation error:', error.response?.data || error.message);
-      Alert.alert(
-        'Error', 
-        `Failed to publish story: ${error.response?.data?.error || error.message}`
-      );
+      toast(`Failed to publish story: ${error.response?.data?.error || error.message}`, 'error');
     } finally {
       setPublishing(false);
     }
   };
 
   const deleteStory = (id: string) => {
-    Alert.alert('Delete story', 'Are you sure you want to remove this story?', [
+    confirm('Delete story', 'Are you sure you want to remove this story?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
@@ -423,10 +423,10 @@ export default function ManageStoriesScreen() {
               return updated;
             });
             
-            Alert.alert('Deleted', 'Story removed successfully');
+            toast('Story removed successfully', 'success');
           } catch (error: any) {
             console.error('❌ Error deleting story:', error.response?.data || error.message);
-            Alert.alert('Error', error.response?.data?.error || 'Failed to delete story. Please try again.');
+            toast(error.response?.data?.error || 'Failed to delete story. Please try again.', 'error');
           }
         },
       },
@@ -535,7 +535,7 @@ export default function ManageStoriesScreen() {
                   setPreviewStoryIndex(0);
                   setShowPreview(true);
                 } else {
-                  Alert.alert('No stories', 'Add a story first to preview');
+                  toast('Add a story first to preview', 'warning');
                 }
               }}
             >
@@ -549,69 +549,69 @@ export default function ManageStoriesScreen() {
         {showCreateForm && (
           <View style={styles.createCard}>
             <View style={styles.createCardHeader}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.createTitle}>Create story</Text>
                 <Text style={styles.createSub}>
-                  Add one short visual update for customers browsing your restaurant.
+                  Videos max 1 min · Auto-deletes in 24h
                 </Text>
               </View>
-              <TouchableOpacity onPress={toggleCreateForm}>
-                <Ionicons name="trash-outline" size={20} color={Colors.gray} />
+              <TouchableOpacity onPress={toggleCreateForm} style={styles.discardBtn}>
+                <Ionicons name="close" size={18} color={Colors.gray} />
               </TouchableOpacity>
             </View>
 
-            {/* Rules Banner */}
-            <View style={styles.rulesBanner}>
-              <View style={styles.rulesItem}>
-                <Ionicons name="videocam-outline" size={16} color={Colors.primary} />
-                <Text style={styles.rulesText}>Videos: Max 1 minute</Text>
-              </View>
-              <View style={styles.rulesItem}>
-                <Ionicons name="trash-outline" size={16} color={Colors.primary} />
-                <Text style={styles.rulesText}>Auto-delete after 24 hours</Text>
-              </View>
-            </View>
-
-            {/* Image/Video Preview */}
-            <View style={styles.imagePreviewContainer}>
+            {/* Media Picker — compact card with action buttons inside */}
+            <View style={styles.mediaPicker}>
               {mediaType === 'video' && videoUri ? (
-                <View style={styles.videoPreview}>
-                  <Ionicons name="play-circle" size={64} color={Colors.primary} />
-                  <Text style={styles.videoPreviewText}>Video selected</Text>
+                <View style={styles.mediaSelected}>
+                  <Ionicons name="videocam" size={32} color={Colors.primary} />
+                  <Text style={styles.mediaSelectedText}>Video ready</Text>
+                  <TouchableOpacity onPress={() => { setVideoUri(null); setMediaType('image'); }} style={styles.mediaRemoveBtn}>
+                    <Ionicons name="close-circle" size={22} color="#E74C3C" />
+                  </TouchableOpacity>
                 </View>
               ) : imageUri && imageUri !== 'cover' ? (
-                <Image source={{ uri: imageUri }} style={styles.imagePreview} />
+                <View style={styles.mediaSelectedImage}>
+                  <Image source={{ uri: imageUri }} style={styles.mediaThumb} />
+                  <TouchableOpacity onPress={() => setImageUri(null)} style={styles.mediaRemoveBtn}>
+                    <Ionicons name="close-circle" size={22} color="#E74C3C" />
+                  </TouchableOpacity>
+                </View>
               ) : imageUri === 'cover' ? (
-                <Image source={require('@/assets/images/hero-restaurant.jpg')} style={styles.imagePreview} />
+                <View style={styles.mediaSelectedImage}>
+                  <Image source={require('@/assets/images/hero-restaurant.jpg')} style={styles.mediaThumb} />
+                  <TouchableOpacity onPress={() => setImageUri(null)} style={styles.mediaRemoveBtn}>
+                    <Ionicons name="close-circle" size={22} color="#E74C3C" />
+                  </TouchableOpacity>
+                </View>
               ) : (
-                <View style={styles.imagePlaceholder}>
-                  <Ionicons name="image-outline" size={48} color={Colors.border} />
-                  <Text style={styles.imagePlaceholderText}>Add a photo or video for your story</Text>
+                <View style={styles.mediaActions}>
+                  <TouchableOpacity style={styles.mediaActionBtn} onPress={pickImage}>
+                    <View style={styles.mediaActionIcon}>
+                      <Ionicons name="image-outline" size={20} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.mediaActionLabel}>Photo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.mediaActionBtn} onPress={pickVideo}>
+                    <View style={styles.mediaActionIcon}>
+                      <Ionicons name="videocam-outline" size={20} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.mediaActionLabel}>Video</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.mediaActionBtn} onPress={useCoverImage}>
+                    <View style={styles.mediaActionIcon}>
+                      <Ionicons name="albums-outline" size={20} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.mediaActionLabel}>Cover</Text>
+                  </TouchableOpacity>
                 </View>
               )}
             </View>
 
-            {/* Upload Buttons */}
-            <View style={styles.uploadRow}>
-              <TouchableOpacity style={styles.uploadBtn} onPress={pickImage}>
-                <Ionicons name="cloud-upload-outline" size={18} color={Colors.text} />
-                <Text style={styles.uploadBtnText}>Upload photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.uploadBtn} onPress={pickVideo}>
-                <Ionicons name="videocam-outline" size={18} color={Colors.text} />
-                <Text style={styles.uploadBtnText}>Upload video</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.uploadBtn} onPress={useCoverImage}>
-                <Ionicons name="images-outline" size={18} color={Colors.text} />
-                <Text style={styles.uploadBtnText}>Use cover</Text>
-              </TouchableOpacity>
-            </View>
-
             {/* Headline */}
-            <Text style={styles.fieldLabel}>Headline</Text>
             <TextInput
               style={styles.textInput}
-              placeholder="Tonight's dinner service is open"
+              placeholder="Headline — e.g. Tonight's dinner service is open"
               placeholderTextColor={Colors.gray}
               value={headline}
               onChangeText={setHeadline}
@@ -619,15 +619,14 @@ export default function ManageStoriesScreen() {
             />
 
             {/* Caption */}
-            <Text style={styles.fieldLabel}>Caption</Text>
             <TextInput
               style={[styles.textInput, styles.textArea]}
-              placeholder="Tell customers what is new today."
+              placeholder="Caption (optional)"
               placeholderTextColor={Colors.gray}
               value={caption}
               onChangeText={setCaption}
               multiline
-              numberOfLines={4}
+              numberOfLines={3}
               maxLength={300}
               textAlignVertical="top"
             />
@@ -761,7 +760,7 @@ export default function ManageStoriesScreen() {
                         onError={(error) => {
                           console.error('❌ Video playback error:', error);
                           console.error('   Video URL was:', story.video_url);
-                          Alert.alert('Error', 'Failed to play video. URL may be invalid or corrupt.');
+                          toast('Failed to play video. URL may be invalid or corrupt.', 'error');
                           setIsPlayingVideo(false);
                         }}
                         onLoad={() => {
@@ -1004,96 +1003,78 @@ const styles = StyleSheet.create({
   },
   createSub: {
     fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.gray,
-    marginTop: 4,
-    lineHeight: 19,
-    maxWidth: 280,
+    marginTop: 3,
   },
-  rulesBanner: {
-    backgroundColor: '#F0F7FF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    gap: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.primary,
-  },
-  rulesItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  rulesText: {
-    fontFamily: 'PlusJakartaSans-Medium',
-    fontSize: 13,
-    color: Colors.text,
-  },
-  imagePreviewContainer: {
+  discardBtn: {
+    width: 32,
+    height: 32,
     borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  imagePreview: {
-    width: '100%',
-    height: 200,
-    borderRadius: 16,
-  },
-  imagePlaceholder: {
-    width: '100%',
-    height: 200,
     backgroundColor: '#F5F0E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Media Picker */
+  mediaPicker: {
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  imagePlaceholderText: {
-    fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 13,
-    color: Colors.gray,
-  },
-  videoPreview: {
-    width: '100%',
-    height: 220,
-    backgroundColor: Colors.border,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  videoPreviewText: {
-    fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 13,
-    color: Colors.text,
-  },
-  uploadRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 20,
-  },
-  uploadBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 24,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.white,
+    borderStyle: 'dashed',
+    backgroundColor: '#FEFCF4',
+    marginBottom: 14,
+    overflow: 'hidden',
   },
-  uploadBtnText: {
+  mediaActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    paddingVertical: 24,
+  },
+  mediaActionBtn: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  mediaActionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F5F0E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaActionLabel: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 12,
+    color: Colors.text,
+  },
+  mediaSelected: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 28,
+    gap: 6,
+    position: 'relative',
+  },
+  mediaSelectedText: {
     fontFamily: 'PlusJakartaSans-Medium',
     fontSize: 13,
     color: Colors.text,
   },
-  fieldLabel: {
-    fontFamily: 'PlusJakartaSans-SemiBold',
-    fontSize: 14,
-    color: Colors.text,
-    marginBottom: 8,
+  mediaSelectedImage: {
+    position: 'relative',
+  },
+  mediaThumb: {
+    width: '100%',
+    height: 180,
+    borderRadius: 14,
+  },
+  mediaRemoveBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 12,
   },
   textInput: {
     backgroundColor: Colors.background,
@@ -1108,7 +1089,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   textArea: {
-    height: 100,
+    height: 80,
     paddingTop: 14,
   },
   publishBtn: {

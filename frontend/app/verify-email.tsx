@@ -7,18 +7,19 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
-  Alert,
-} from 'react-native';
+  } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
 export default function VerifyEmailScreen() {
+  const { toast } = useAppToast();
   const [codes, setCodes] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
@@ -62,13 +63,13 @@ export default function VerifyEmailScreen() {
     const verificationCode = (code || codes.join('')).trim(); // Ensure trimmed
     
     if (verificationCode.length !== 6) {
-      Alert.alert('Error', 'Please enter all 6 digits');
+      toast('Please enter all 6 digits', 'error');
       return;
     }
     
     // Validate that all characters are digits
     if (!/^\d{6}$/.test(verificationCode)) {
-      Alert.alert('Error', 'Verification code must contain only 6 digits');
+      toast('Verification code must contain only 6 digits', 'error');
       return;
     }
 
@@ -121,12 +122,12 @@ export default function VerifyEmailScreen() {
         
         if (!storedToken) {
           console.error('❌ CRITICAL: Token was not actually stored!');
-          Alert.alert('Error', 'Failed to store authentication token. Please try again.');
+          toast('Failed to store authentication token. Please try again.', 'error');
           return;
         }
       } else {
         console.error('❌ CRITICAL: No token in verification response');
-        Alert.alert('Error', 'No authentication token received. Please try again.');
+        toast('No authentication token received. Please try again.', 'error');
         return;
       }
       
@@ -140,7 +141,7 @@ export default function VerifyEmailScreen() {
       await AsyncStorage.removeItem('guestMode');
       
       console.log('✓ All data stored successfully. Navigating to home...');
-      Alert.alert('Success', 'Email verified successfully!');
+      toast('Email verified successfully!', 'success');
       
       // Add a small delay to ensure everything is flushed to disk
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -160,7 +161,7 @@ export default function VerifyEmailScreen() {
         }
       }
       
-      Alert.alert('Verification Failed', errorMessage);
+      toast(errorMessage, 'error');
       
       // Reset the input fields for retry
       setCodes(['', '', '', '', '', '']);
@@ -177,12 +178,12 @@ export default function VerifyEmailScreen() {
         email 
       });
 
-      Alert.alert('Success', 'Verification code resent to your email');
+      toast('Verification code resent to your email', 'success');
       setTimer(60); // 60 second cooldown
       setCodes(['', '', '', '', '', '']); // Clear inputs
       inputRefs.current[0]?.focus();
     } catch (error) {
-      Alert.alert('Error', 'Failed to resend code. Please try again.');
+      toast('Failed to resend code. Please try again.', 'error');
     } finally {
       setResendLoading(false);
     }

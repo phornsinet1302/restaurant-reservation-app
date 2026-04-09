@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Image,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -9,8 +9,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function EditProfileScreen() {
+  const { toast } = useAppToast();
   const router = useRouter();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -31,10 +33,30 @@ export default function EditProfileScreen() {
         setFullName(user.fullName || user.name || '');
         setEmail(user.email || '');
         setPhone(user.phone || '');
-        // Load profile picture from backend
         if (user.profile_picture_url) {
           setProfilePictureUrl(user.profile_picture_url);
         }
+      }
+
+      // Also fetch latest from backend to get fresh profile_picture_url
+      const token = await AsyncStorage.getItem('token');
+      if (token) {
+        try {
+          const res = await axios.get(`${API_CONFIG.BASE_URL}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000,
+          });
+          if (res.data?.user) {
+            const backendUser = res.data.user;
+            if (backendUser.profile_picture_url) {
+              setProfilePictureUrl(backendUser.profile_picture_url);
+              // Sync to AsyncStorage
+              const u = userStr ? JSON.parse(userStr) : {};
+              u.profile_picture_url = backendUser.profile_picture_url;
+              await AsyncStorage.setItem('user', JSON.stringify(u));
+            }
+          }
+        } catch {}
       }
     } catch {}
   };
@@ -43,7 +65,7 @@ export default function EditProfileScreen() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please allow access to your photo library.');
+        toast('Please allow access to your photo library.', 'warning');
         return;
       }
 
@@ -93,12 +115,12 @@ export default function EditProfileScreen() {
         user.profile_picture_url = newUrl;
         await AsyncStorage.setItem('user', JSON.stringify(user));
 
-        Alert.alert('Success', 'Profile picture updated!');
+        toast('Profile picture updated!', 'success');
         setUploadingImage(false);
       }
     } catch (error: any) {
       console.error('❌ Image upload failed:', error.message);
-      Alert.alert('Upload Failed', error.response?.data?.error || error.message);
+      toast(error.response?.data?.error || error.message, 'error');
       setUploadingImage(false);
     }
   };
@@ -107,7 +129,7 @@ export default function EditProfileScreen() {
 
   const handleSave = async () => {
     if (!fullName.trim()) {
-      Alert.alert('Error', 'Full name is required.');
+      toast('Full name is required.', 'error');
       return;
     }
     setSaving(true);
@@ -125,9 +147,9 @@ export default function EditProfileScreen() {
       user.name = fullName.trim();
       user.phone = phone.trim();
       await AsyncStorage.setItem('user', JSON.stringify(user));
-      Alert.alert('Saved', 'Your profile has been updated.');
+      toast('Your profile has been updated.', 'success');
     } catch {
-      Alert.alert('Error', 'Failed to update profile.');
+      toast('Failed to update profile.', 'error');
     } finally {
       setSaving(false);
     }
@@ -192,10 +214,11 @@ export default function EditProfileScreen() {
         <TextInput
           style={styles.input}
           value={phone}
-          onChangeText={setPhone}
+          onChangeText={(t) => setPhone(t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''))}
           placeholder="+855 12 345 678"
           placeholderTextColor={Colors.gray}
           keyboardType="phone-pad"
+          maxLength={15}
         />
       </View>
     </View>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Image, Alert, ActivityIndicator, Modal,
+  TextInput, Image, ActivityIndicator, Modal,
   FlatList, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,6 +11,7 @@ import axios from 'axios';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 interface Story {
   id: string;
@@ -25,6 +26,7 @@ interface Story {
 const API_URL = API_CONFIG.BASE_URL;
 
 export default function ManageStoriesScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const [token, setToken] = useState('');
   const [restaurantId, setRestaurantId] = useState('');
@@ -56,7 +58,7 @@ export default function ManageStoriesScreen() {
       const restaurantId = await AsyncStorage.getItem('restaurantId');
 
       if (!token || !restaurantId) {
-        Alert.alert('Error', 'Please log in as a restaurant merchant first');
+        toast('Please log in as a restaurant merchant first', 'error');
         router.replace('/login');
         return;
       }
@@ -93,7 +95,7 @@ export default function ManageStoriesScreen() {
       setActiveStories(activeRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
-      Alert.alert('Error', 'Failed to load stories');
+      toast('Failed to load stories', 'error');
     } finally {
       setLoading(false);
     }
@@ -112,18 +114,18 @@ export default function ManageStoriesScreen() {
         setSelectedImage(result.assets[0]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image');
+      toast('Failed to pick image', 'error');
     }
   };
 
   const uploadImageAndCreateStory = async () => {
     if (!selectedImage) {
-      Alert.alert('Error', 'Please select an image');
+      toast('Please select an image', 'error');
       return;
     }
 
     if (!title.trim()) {
-      Alert.alert('Error', 'Please add a title');
+      toast('Please add a title', 'error');
       return;
     }
 
@@ -169,20 +171,17 @@ export default function ManageStoriesScreen() {
       setTitle('');
       setDescription('');
 
-      Alert.alert('Success', 'Story posted! It will be visible for 24 hours.');
+      toast('Story posted! It will be visible for 24 hours.', 'success');
     } catch (error: any) {
       console.error('Error:', error);
-      Alert.alert('Error', error.response?.data?.error || 'Failed to post story');
+      toast(error.response?.data?.error || 'Failed to post story', 'error');
     } finally {
       setUploading(false);
     }
   };
 
   const handleDeleteStory = async (storyId: string) => {
-    Alert.alert(
-      'Delete Story',
-      'Are you sure?',
-      [
+    confirm('Delete Story', 'Are you sure?', [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
@@ -194,14 +193,13 @@ export default function ManageStoriesScreen() {
                 { headers: { 'Authorization': `Bearer ${token}` } }
               );
               setStories(stories.filter(s => s.id !== storyId));
-              Alert.alert('Success', 'Story deleted');
+              toast('Story deleted', 'success');
             } catch (error: any) {
-              Alert.alert('Error', error.response?.data?.error || 'Failed to delete');
+              toast(error.response?.data?.error || 'Failed to delete', 'error');
             }
           },
         },
-      ]
-    );
+      ]);
   };
 
   const getTimeRemaining = (expiresAt: string) => {

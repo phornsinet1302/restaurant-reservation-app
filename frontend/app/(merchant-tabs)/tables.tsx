@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Alert, ActivityIndicator, RefreshControl, TextInput, Modal,
+  ActivityIndicator, RefreshControl, TextInput, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useRealtimeTableUpdates } from '@/hooks/useRealtimeTableUpdates';
+import { useAppToast } from '@/components/ToastProvider';
 
 interface Table {
   id: string;
@@ -24,6 +25,7 @@ interface Table {
 export default function MerchantTablesScreen() {
   const [tables, setTables] = useState<Table[]>([]);
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
+  const { toast, confirm } = useAppToast();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -96,12 +98,12 @@ export default function MerchantTablesScreen() {
       );
       setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: newStatus } : t));
     } catch {
-      Alert.alert('Error', 'Failed to update table status');
+      toast('Failed to update table status', 'error');
     }
   };
 
   const handleDelete = (table: Table) => {
-    Alert.alert('Delete Table', `Delete Table ${table.table_number}?`, [
+    confirm('Delete Table', `Delete Table ${table.table_number}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive', onPress: async () => {
@@ -115,10 +117,10 @@ export default function MerchantTablesScreen() {
             setTables(prev => prev.filter(t => t.id !== table.id));
             
             // Show success
-            Alert.alert('Deleted', `Table ${table.table_number} has been removed`);
+            toast(`Table ${table.table_number} has been removed`, 'success');
           } catch (err: any) {
             console.error('Error deleting table:', err.response?.data || err.message);
-            Alert.alert('Error', err.response?.data?.error || 'Failed to delete table');
+            toast(err.response?.data?.error || 'Failed to delete table', 'error');
           }
         },
       },
@@ -139,28 +141,31 @@ export default function MerchantTablesScreen() {
       
       const message = `Please fill in: ${missingFields.join(', ')}`;
       console.log('❌ Validation failed:', message);
-      Alert.alert('Error', message);
+      toast(message, 'error');
       return;
     }
 
     // Validate table number
     const tableNum = parseInt(newTableNumber);
     if (isNaN(tableNum) || tableNum <= 0) {
-      Alert.alert('Invalid Table Number', 'Table number must be a positive number (e.g., 1, 2, 3)');
+      toast('Table number must be a positive number (e.g., 1, 2, 3)', 'warning');
       return;
     }
 
     // Validate capacity
     const cap = parseInt(newCapacity);
     if (isNaN(cap) || cap <= 0) {
-      Alert.alert('Invalid Capacity', 'Capacity must be a positive number (e.g., 2, 4, 6)');
+      toast('Capacity must be a positive number (e.g., 2, 4, 6)', 'warning');
       return;
     }
 
     // Check if table number already exists locally
-    const tableExists = tables.some(t => t.table_number === tableNum);
+    const tableExists = displayTables.some(t => t.table_number === tableNum);
     if (tableExists) {
-      Alert.alert('Duplicate Table Number', `Table ${tableNum} already exists. Each table must have a unique number.`);
+      setShowAddModal(false);
+      setNewTableNumber('');
+      setNewCapacity('');
+      setTimeout(() => toast(`Table ${tableNum} already exists. Each table must have a unique number.`, 'warning'), 300);
       return;
     }
 
@@ -186,7 +191,7 @@ export default function MerchantTablesScreen() {
         setNewCapacity('');
         
         // Show success message
-        Alert.alert('Success', `Table ${created.table_number} (${created.capacity} seats) has been added and is now live for customers!`);
+        toast(`Table ${created.table_number} (${created.capacity} seats) has been added and is now live for customers!`, 'success');
         
         // Refresh from server to ensure sync
         setTimeout(() => loadData(), 500);
@@ -199,49 +204,48 @@ export default function MerchantTablesScreen() {
       // Handle 409 Conflict - Duplicate Table
       if (err.response?.status === 409) {
         console.log('   → Duplicate table detected');
-        Alert.alert(
-          'Table Number Already Exists',
-          `Table ${newTableNumber} already exists for this restaurant. Please use a different table number (e.g., ${tableNum + 1})`,
-          [{ text: 'OK', onPress: () => console.log('Alert dismissed') }]
-        );
+        setShowAddModal(false);
+        setNewTableNumber('');
+        setNewCapacity('');
+        setTimeout(() => toast(`Table ${newTableNumber} already exists. Please use a different number (e.g., ${tableNum + 1}).`, 'warning'), 300);
         return;
       }
       
       // Handle 400 Bad Request
       if (err.response?.status === 400) {
         console.log('   → Invalid input');
-        Alert.alert('Invalid Input', err.response.data?.error || 'Please check your inputs');
+        toast(err.response.data?.error || 'Please check your inputs', 'warning');
         return;
       }
       
       // Handle 401 Unauthorized
       if (err.response?.status === 401) {
         console.log('   → Not authorized');
-        Alert.alert('Not Authorized', 'Please log in again');
+        toast('Please log in again', 'warning');
         return;
       }
       
       // Handle 403 Forbidden
       if (err.response?.status === 403) {
         console.log('   → Forbidden');
-        Alert.alert('Permission Denied', err.response.data?.error || 'You cannot manage tables for this restaurant');
+        toast(err.response.data?.error || 'You cannot manage tables for this restaurant', 'warning');
         return;
       }
       
       // Handle other errors
       if (err.response?.data?.error) {
         console.log('   → API error:', err.response.data.error);
-        Alert.alert('Error', err.response.data.error);
+        toast(err.response.data.error, 'error');
         return;
       }
       
       if (err.message) {
         console.log('   → Exception:', err.message);
-        Alert.alert('Error', err.message);
+        toast(err.message, 'error');
         return;
       }
       
-      Alert.alert('Error', 'Failed to add table. Please try again.');
+      toast('Failed to add table. Please try again.', 'error');
     }
   };
 

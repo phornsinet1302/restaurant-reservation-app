@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useAppFonts } from '@/hooks/useFonts';
+import { ToastProvider } from '@/components/ToastProvider';
 
 export default function RootLayout() {
   const fontsLoaded = useAppFonts();
@@ -12,7 +13,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <ToastProvider>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
@@ -100,6 +101,6 @@ export default function RootLayout() {
         />
         <Stack.Screen name="+not-found" options={{ headerShown: true, title: 'Oops!' }} />
       </Stack>
-    </>
+    </ToastProvider>
   );
 }

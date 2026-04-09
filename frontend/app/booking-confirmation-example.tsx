@@ -10,14 +10,14 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
-} from 'react-native';
+  } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 // import LocationTracking from '@/components/LocationTracking'; // Disabled - requires native build
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
@@ -31,6 +31,7 @@ interface BookingData {
 }
 
 export default function BookingConfirmationScreen() {
+  const { toast, confirm } = useAppToast();
   const router = useRouter();
   const params = useLocalSearchParams();
   const [booking, setBooking] = useState<BookingData | null>(null);
@@ -64,17 +65,17 @@ export default function BookingConfirmationScreen() {
   };
 
   const handleCancelBooking = async () => {
-    Alert.alert('Cancel Booking', 'Are you sure you want to cancel this booking?', [
+    confirm('Cancel Booking', 'Are you sure you want to cancel this booking?', [
       { text: 'No', onPress: () => {} },
       {
         text: 'Yes',
         onPress: async () => {
           try {
             // TODO: Call cancel API endpoint
-            Alert.alert('Success', 'Booking cancelled');
+            toast('Booking cancelled', 'success');
             router.back();
           } catch (error) {
-            Alert.alert('Error', 'Failed to cancel booking');
+            toast('Failed to cancel booking', 'error');
           }
         },
       },

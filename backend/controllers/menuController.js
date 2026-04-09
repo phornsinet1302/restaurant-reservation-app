@@ -129,7 +129,16 @@ exports.getMenuItemDetails = async (req, res) => {
 exports.updateMenuItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body; // Allows updating price, name, is_available, etc.
+    const body = req.body;
+
+    // Whitelist only columns that exist in the menu_items table
+    const updates = {};
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.price !== undefined) updates.price = parseFloat(body.price);
+    if (body.category !== undefined) updates.category = body.category;
+    if (body.image_url !== undefined) updates.image_url = body.image_url;
+    if (body.is_available !== undefined) updates.is_available = body.is_available;
 
     const { data, error } = await supabaseAdmin
       .from('menu_items')

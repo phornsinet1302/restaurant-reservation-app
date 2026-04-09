@@ -46,5 +46,6 @@ router.post('/upload-profile-picture', protect, uploadProfilePicture.single('fil
 router.post('/reset-password', protect, authController.resetPassword);
 router.post('/complete-profile-setup', protect, authController.completeProfileSetup);
 router.get('/check-profile-completion', protect, authController.checkProfileCompletion);
+router.delete('/delete-account', protect, authController.deleteAccount);
 
 module.exports = router;

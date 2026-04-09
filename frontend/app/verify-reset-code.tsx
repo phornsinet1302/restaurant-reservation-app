@@ -7,7 +7,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,8 +15,10 @@ import axios from 'axios';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 export default function VerifyResetCodeScreen() {
+  const { toast } = useAppToast();
   const [resetCode, setResetCode] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -29,17 +30,17 @@ export default function VerifyResetCodeScreen() {
 
   const validateCode = () => {
     if (!email) {
-      Alert.alert('Error', 'Email not found. Please try forgot password again.');
+      toast('Email not found. Please try forgot password again.', 'error');
       return false;
     }
 
     if (!resetCode) {
-      Alert.alert('Error', 'Please enter the 6-digit code');
+      toast('Please enter the 6-digit code', 'error');
       return false;
     }
 
     if (resetCode.length !== 6 || isNaN(Number(resetCode))) {
-      Alert.alert('Error', 'Code must be exactly 6 digits');
+      toast('Code must be exactly 6 digits', 'error');
       return false;
     }
 
@@ -80,7 +81,7 @@ export default function VerifyResetCodeScreen() {
         }
       }
 
-      Alert.alert('Error', errorMessage);
+      toast(errorMessage, 'error');
     } finally {
       setLoading(false);
     }

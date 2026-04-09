@@ -14,7 +14,8 @@
       "infoPlist": {
         "NSAppleMusicUsageDescription": "Allow $(PRODUCT_NAME) to access your Apple Music library",
         "NSLocationWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant.",
+        "LSApplicationQueriesSchemes": ["comgooglemaps"]
       },
       "config": {
         "googleMapsApiKey": "AIzaSyCIkLAU412I5NDh_taEpWErZ7qRmDtCIbI"

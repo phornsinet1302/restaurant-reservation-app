@@ -13,18 +13,19 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
-} from 'react-native';
+  } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
 import DatePickerInput from '@/components/DatePickerInput';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function SignUpScreen() {
+  const { toast, confirm } = useAppToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -35,6 +36,8 @@ export default function SignUpScreen() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
   const [step, setStep] = useState(1); // Step 1: Email/Password, Step 2: Full Profile
+  const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
@@ -72,7 +75,7 @@ export default function SignUpScreen() {
         const { code } = result.params;
         
         if (!code) {
-          Alert.alert('Error', 'Failed to get authorization code');
+          toast('Failed to get authorization code', 'error');
           return;
         }
 
@@ -92,7 +95,7 @@ export default function SignUpScreen() {
         const tokens = await tokenResponse.json();
 
         if (!tokens.access_token) {
-          Alert.alert('Error', tokens.error_description || 'Token exchange failed');
+          toast(tokens.error_description || 'Token exchange failed', 'error');
           return;
         }
 
@@ -108,20 +111,20 @@ export default function SignUpScreen() {
           if (backendResponse.data.user) {
             await AsyncStorage.setItem('user', JSON.stringify(backendResponse.data.user));
           }
-          Alert.alert('Success', 'Signed up with Google successfully!');
+          toast('Signed up with Google successfully!', 'success');
           router.replace('/(tabs)');
         } else {
-          Alert.alert('Error', 'No token received from backend');
+          toast('No token received from backend', 'error');
         }
       } else if (result?.type === 'error') {
-        Alert.alert('Error', `Authentication failed: ${result.params?.error || 'Unknown error'}`);
+        toast(`Authentication failed: ${result.params?.error || 'Unknown error'}`, 'error');
       }
     } catch (error) {
       console.error('Google signup error:', error);
       if (axios.isAxiosError(error)) {
-        Alert.alert('Error', error.response?.data?.error || error.message);
+        toast(error.response?.data?.error || error.message, 'error');
       } else {
-        Alert.alert('Error', 'Google signup failed. Please try again.');
+        toast('Google signup failed. Please try again.', 'error');
       }
     } finally {
       setGoogleLoading(false);
@@ -130,7 +133,7 @@ export default function SignUpScreen() {
 
   const handleAppleSignUp = async () => {
     if (Platform.OS !== 'ios') {
-      Alert.alert('Error', 'Apple Sign In is only available on iOS devices');
+      toast('Apple Sign In is only available on iOS devices', 'error');
       return;
     }
 
@@ -156,19 +159,19 @@ export default function SignUpScreen() {
             await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
           }
           
-          Alert.alert('Success', 'Signed up with Apple successfully!');
+          toast('Signed up with Apple successfully!', 'success');
           router.replace('/(tabs)');
         } else {
-          Alert.alert('Error', 'No token received');
+          toast('No token received', 'error');
         }
       }
     } catch (error) {
       if (error instanceof Error) {
         if (error.message !== 'User cancelled the sign-in flow.') {
-          Alert.alert('Error', error.message);
+          toast(error.message, 'error');
         }
       } else {
-        Alert.alert('Error', 'Apple sign up failed');
+        toast('Apple sign up failed', 'error');
       }
     } finally {
       setAppleLoading(false);
@@ -178,27 +181,29 @@ export default function SignUpScreen() {
   const handleSignUp = async () => {
     // Step 1: Validate Email & Password
     if (step === 1) {
-      if (!email || !password) {
-        alert('Please enter email and password');
+      const errors: Record<string, string> = {};
+      if (!email.trim()) errors.email = 'Email is required';
+      if (!password) errors.password = 'Password is required';
+      else if (password.length < 6) errors.password = 'Password must be at least 6 characters';
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
         return;
       }
-
-      if (password.length < 6) {
-        alert('Password must be at least 6 characters');
-        return;
-      }
-
-      // Move to step 2 (Profile details)
+      setFieldErrors({});
       setStep(2);
       return;
     }
 
     // Step 2: Collect Full Profile & Register
     if (step === 2) {
-      if (!fullName || !phone) {
-        alert('Please enter full name and phone number');
+      const errors: Record<string, string> = {};
+      if (!fullName.trim()) errors.fullName = 'Full name is required';
+      if (!phone.trim()) errors.phone = 'Phone number is required';
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
         return;
       }
+      setFieldErrors({});
 
       setLoading(true);
       try {
@@ -277,7 +282,7 @@ export default function SignUpScreen() {
 
         // ✅ TEMPORARY: Skip email verification entirely - go straight to home
         console.log('✅ Signup successful! Redirecting to home screen...');
-        Alert.alert('Success', 'Welcome! Your account is ready.');
+        toast('Welcome! Your account is ready.', 'success');
         
         // Clear guest mode and redirect to home
         await AsyncStorage.removeItem('guestMode');
@@ -305,10 +310,7 @@ export default function SignUpScreen() {
         // Check if this is a duplicate email error
         if (errorMessage.includes('already registered')) {
           console.log('🔄 Email already registered, showing login redirect option...');
-          Alert.alert(
-            'Email Already Registered',
-            `${errorMessage}\n\nWould you like to login with this email instead?`,
-            [
+          confirm('Email Already Registered', `${errorMessage}\n\nWould you like to login with this email instead?`, [
               {
                 text: 'Cancel',
                 onPress: () => console.log('User cancelled'),
@@ -321,8 +323,7 @@ export default function SignUpScreen() {
                   router.replace('/login');
                 },
               },
-            ]
-          );
+            ]);
         } else {
           alert('Error: ' + errorMessage);
         }
@@ -366,26 +367,37 @@ export default function SignUpScreen() {
         {/* Input fields - Step 1: Email & Password */}
         {step === 1 && (
           <View style={styles.inputsContainer}>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your email"
-                placeholderTextColor={Colors.gray}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+            <View>
+              <Text style={styles.fieldLabel}>Email <Text style={styles.required}>*</Text></Text>
+              <View style={[styles.inputWrapper, fieldErrors.email && styles.inputWrapperError]}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email"
+                  placeholderTextColor={Colors.gray}
+                  value={email}
+                  onChangeText={(t) => { setEmail(t); setFieldErrors(e => { const { email, ...rest } = e; return rest; }); }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+              {fieldErrors.email && <Text style={styles.errorText}>{fieldErrors.email}</Text>}
             </View>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Create a password (min 6 chars)"
-                placeholderTextColor={Colors.gray}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-              />
+            <View>
+              <Text style={styles.fieldLabel}>Password <Text style={styles.required}>*</Text></Text>
+              <View style={[styles.inputWrapper, styles.passwordWrapper, fieldErrors.password && styles.inputWrapperError]}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="Create a password (min 6 chars)"
+                  placeholderTextColor={Colors.gray}
+                  value={password}
+                  onChangeText={(t) => { setPassword(t); setFieldErrors(e => { const { password, ...rest } = e; return rest; }); }}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color={Colors.gray} />
+                </TouchableOpacity>
+              </View>
+              {fieldErrors.password && <Text style={styles.errorText}>{fieldErrors.password}</Text>}
             </View>
           </View>
         )}
@@ -393,32 +405,43 @@ export default function SignUpScreen() {
         {/* Input fields - Step 2: Profile Details */}
         {step === 2 && (
           <View style={styles.inputsContainer}>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Full Name"
-                placeholderTextColor={Colors.gray}
-                value={fullName}
-                onChangeText={setFullName}
-                autoCapitalize="words"
-              />
+            <View>
+              <Text style={styles.fieldLabel}>Full Name <Text style={styles.required}>*</Text></Text>
+              <View style={[styles.inputWrapper, fieldErrors.fullName && styles.inputWrapperError]}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Full Name"
+                  placeholderTextColor={Colors.gray}
+                  value={fullName}
+                  onChangeText={(t) => { setFullName(t); setFieldErrors(e => { const { fullName, ...rest } = e; return rest; }); }}
+                  autoCapitalize="words"
+                />
+              </View>
+              {fieldErrors.fullName && <Text style={styles.errorText}>{fieldErrors.fullName}</Text>}
             </View>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Phone Number"
-                placeholderTextColor={Colors.gray}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-              />
+            <View>
+              <Text style={styles.fieldLabel}>Phone Number <Text style={styles.required}>*</Text></Text>
+              <View style={[styles.inputWrapper, fieldErrors.phone && styles.inputWrapperError]}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone Number"
+                  placeholderTextColor={Colors.gray}
+                  value={phone}
+                  onChangeText={(t) => { const clean = t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''); setPhone(clean); setFieldErrors(e => { const { phone, ...rest } = e; return rest; }); }}
+                  keyboardType="phone-pad"
+                  maxLength={15}
+                />
+              </View>
+              {fieldErrors.phone && <Text style={styles.errorText}>{fieldErrors.phone}</Text>}
             </View>
-            <View style={styles.inputWrapper}>
+            <View>
+              <Text style={styles.fieldLabel}>Date of Birth</Text>
               <DatePickerInput
                 value={dateOfBirth}
                 onChangeText={setDateOfBirth}
                 placeholder="DD/MM/YYYY"
                 editable={true}
+                style={{ borderRadius: 16, height: 52 }}
               />
             </View>
             <View style={styles.bioWrapper}>
@@ -560,6 +583,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16,
     backgroundColor: Colors.background,
+  },
+  inputWrapperError: {
+    borderColor: Colors.error,
+  },
+  passwordWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  eyeButton: {
+    padding: 8,
+    marginRight: -8,
+  },
+  fieldLabel: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 13,
+    color: Colors.text,
+    marginBottom: 6,
+  },
+  required: {
+    color: Colors.error,
+  },
+  errorText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.error,
+    marginTop: 4,
   },
   bioWrapper: {
     minHeight: 100,

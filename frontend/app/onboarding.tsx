@@ -7,7 +7,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,10 +15,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
 
 export default function OnboardingScreen() {
+  const { toast } = useAppToast();
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [bio, setBio] = useState('');
@@ -31,13 +32,13 @@ export default function OnboardingScreen() {
   const handleNextStep = () => {
     if (step === 1) {
       if (!fullName.trim()) {
-        Alert.alert('Error', 'Please enter your full name');
+        toast('Please enter your full name', 'error');
         return;
       }
       setStep(2);
     } else if (step === 2) {
       if (!phone.trim()) {
-        Alert.alert('Error', 'Please enter your phone number');
+        toast('Please enter your phone number', 'error');
         return;
       }
       setStep(3);
@@ -58,7 +59,7 @@ export default function OnboardingScreen() {
       const token = await AsyncStorage.getItem('token');
       
       if (!token) {
-        Alert.alert('Error', 'Session expired. Please login again.');
+        toast('Session expired. Please login again.', 'error');
         router.push('/login');
         return;
       }
@@ -78,7 +79,7 @@ export default function OnboardingScreen() {
         }
       );
 
-      Alert.alert('Success', 'Profile setup completed!');
+      toast('Profile setup completed!', 'success');
       router.replace('/(tabs)');
     } catch (error) {
       console.error('Onboarding error:', error);
@@ -96,7 +97,7 @@ export default function OnboardingScreen() {
         }
       }
       
-      Alert.alert('Error', errorMessage);
+      toast(errorMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -172,8 +173,9 @@ export default function OnboardingScreen() {
                   placeholder="+1 (555) 123-4567"
                   placeholderTextColor={Colors.border}
                   value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={(t) => setPhone(t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''))}
                   keyboardType="phone-pad"
+                  maxLength={15}
                   editable={!loading}
                 />
               </View>

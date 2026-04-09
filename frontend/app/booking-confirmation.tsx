@@ -6,7 +6,6 @@ import {
   ScrollView,
   Image,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +14,7 @@ import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAppToast } from '@/components/ToastProvider';
 // import LocationTracking from '@/components/LocationTracking'; // Disabled - requires native build
 
 /* ── Helpers ── */
@@ -60,6 +60,7 @@ export default function BookingConfirmationScreen() {
     address: string;
     specialRequests: string;
   }>();
+  const { toast } = useAppToast();
   const router = useRouter();
   const [showTracking, setShowTracking] = useState(false);
   const [step, setStep] = useState<BookingStep>('detail');
@@ -124,7 +125,7 @@ export default function BookingConfirmationScreen() {
 
     } catch (error: any) {
       console.error('❌ [DEBUG] Booking creation failed:', error.response?.data || error.message);
-      Alert.alert('Error', `Failed to create booking: ${error.response?.data?.error || error.message}`);
+      toast(`Failed to create booking: ${error.response?.data?.error || error.message}`, 'error');
       setLoading(false);
     }
   };
