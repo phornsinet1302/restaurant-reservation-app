@@ -461,10 +461,6 @@ export default function RestaurantDetailScreen() {
 
             {/* Action buttons */}
             <View style={styles.heroActions}>
-              <TouchableOpacity style={styles.moreInfoBtn} onPress={() => toast('More info coming soon', 'info')}>
-                <Ionicons name="information-circle-outline" size={18} color={Colors.white} />
-                <Text style={styles.moreInfoText}>More info</Text>
-              </TouchableOpacity>
               <TouchableOpacity style={styles.directionsBtn} onPress={openGoogleMaps}>
                 <Ionicons name="navigate-outline" size={18} color={Colors.text} />
                 <Text style={styles.directionsText}>Get Directions</Text>
@@ -805,20 +801,6 @@ const styles = StyleSheet.create({
   heroActions: {
     flexDirection: 'row',
     gap: 12,
-  },
-  moreInfoBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  moreInfoText: {
-    fontFamily: 'PlusJakartaSans-Medium',
-    fontSize: 14,
-    color: Colors.white,
   },
   directionsBtn: {
     flexDirection: 'row',

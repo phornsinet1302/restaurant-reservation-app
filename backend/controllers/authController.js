@@ -1089,7 +1089,11 @@ exports.verifyEmailCode = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { password, confirmPassword } = req.body;
-    const userId = req.user.id; // From auth middleware
+    const userId = req.user?.id; // From auth middleware
+
+    if (!userId) {
+      return res.status(401).json({ error: "Auth session missing. Please login and try again." });
+    }
 
     if (!password || !confirmPassword) {
       return res.status(400).json({ error: "Password and confirm password are required" });
@@ -1119,11 +1123,16 @@ exports.resetPassword = async (req, res) => {
 
     // Also update in Supabase Auth (admin client, no session needed)
     if (supabaseAdmin !== supabase) {
-      await supabaseAdmin.auth.admin.updateUserById(userId, { password: password });
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(userId, { password: password });
+      } catch (authUpdateErr) {
+        console.error("Supabase auth update error:", authUpdateErr);
+        // Don't fail if Supabase auth update fails - we already updated the DB
+      }
     }
 
     res.status(200).json({ 
-      message: "Password reset successfully"
+      message: "Password reset successfully. Please login with your new password."
     });
   } catch (error) {
     console.error("Reset Password Error:", error);

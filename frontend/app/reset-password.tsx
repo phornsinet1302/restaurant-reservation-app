@@ -69,6 +69,14 @@ export default function ResetPasswordScreen() {
       } else {
         // Settings flow: use JWT token
         const token = await AsyncStorage.getItem('token');
+        
+        // Check if token exists - if not, session has expired
+        if (!token) {
+          toast('Your session has expired. Please login again.', 'error');
+          router.replace('/login');
+          return;
+        }
+
         await axios.post(
           `${API_CONFIG.BASE_URL}/api/auth/reset-password`,
           { password: newPassword, confirmPassword },

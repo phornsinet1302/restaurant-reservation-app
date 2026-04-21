@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
@@ -42,6 +42,7 @@ type Restaurant = {
   distance?: string;
   hours?: string;
   opening_hours?: string;
+  category?: string;
 };
 
 export default function SearchScreen() {
@@ -58,6 +59,7 @@ export default function SearchScreen() {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const { isGuest } = useAuth();
+  const isInitialMountRef = useRef(true);
   const router = useRouter();
 
   // Calculate distance between two coordinates using Haversine formula
@@ -120,7 +122,7 @@ export default function SearchScreen() {
     // Set default location immediately for distance calculation
     setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
     requestLocationPermission();
-    fetchRestaurants('');
+    // Don't fetch here - wait for location to be set via useEffect below
   }, []);
 
   const loadFavoritesAndToken = async () => {
@@ -268,8 +270,14 @@ export default function SearchScreen() {
     }
   };
 
-  // Debounce search
+  // Debounce search - skip on initial mount to avoid redundant fetch
   useEffect(() => {
+    // Skip the initial mount since location watcher handles the initial empty search
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+
     const timer = setTimeout(() => {
       if (searchTerm.length > 0) {
         fetchRestaurants(searchTerm);
@@ -291,6 +299,29 @@ export default function SearchScreen() {
       }
     }
   }, [userLocation]);
+
+  // Map filter IDs to restaurant categories
+  const categoryMap: Record<string, string[]> = {
+    all: [],
+    restaurants: ['restaurant', 'restaurants'],
+    pubs: ['pub', 'pubs', 'bar'],
+    cafe: ['cafe', 'café', 'coffee'],
+  };
+
+  // Filter restaurants based on active category filter
+  const getFilteredRestaurants = () => {
+    if (activeFilter === 'all') {
+      return restaurants;
+    }
+
+    const allowedCategories = categoryMap[activeFilter] || [];
+    return restaurants.filter((r) => {
+      const restaurantCategory = r.category?.toLowerCase() || '';
+      return allowedCategories.some(cat => restaurantCategory.includes(cat));
+    });
+  };
+
+  const filteredRestaurants = getFilteredRestaurants();
 
   return (
     <View style={styles.container}>
@@ -367,7 +398,7 @@ export default function SearchScreen() {
       )}
 
       {/* No results */}
-      {!loading && restaurants.length === 0 && searchTerm && (
+      {!loading && filteredRestaurants.length === 0 && searchTerm && (
         <View style={styles.centerContent}>
           <Ionicons name="search" size={48} color={Colors.gray} style={{ marginBottom: 12 }} />
           <Text style={styles.noResultsText}>No restaurants found</Text>
@@ -376,12 +407,12 @@ export default function SearchScreen() {
       )}
 
       {/* Count text */}
-      {!loading && restaurants.length > 0 && (
-        <Text style={styles.countText}>Found {restaurants.length} restaurant(s)</Text>
+      {!loading && filteredRestaurants.length > 0 && (
+        <Text style={styles.countText}>Found {filteredRestaurants.length} restaurant(s)</Text>
       )}
 
       {/* Cards */}
-      {restaurants.map((r: any) => (
+      {filteredRestaurants.map((r: any) => (
         <TouchableOpacity
           key={r.id}
           style={styles.card}

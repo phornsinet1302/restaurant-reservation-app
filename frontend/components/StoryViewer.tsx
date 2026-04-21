@@ -11,7 +11,7 @@ import {
   ImageSourcePropType,
   StatusBar,
 } from 'react-native';
-import { Video } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
@@ -45,6 +45,70 @@ interface StoryViewerProps {
   onStoryDeleted?: () => void; // Callback when story is deleted
 }
 
+interface BackgroundMediaProps {
+  slide: StorySlide | undefined;
+  videoError: boolean;
+  onVideoError: (error: any) => void;
+}
+
+function VideoPlayerWrapper({ videoUrl, onError }: { videoUrl: string; onError: (error: any) => void }) {
+  // Only proceed if we have a valid URL
+  if (!videoUrl || videoUrl.length === 0) {
+    return <View style={styles.bgImage} />;
+  }
+
+  // Format source properly for expo-video with uri object
+  const source = { uri: videoUrl };
+  const videoPlayer = useVideoPlayer(source);
+
+  useEffect(() => {
+    if (videoPlayer && typeof videoPlayer.play === 'function') {
+      try {
+        videoPlayer.loop = true;
+        // Wrap play() result in Promise.resolve to safely handle both promise and non-promise returns
+        Promise.resolve(videoPlayer.play()).catch((err: any) => {
+          console.warn('Video play error:', err);
+          onError(err);
+        });
+      } catch (err) {
+        console.warn('Video config error:', err);
+      }
+    }
+  }, [videoPlayer, onError]);
+
+  return (
+    <VideoView
+      player={videoPlayer}
+      style={styles.bgImage}
+      nativeControls={false}
+      onError={(error) => {
+        console.warn('🎥 Video playback error:', error);
+        onError(error);
+      }}
+    />
+  );
+}
+
+function BackgroundMedia({ slide, videoError, onVideoError }: BackgroundMediaProps) {
+  // Check if we have a valid video URL (simple check)
+  const hasValidVideo = slide?.video && 
+                        slide.video.length > 0 && 
+                        !slide.video.startsWith('file://');
+
+  // Show video if available and no error
+  if (hasValidVideo && !videoError) {
+    return (
+      <VideoPlayerWrapper
+        videoUrl={slide!.video}
+        onError={onVideoError}
+      />
+    );
+  }
+
+  // Fall back to image
+  return <Image source={slide?.image} style={styles.bgImage} resizeMode="cover" />;
+}
+
 /* ── Component ── */
 
 export default function StoryViewer({
@@ -61,6 +125,13 @@ export default function StoryViewer({
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
   const prevGroupCountRef = useRef(groups.length);
   const prevSlideCountRef = useRef(groups[initialGroupIndex]?.slides.length || 0);
+
+  // Validate indices
+  const validGroupIdx = Math.min(groupIdx, Math.max(0, groups.length - 1));
+  const group = groups[validGroupIdx];
+  const validSlideIdx = group && group.slides ? Math.min(slideIdx, Math.max(0, group.slides.length - 1)) : 0;
+  const slide = group?.slides?.[validSlideIdx];
+  const totalSlides = group?.slides?.length || 0;
 
   // Detect if current group/story was deleted
   useEffect(() => {
@@ -90,10 +161,6 @@ export default function StoryViewer({
     }
   }, [groups, groupIdx, slideIdx, onStoryDeleted]);
 
-  // Validate indices
-  const validGroupIdx = Math.min(groupIdx, Math.max(0, groups.length - 1));
-  const group = groups[validGroupIdx];
-  
   // Safety check: if no groups or current group has no slides, close
   if (!groups || groups.length === 0 || !group || !group.slides || group.slides.length === 0) {
     console.warn('⚠️ No valid stories to display - closing story viewer');
@@ -101,14 +168,10 @@ export default function StoryViewer({
     return null;
   }
 
-  const validSlideIdx = Math.min(slideIdx, Math.max(0, group.slides.length - 1));
-  const slide = group.slides[validSlideIdx];
-  const totalSlides = group.slides.length;
-
   /* Start / restart the timer bar */
   const startTimer = useCallback(() => {
     // Validate slide before starting timer
-    if (!slide || !slide.image) {
+    if (!slide) {
       console.warn('⚠️ Invalid slide, skipping timer');
       return;
     }
@@ -124,7 +187,7 @@ export default function StoryViewer({
     anim.start(({ finished }) => {
       if (finished) goNext();
     });
-  }, [groupIdx, slideIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [validSlideIdx, groupIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     startTimer();
@@ -175,24 +238,13 @@ export default function StoryViewer({
       <StatusBar barStyle="light-content" />
 
       {/* Background - Image or Video */}
-      {slide.video && !videoError && !slide.video.startsWith('file://') ? (
-        <Video
-          source={{ uri: slide.video }}
-          style={styles.bgImage}
-          resizeMode="cover"
-          isLooping
-          shouldPlay
-          useNativeControls={false}
-          onError={(error) => {
-            console.warn('🎥 Video playback error:', error);
-            setVideoError(true);
-          }}
-          progressUpdateIntervalMillis={500}
-          rate={1.0}
-        />
-      ) : (
-        <Image source={slide.image} style={styles.bgImage} resizeMode="cover" />
-      )}
+      <BackgroundMedia
+        slide={slide}
+        videoError={videoError}
+        onVideoError={(error) => {
+          setVideoError(true);
+        }}
+      />
 
       {/* Dark overlay */}
       <View style={styles.overlay} />

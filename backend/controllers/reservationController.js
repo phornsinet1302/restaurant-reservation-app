@@ -460,7 +460,7 @@ exports.getMyReservations = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('reservations')
-      .select('*, restaurants(name, image_url), tables(table_number)') 
+      .select('id, restaurant_id, table_id, reservation_date, reservation_time, party_size, status, customer_name, customer_email, special_request, restaurants(name, image_url), tables(table_number)') 
       .eq('customer_id', req.user.id);
 
     if (error) return res.status(400).json({ error: error.message });
@@ -472,7 +472,9 @@ exports.getMyReservations = async (req, res) => {
       data.forEach((booking, idx) => {
         console.log(`   Booking ${idx + 1}:`);
         console.log(`     - Restaurant:`, booking.restaurants?.name);
-        console.log(`     - Image URL:`, booking.restaurants?.image_url);
+        console.log(`     - Customer Name:`, booking.customer_name);
+        console.log(`     - Customer Email:`, booking.customer_email);
+        console.log(`     - Special Request:`, booking.special_request);
       });
     }
     

@@ -10,7 +10,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
-import { Video } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAppToast } from '@/components/ToastProvider';
 
@@ -28,6 +28,89 @@ interface Story {
   caption?: string;
   created_at: string;
   expires_at?: string;
+}
+
+/* ── Video Player Wrapper Component ── */
+function VideoPlayerWrapper({ videoUrl, onError }: { videoUrl: string; onError: (error: any) => void }) {
+  // Only proceed if we have a valid URL
+  if (!videoUrl || videoUrl.length === 0) {
+    return <View style={{ width: '100%', height: '100%', backgroundColor: '#000' }} />;
+  }
+
+  // Format source properly for expo-video with uri object
+  const source = { uri: videoUrl };
+  const videoPlayer = useVideoPlayer(source);
+
+  useEffect(() => {
+    if (videoPlayer && typeof videoPlayer.play === 'function') {
+      try {
+        videoPlayer.loop = true;
+        // Wrap play() result in Promise.resolve to safely handle both promise and non-promise returns
+        Promise.resolve(videoPlayer.play()).catch((err: any) => {
+          console.warn('Video play error:', err);
+          onError(err);
+        });
+      } catch (err) {
+        console.warn('Video error:', err);
+      }
+    }
+  }, [videoPlayer, onError]);
+
+  return (
+    <VideoView
+      player={videoPlayer}
+      nativeControls
+      style={{ width: '100%', height: '100%' }}
+    />
+  );
+}
+
+/* ── Video Preview Component (handles hook properly) ── */
+interface VideoPreviewProps {
+  story: Story;
+  isPlayingVideo: boolean;
+  onPlayPress: () => void;
+}
+
+function VideoPreviewContent({ story, isPlayingVideo, onPlayPress }: VideoPreviewProps) {
+  const isVideo = story.media_type === 'video' && 
+                  story.video_url && 
+                  story.video_url.length > 0;
+
+  if (!isVideo) {
+    return (
+      <Image
+        source={{ uri: story.media_url }}
+        style={styles.storyPreviewImage}
+      />
+    );
+  }
+
+  if (isPlayingVideo && story.video_url && story.video_url.length > 0) {
+    return (
+      <VideoPlayerWrapper
+        videoUrl={story.video_url}
+        onError={() => console.warn('Video error')}
+      />
+    );
+  }
+
+  // Show thumbnail with play button
+  return (
+    <TouchableOpacity 
+      activeOpacity={0.8}
+      onPress={onPlayPress}
+      style={styles.videoPlayerContainer}
+    >
+      <Image
+        source={{ uri: story.media_url }}
+        style={styles.storyPreviewImage}
+      />
+      <View style={styles.videoPlayOverlay}>
+        <Ionicons name="play-circle" size={80} color="white" />
+      </View>
+    </TouchableOpacity>
+  );
 }
 
 export default function ManageStoriesScreen() {
@@ -51,7 +134,6 @@ export default function ManageStoriesScreen() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewStoryIndex, setPreviewStoryIndex] = useState(0);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
-  const videoRef = useRef(null);
 
   useEffect(() => {
     console.log('🎥 [STATE CHANGE] isPlayingVideo is now:', isPlayingVideo);
@@ -665,10 +747,9 @@ export default function ManageStoriesScreen() {
                 {/* Video Thumbnail with Play Icon */}
                 {story.video_url ? (
                   <View style={styles.videoThumbnailContainer}>
-                    <Video
-                      source={{ uri: story.video_url }}
+                    <Image
+                      source={{ uri: story.media_url || '' }}
                       style={styles.storyThumb}
-                      onError={(error) => console.log('Video thumbnail error:', error)}
                     />
                     {/* Play Button Overlay */}
                     <View style={styles.playButtonOverlay}>
@@ -733,72 +814,14 @@ export default function ManageStoriesScreen() {
           {stories.length > 0 && (
             <View style={styles.storyPreviewWrapper}>
               {/* Image or Video */}
-              {(() => {
-                const story = stories[previewStoryIndex];
-                const isVideo = story.media_type === 'video' && story.video_url && story.video_url.length > 0;
-                console.log('🎬 [Preview] Story preview:');
-                console.log('   media_type:', story.media_type);
-                console.log('   video_url:', story.video_url ? story.video_url.substring(0, 80) + '...' : 'none');
-                console.log('   media_url:', story.media_url ? story.media_url.substring(0, 60) + '...' : 'none');
-                console.log('   isVideo (valid):', isVideo);
-                console.log('   isPlayingVideo:', isPlayingVideo);
-                
-                if (isVideo) {
-                  // For videos: show player if isPlayingVideo, else show thumbnail
-                  if (isPlayingVideo) {
-                    return (
-                      <Video
-                        ref={videoRef}
-                        source={{ uri: story.video_url || '' }}
-                        rate={1.0}
-                        volume={1.0}
-                        isMuted={false}
-                        useNativeControls
-                        isLooping
-                        progressUpdateIntervalMillis={1000}
-                        style={{ width: '100%', height: '100%' }}
-                        onError={(error) => {
-                          console.error('❌ Video playback error:', error);
-                          console.error('   Video URL was:', story.video_url);
-                          toast('Failed to play video. URL may be invalid or corrupt.', 'error');
-                          setIsPlayingVideo(false);
-                        }}
-                        onLoad={() => {
-                          console.log('✅ Video loaded successfully');
-                        }}
-                      />
-                    );
-                  } else {
-                    // Show thumbnail with play button
-                    return (
-                      <TouchableOpacity 
-                        activeOpacity={0.8}
-                        onPress={() => {
-                          console.log('   🎬 PLAY BUTTON TAPPED! Setting isPlayingVideo to true');
-                          setIsPlayingVideo(true);
-                        }}
-                        style={styles.videoPlayerContainer}
-                      >
-                        <Image
-                          source={{ uri: story.media_url }}
-                          style={styles.storyPreviewImage}
-                        />
-                        <View style={styles.videoPlayOverlay}>
-                          <Ionicons name="play-circle" size={80} color="white" />
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  }
-                } else {
-                  // For regular images
-                  return (
-                    <Image
-                      source={{ uri: story.media_url }}
-                      style={styles.storyPreviewImage}
-                    />
-                  );
-                }
-              })()}
+              <VideoPreviewContent
+                story={stories[previewStoryIndex]}
+                isPlayingVideo={isPlayingVideo}
+                onPlayPress={() => {
+                  console.log('   🎬 PLAY BUTTON TAPPED! Setting isPlayingVideo to true');
+                  setIsPlayingVideo(true);
+                }}
+              />
 
               {/* Content Overlay */}
               {!isPlayingVideo && (

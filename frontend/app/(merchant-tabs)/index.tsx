@@ -85,7 +85,17 @@ export default function MerchantDashboard() {
         }
       }
     } catch (error: any) {
-      console.error('❌ [MerchantDashboard] Error:', error.response?.data || error.message);
+      const errorMsg = error.response?.data?.error || error.message;
+      
+      // Handle case where merchant has no restaurant yet
+      if (errorMsg && errorMsg.includes('No restaurant found')) {
+        console.warn('⚠️ [MerchantDashboard] Merchant has no restaurant account yet');
+        setRestaurantName('No Restaurant Setup');
+        setRestaurantAddress('Please create or select a restaurant');
+        return;
+      }
+      
+      console.error('❌ [MerchantDashboard] Error:', errorMsg);
     } finally {
       setRefreshing(false);
     }
