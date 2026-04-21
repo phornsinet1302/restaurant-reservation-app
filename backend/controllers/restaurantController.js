@@ -9,15 +9,37 @@ exports.searchRestaurants = async (req, res) => {
     // Search by name or address/location
     if (search) {
       const searchTerm = `%${search}%`;
-      // Use OR filter to search in both name and address, only published restaurants
-      const { data, error } = await supabase
-        .from('restaurants')
-        .select('*')
-        .eq('is_published', true)
-        .or(`name.ilike.${searchTerm},address.ilike.${searchTerm}`);
       
-      if (error) return res.status(400).json({ error: error.message });
-      restaurants = data;
+      // Make two separate queries instead of using .or() to avoid filter syntax issues
+      const [nameQuery, addressQuery] = await Promise.all([
+        supabase
+          .from('restaurants')
+          .select('*')
+          .eq('is_published', true)
+          .ilike('name', searchTerm),
+        supabase
+          .from('restaurants')
+          .select('*')
+          .eq('is_published', true)
+          .ilike('address', searchTerm)
+      ]);
+      
+      if (nameQuery.error && addressQuery.error) {
+        return res.status(400).json({ error: 'Search failed' });
+      }
+      
+      // Combine results and remove duplicates
+      const nameRestaurants = nameQuery.data || [];
+      const addressRestaurants = addressQuery.data || [];
+      const seenIds = new Set();
+      restaurants = [];
+      
+      for (const restaurant of [...nameRestaurants, ...addressRestaurants]) {
+        if (!seenIds.has(restaurant.id)) {
+          seenIds.add(restaurant.id);
+          restaurants.push(restaurant);
+        }
+      }
     } else {
       // Get all published restaurants if no search
       const { data, error } = await supabase

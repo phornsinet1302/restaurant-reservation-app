@@ -81,8 +81,16 @@ export default function ModifyBookingScreen() {
   const params = useLocalSearchParams<{
     id: string;
     restaurantId: string;
-    name: string;
+    restaurantName: string;
+    bookingName: string;
+    bookingEmail: string;
     address: string;
+    date?: string;
+    time?: string;
+    guests?: string;
+    table?: string;
+    ref?: string;
+    specialRequests?: string;
   }>();
   const { toast, confirm } = useAppToast();
   const router = useRouter();
@@ -95,6 +103,7 @@ export default function ModifyBookingScreen() {
   const [selectedTime, setSelectedTime] = useState('7:30pm');
   const [guests, setGuests] = useState(2);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [existingTableId, setExistingTableId] = useState<string | null>(null);
   const [specialRequests, setSpecialRequests] = useState('');
   const [bookingName, setBookingName] = useState('');
   const [bookingEmail, setBookingEmail] = useState('');
@@ -108,7 +117,60 @@ export default function ModifyBookingScreen() {
 
   const reservationId = params.id?.trim() || '';
   const restaurantId = params.restaurantId?.trim() || '';
-  const restaurantName = params.name || 'Restaurant';
+  const restaurantName = params.restaurantName || 'Restaurant';
+
+  // Pre-fill form with existing booking data
+  useEffect(() => {
+    if (params.date) {
+      try {
+        const existingDate = new Date(params.date);
+        if (!isNaN(existingDate.getTime())) {
+          setSelectedDate(existingDate);
+        }
+      } catch (err) {
+        console.log('Error parsing date:', err);
+      }
+    }
+
+    if (params.time) {
+      setSelectedTime(params.time);
+    }
+
+    if (params.guests) {
+      const parsedGuests = parseInt(params.guests, 10);
+      if (!isNaN(parsedGuests)) {
+        setGuests(parsedGuests);
+      }
+    }
+
+    console.log('📝 Pre-filling form with existing booking data:', {
+      date: params.date,
+      time: params.time,
+      guests: params.guests,
+      table: params.table,
+      specialRequests: params.specialRequests,
+      bookingName: params.bookingName,
+      bookingEmail: params.bookingEmail,
+    });
+
+    // Store existing table ID for later pre-selection
+    if (params.table) {
+      setExistingTableId(params.table);
+    }
+
+    // Pre-fill special requests from existing booking
+    if (params.specialRequests) {
+      setSpecialRequests(params.specialRequests);
+    }
+
+    // Pre-fill booking name and email from existing booking
+    if (params.bookingName) {
+      setBookingName(params.bookingName);
+    }
+    if (params.bookingEmail) {
+      setBookingEmail(params.bookingEmail);
+    }
+  }, [params.date, params.time, params.guests, params.table, params.specialRequests, params.bookingName, params.bookingEmail]);
 
   // Fetch user's name and email from AsyncStorage
   useEffect(() => {
@@ -214,8 +276,20 @@ export default function ModifyBookingScreen() {
     
     if (availableTables.length > 0) {
       setTables(availableTables);
-      // Keep previously selected table if it still meets capacity
-      if (selectedTableId) {
+      
+      // Try to pre-select the existing table if it's still available and meets capacity
+      if (existingTableId) {
+        const existingTableStillValid = availableTables.find((t: any) => t.id === existingTableId);
+        if (existingTableStillValid) {
+          console.log('✅ Existing table is still available:', existingTableId);
+          setSelectedTableId(existingTableId);
+        } else {
+          // Existing table is not available for this guest count
+          console.log('⚠️ Existing table not available for current guest count. Selecting first available table.');
+          setSelectedTableId(availableTables[0].id);
+        }
+      } else if (selectedTableId) {
+        // Keep previously selected table if it still meets capacity
         const stillValid = availableTables.find((t: any) => t.id === selectedTableId);
         if (!stillValid) {
           setSelectedTableId(availableTables[0].id);
@@ -229,7 +303,12 @@ export default function ModifyBookingScreen() {
       const tablesWithCapacity = allTablesFromAPI.filter((t: any) => t.capacity >= guests);
       if (tablesWithCapacity.length > 0) {
         setTables(tablesWithCapacity);
-        setSelectedTableId(null);
+        // Try to show existing table even if not available
+        if (existingTableId && tablesWithCapacity.find((t: any) => t.id === existingTableId)) {
+          setSelectedTableId(existingTableId);
+        } else {
+          setSelectedTableId(null);
+        }
         setError('Sorry, no available tables with enough capacity right now. Please try another time.');
       } else {
         setTables(allTablesFromAPI);
@@ -237,7 +316,7 @@ export default function ModifyBookingScreen() {
         setError(`Sorry, no tables available for ${guests} guests. Please try another time or adjust your party size.`);
       }
     }
-  }, [guests, allTablesFromAPI]);
+  }, [guests, allTablesFromAPI, existingTableId]);
 
   const suggestion = useMemo(() => {
     if (guests <= 2) return { table: 5, seats: 2 };
@@ -329,19 +408,23 @@ export default function ModifyBookingScreen() {
     const selectedTable = tables.find(t => t.id === selectedTableId);
     const tableNumber = selectedTable?.table_number || selectedTable?.id || selectedTableId;
     
-    const bookingRef = 'REF-' + Date.now();
+    // For updates, use existing reservation ID; for new bookings, create new ref
+    const bookingRef = isUpdating ? reservationId : 'REF-' + Date.now();
 
     console.log('📊 Navigation Params:', {
+      isUpdating,
+      reservationId: isUpdating ? reservationId : 'N/A',
       restaurantId,
       tableId: selectedTableId,
       time12hr: selectedTime,
       time24hr,
     });
 
-    // Navigate to confirmation screen - booking will be created when user confirms
+    // Navigate to confirmation screen - booking will be created/updated when user confirms
     router.push({
       pathname: '/booking-confirmation',
       params: {
+        reservationId: reservationId,  // Pass reservation ID for updates
         bookingId: bookingRef,
         id: bookingRef,
         name: restaurantName,

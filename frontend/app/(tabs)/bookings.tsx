@@ -40,6 +40,9 @@ type Booking = {
   imageUrl?: string;
   address?: string;
   restaurantId?: string;
+  special_requests?: string;
+  customer_name?: string;
+  customer_email?: string;
 };
 
 const TABS = ['Upcoming', 'Past', 'Cancelled / Modified'] as const;
@@ -136,6 +139,9 @@ export default function BookingsScreen() {
           imageUrl: restaurantImageUrl,
           address: apiBooking.restaurant_address,
           restaurantId: apiBooking.restaurant_id,
+          special_requests: apiBooking.special_request || '',
+          customer_name: apiBooking.customer_name || '',
+          customer_email: apiBooking.customer_email || '',
         };
       });
 
@@ -231,13 +237,16 @@ export default function BookingsScreen() {
       params: {
         id: booking.id,
         restaurantId: booking.restaurantId || '',
-        name: booking.name,
+        restaurantName: booking.name || 'Restaurant',
+        bookingName: booking.customer_name || '',
+        bookingEmail: booking.customer_email || '',
         ref: booking.ref,
         date: booking.date,
         time: booking.time,
         guests: String(booking.guests),
         table: String(booking.table ?? 0),
         address: booking.address ?? '',
+        specialRequests: booking.special_requests || '',
       },
     } as any);
   };

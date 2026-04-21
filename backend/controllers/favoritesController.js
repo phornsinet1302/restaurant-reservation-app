@@ -56,13 +56,23 @@ exports.getMyFavorites = async (req, res) => {
   try {
     const user_id = req.user.id;
 
-    // We use *, restaurants(*) to pull the actual restaurant details, not just the ID!
+    // We use *, restaurants(*) to pull ALL the actual restaurant details
     const { data, error } = await supabase
       .from('favorites')
-      .select('*, restaurants(name, location)')
+      .select('*, restaurants(*)')
       .eq('user_id', user_id);
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Favorites query error:', error);
+      throw error;
+    }
+
+    console.log('✅ Favorites data with restaurant details:', data?.map((item) => ({
+      restaurant_id: item.restaurant_id,
+      name: item.restaurants?.name,
+      image_url: item.restaurants?.image_url,
+      category: item.restaurants?.category,
+    })));
 
     res.status(200).json(data);
   } catch (error) {

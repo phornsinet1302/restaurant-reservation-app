@@ -38,12 +38,17 @@ type Restaurant = {
   image_url?: string;
   latitude?: number;
   longitude?: number;
+  address?: string;
+  description?: string;
+  category?: string;
+  cuisine?: string;
 };
 
 const CATEGORIES = [
-  { id: 'c1', emoji: '🍽️', label: 'Restaurants' },
-  { id: 'c2', emoji: '🍺', label: 'Pubs' },
-  { id: 'c3', emoji: '🎉', label: 'Night clubs' },
+  { id: 'all', emoji: '🔍', label: 'All' },
+  { id: 'restaurants', emoji: '🍽️', label: 'Restaurants' },
+  { id: 'pubs', emoji: '🍺', label: 'Pubs' },
+  { id: 'cafe', emoji: '☕', label: 'Café' },
 ];
 
 // Fallback: Default restaurant images
@@ -100,6 +105,7 @@ export default function HomeScreen() {
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   
   // Location tracking
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -244,7 +250,7 @@ export default function HomeScreen() {
             console.log('📸 [HomeScreen] ❌ No profile picture found in backend');
             setProfileImageUri(null);
           }
-        } catch (error) {
+        } catch (error: any) {
           console.warn('📸 [HomeScreen] ❌ Failed to fetch profile from backend:', error.message);
           console.log('   Attempt to use fallback from localStorage...');
           // Fallback to localStorage if backend fails
@@ -458,14 +464,30 @@ export default function HomeScreen() {
       <StoryRow />
 
       {/* ── Categories ── */}
-      <View style={styles.categoriesRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.categoriesRow}
+      >
         {CATEGORIES.map((cat) => (
-          <TouchableOpacity key={cat.id} style={styles.categoryPill} onPress={() => toast('Category filter coming soon', 'info')}>
+          <TouchableOpacity
+            key={cat.id}
+            style={[
+              styles.categoryPill,
+              selectedCategory === cat.id && styles.categoryPillActive,
+            ]}
+            onPress={() => setSelectedCategory(cat.id)}
+          >
             <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
-            <Text style={styles.categoryLabel}>{cat.label}</Text>
+            <Text style={[
+              styles.categoryLabel,
+              selectedCategory === cat.id && styles.categoryLabelActive,
+            ]}>
+              {cat.label}
+            </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* ── Top Restaurants ── */}
       <View style={styles.sectionHeaderRow}>
@@ -480,60 +502,29 @@ export default function HomeScreen() {
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={styles.loadingText}>Loading restaurants...</Text>
         </View>
-      ) : restaurants.length > 0 ? (
-        restaurants.map((restaurant) => (
-        <TouchableOpacity
-          key={restaurant.id}
-          style={styles.restaurantCard}
-          activeOpacity={0.9}
-          onPress={() =>
-            router.push({
-              pathname: '../restaurant-detail',
-              params: {
-                id: restaurant.id,
-                name: restaurant.name,
-                rating: restaurant.rating,
-                reviews: '3.2k',
-                address: restaurant.address || '42 Fleet Street, City',
-                description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
-                hours: restaurant.hours,
-                distance: restaurant.distance,
-                latitude: restaurant.latitude || '',
-                longitude: restaurant.longitude || '',
-              },
-            } as any)
-          }
-        >
-          {/* Image with rating badge */}
-          <View style={styles.restaurantImageWrapper}>
-            {restaurant.image_url ? (
-              <Image source={{ uri: restaurant.image_url }} style={styles.restaurantImage} />
-            ) : (
-              <Image source={restaurant.image} style={styles.restaurantImage} />
-            )}
-            <View style={styles.ratingBadge}>
-              <Ionicons name="star" size={13} color="#FFFBF0" />
-              <Text style={styles.ratingText}>{restaurant.rating}</Text>
-            </View>
-          </View>
+      ) : (() => {
+        // Filter restaurants by selected category - match search screen logic
+        const categoryMap: Record<string, string[]> = {
+          'restaurants': ['restaurant', 'restaurants'],
+          'pubs': ['pub', 'pubs', 'bar'],
+          'cafe': ['cafe', 'café', 'coffee'],
+        };
 
-          {/* Info row */}
-          <View style={styles.restaurantInfoRow}>
-            <View style={styles.restaurantNameCol}>
-              <Text style={styles.restaurantName}>{restaurant.name}</Text>
-            </View>
-            <View style={styles.restaurantActions}>
-              <TouchableOpacity 
-                onPress={() => handleToggleFavorite(restaurant.id, restaurant.name)}
-                disabled={loading}
-              >
-                <Ionicons 
-                  name={favorites.includes(restaurant.id) ? 'heart' : 'heart-outline'} 
-                  size={22} 
-                  color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.detailsButton}
+        const filteredRestaurants = selectedCategory === 'all'
+          ? restaurants
+          : restaurants.filter(r => {
+              const allowedCategories = categoryMap[selectedCategory] || [];
+              const restaurantCategory = r.category?.toLowerCase() || '';
+              return allowedCategories.some(cat => restaurantCategory.includes(cat));
+            });
+        
+        return filteredRestaurants.length > 0 ? (
+          <View>
+            {filteredRestaurants.map((restaurant) => (
+              <TouchableOpacity
+                key={restaurant.id}
+                style={styles.restaurantCard}
+                activeOpacity={0.9}
                 onPress={() =>
                   router.push({
                     pathname: '../restaurant-detail',
@@ -552,32 +543,88 @@ export default function HomeScreen() {
                   } as any)
                 }
               >
-                <Text style={styles.detailsText}>Details</Text>
-                <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
-              </TouchableOpacity>
-            </View>
-          </View>
+                {/* Image with rating badge */}
+                <View style={styles.restaurantImageWrapper}>
+                  {restaurant.image_url ? (
+                    <Image source={{ uri: restaurant.image_url }} style={styles.restaurantImage} />
+                  ) : (
+                    <Image source={restaurant.image} style={styles.restaurantImage} />
+                  )}
+                  <View style={styles.ratingBadge}>
+                    <Ionicons name="star" size={13} color="#FFFBF0" />
+                    <Text style={styles.ratingText}>{restaurant.rating}</Text>
+                  </View>
+                </View>
 
-          {/* Meta row */}
-          <View style={styles.restaurantMeta}>
-            <View style={styles.metaItem}>
-              <Ionicons name="time-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{restaurant.hours}</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <Ionicons name="location-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{restaurant.distance}</Text>
-            </View>
+                {/* Info row */}
+                <View style={styles.restaurantInfoRow}>
+                  <View style={styles.restaurantNameCol}>
+                    <Text style={styles.restaurantName}>{restaurant.name}</Text>
+                    {/* Hours and Distance */}
+                    <View style={styles.restaurantMeta}>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="time-outline" size={12} color={Colors.gray} />
+                        <Text style={styles.metaText}>{restaurant.hours || 'Check hours'}</Text>
+                      </View>
+                      <View style={styles.metaDivider} />
+                      <View style={styles.metaItem}>
+                        <Ionicons name="location-outline" size={12} color={Colors.gray} />
+                        <Text style={styles.metaText}>{restaurant.distance || 'N/A'}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.restaurantActions}>
+                    <TouchableOpacity 
+                      onPress={() => handleToggleFavorite(restaurant.id, restaurant.name)}
+                      disabled={loading}
+                    >
+                      <Ionicons 
+                        name={favorites.includes(restaurant.id) ? 'heart' : 'heart-outline'} 
+                        size={22} 
+                        color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.detailsButton}
+                      onPress={() =>
+                        router.push({
+                          pathname: '../restaurant-detail',
+                          params: {
+                            id: restaurant.id,
+                            name: restaurant.name,
+                            rating: restaurant.rating,
+                            reviews: '3.2k',
+                            address: restaurant.address || '42 Fleet Street, City',
+                            description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                            hours: restaurant.hours,
+                            distance: restaurant.distance,
+                            latitude: restaurant.latitude || '',
+                            longitude: restaurant.longitude || '',
+                          },
+                        } as any)
+                      }
+                    >
+                      <Text style={styles.detailsText}>Details</Text>
+                      <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
           </View>
-        </TouchableOpacity>
-        ))
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="restaurant-outline" size={48} color={Colors.gray} />
-          <Text style={styles.emptyText}>No restaurants available</Text>
-          <Text style={styles.emptySubtext}>Check back later for new restaurants</Text>
-        </View>
-      )}
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="restaurant-outline" size={48} color={Colors.gray} />
+            <Text style={styles.emptyText}>
+              {selectedCategory === 'all' ? 'No restaurants available' : 'No restaurants in this category'}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {selectedCategory === 'all' 
+                ? 'Check back later for new restaurants' 
+                : 'Try selecting a different category'}
+            </Text>
+          </View>
+        );
+      })()}
       </ScrollView>
 
       <GuestLoginModal
@@ -794,6 +841,7 @@ const styles = StyleSheet.create({
   categoriesRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
+    paddingVertical: 0,
     gap: 10,
     marginBottom: 24,
   },
@@ -808,6 +856,10 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.background,
   },
+  categoryPillActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
   categoryEmoji: {
     fontSize: 16,
   },
@@ -815,6 +867,9 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Medium',
     fontSize: 14,
     color: Colors.text,
+  },
+  categoryLabelActive: {
+    color: '#FFFFFF',
   },
 
   /* Restaurant card */
@@ -863,6 +918,27 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: Colors.text,
   },
+  restaurantMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: Colors.border,
+  },
+  metaText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.gray,
+  },
   restaurantActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -882,22 +958,6 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Medium',
     fontSize: 14,
     color: Colors.text,
-  },
-  restaurantMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 20,
-    marginTop: 6,
-  },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: {
-    fontFamily: 'PlusJakartaSans-Regular',
-    fontSize: 13,
-    color: Colors.gray,
   },
   loadingContainer: {
     alignItems: 'center',

@@ -47,6 +47,7 @@ export default function BookingConfirmationScreen() {
   const params = useLocalSearchParams<{
     id?: string;
     bookingId?: string;
+    reservationId?: string;
     name: string;
     ref: string;
     date: string;
@@ -69,6 +70,8 @@ export default function BookingConfirmationScreen() {
 
   const image = IMAGE_MAP[params.name ?? ''] ?? require('@/assets/restaurant-1.jpg');
   const bookingId = params.bookingId || params.id || '';
+  const reservationId = params.reservationId || ''; // Get reservation ID for updates
+  const isUpdating = !!reservationId && reservationId.trim().length > 0;
 
   const details = [
     { icon: 'pricetag-outline' as const, label: 'Reference', value: params.ref || 'N/A' },
@@ -81,51 +84,103 @@ export default function BookingConfirmationScreen() {
     { icon: 'location-outline' as const, label: 'Location', value: params.address || 'N/A' },
   ];
 
-  // CREATE BOOKING API CALL
+  // CREATE OR UPDATE BOOKING API CALL
   const handleConfirmBooking = async () => {
     try {
       setLoading(true);
+
+      // Validate required fields before attempting booking
+      if (!params.bookingName?.trim()) {
+        toast('Customer name is required for the booking', 'warning');
+        setLoading(false);
+        return;
+      }
+
+      if (!params.bookingEmail?.trim()) {
+        toast('Customer email is required for the booking', 'warning');
+        setLoading(false);
+        return;
+      }
+
       const token = await AsyncStorage.getItem('token');
 
-      console.log('📝 [DEBUG] Creating booking with:', {
-        restaurant_id: params.restaurantId,
-        table_id: params.tableId,
-        reservation_date: params.date,
-        reservation_time: params.time,
-        party_size: params.guests,
-        customer_name: params.bookingName,
-        customer_email: params.bookingEmail,
-        special_request: params.specialRequests,
-      });
+      if (isUpdating) {
+        // UPDATE EXISTING BOOKING
+        console.log('✏️ [DEBUG] Updating booking with:', {
+          reservation_id: reservationId,
+          table_id: params.tableId,
+          reservation_date: params.date,
+          reservation_time: params.time,
+          party_size: params.guests,
+          special_request: params.specialRequests,
+        });
 
-      const response = await axios.post(
-        `${API_CONFIG.BASE_URL}/api/reservations`,
-        {
+        const response = await axios.patch(
+          `${API_CONFIG.BASE_URL}/api/reservations/${reservationId}/update`,
+          {
+            table_id: params.tableId,
+            reservation_date: params.date,
+            reservation_time: params.time,
+            party_size: Number(params.guests),
+            special_request: params.specialRequests?.trim() || '',
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+
+        console.log('✅ [DEBUG] Booking updated successfully:', response.data);
+        const updatedBookingId = response.data[0]?.id || reservationId;
+        setConfirmationId(updatedBookingId);
+        toast('Booking updated successfully!', 'success');
+        
+        // Show success screen
+        setStep('success');
+        setLoading(false);
+
+      } else {
+        // CREATE NEW BOOKING
+        console.log('📝 [DEBUG] Creating new booking with:', {
           restaurant_id: params.restaurantId,
           table_id: params.tableId,
           reservation_date: params.date,
           reservation_time: params.time,
-          party_size: Number(params.guests),
+          party_size: params.guests,
           customer_name: params.bookingName,
           customer_email: params.bookingEmail,
-          special_request: params.specialRequests || '',
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
-      );
+          special_request: params.specialRequests,
+        });
 
-      console.log('✅ [DEBUG] Booking created successfully:', response.data);
-      const newBookingId = response.data.id || bookingId;
-      setConfirmationId(newBookingId);
-      
-      // Show success screen
-      setStep('success');
-      setLoading(false);
+        const response = await axios.post(
+          `${API_CONFIG.BASE_URL}/api/reservations`,
+          {
+            restaurant_id: params.restaurantId,
+            table_id: params.tableId,
+            reservation_date: params.date,
+            reservation_time: params.time,
+            party_size: Number(params.guests),
+            customer_name: params.bookingName?.trim(),
+            customer_email: params.bookingEmail?.trim(),
+            special_request: params.specialRequests?.trim() || '',
+          },
+          {
+            headers: { Authorization: `Bearer ${token}` }
+          }
+        );
+
+        console.log('✅ [DEBUG] Booking created successfully:', response.data);
+        const newBookingId = response.data.id || bookingId;
+        setConfirmationId(newBookingId);
+        
+        // Show success screen
+        setStep('success');
+        setLoading(false);
+      }
 
     } catch (error: any) {
-      console.error('❌ [DEBUG] Booking creation failed:', error.response?.data || error.message);
-      toast(`Failed to create booking: ${error.response?.data?.error || error.message}`, 'error');
+      console.error('❌ [DEBUG] Booking operation failed:', error.response?.data || error.message);
+      const errorMsg = isUpdating ? 'Failed to update booking' : 'Failed to create booking';
+      toast(`${errorMsg}: ${error.response?.data?.error || error.message}`, 'error');
       setLoading(false);
     }
   };
