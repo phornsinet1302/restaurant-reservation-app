@@ -105,12 +105,17 @@ export default function SignUpScreen() {
         });
 
         console.log('Backend response:', backendResponse.data);
-        const token = backendResponse.data.session?.access_token;
+        const token =
+          backendResponse.data.access_token ||
+          backendResponse.data.session?.access_token;
         if (token) {
           await AsyncStorage.setItem('token', token);
-          if (backendResponse.data.user) {
-            await AsyncStorage.setItem('user', JSON.stringify(backendResponse.data.user));
+          const authUser = backendResponse.data.user || backendResponse.data.session?.user;
+          if (authUser) {
+            await AsyncStorage.setItem('user', JSON.stringify(authUser));
           }
+          // Critical: ensure we leave guest mode after OAuth sign up
+          await AsyncStorage.removeItem('guestMode');
           toast('Signed up with Google successfully!', 'success');
           router.replace('/(tabs)');
         } else {
@@ -158,6 +163,8 @@ export default function SignUpScreen() {
           if (response.data.user) {
             await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
           }
+          // Critical: ensure we leave guest mode after OAuth sign up
+          await AsyncStorage.removeItem('guestMode');
           
           toast('Signed up with Apple successfully!', 'success');
           router.replace('/(tabs)');
@@ -233,42 +240,7 @@ export default function SignUpScreen() {
         console.log('Signup response:', response.data);
         console.log('Full response data structure:', JSON.stringify(response.data, null, 2));
         
-        // Store token and user info
-        let token = null;
-        
-        // Try multiple paths to find the token
-        if (response.data.access_token) {
-          token = response.data.access_token;
-          console.log('✓ Token found in response.data.access_token (primary)');
-        } else if (response.data.session?.access_token) {
-          token = response.data.session.access_token;
-          console.log('✓ Token found in response.data.session.access_token (fallback 1)');
-        } else if (response.data.session) {
-          console.log('⚠️  Session exists but no direct access_token found. Session structure:', response.data.session);
-          token = response.data.session.access_token;
-        } else {
-          console.log('❌ No session or access_token found in response');
-        }
-        
-        if (token) {
-          console.log('=== TOKEN STORAGE START ===');
-          console.log('Token length:', token.length);
-          console.log('Token first 30 chars:', token.slice(0, 30));
-          console.log('Token last 10 chars:', token.slice(-10));
-          
-          await AsyncStorage.setItem('token', token);
-          
-          // Verify it was stored
-          const verifyToken = await AsyncStorage.getItem('token');
-          console.log('Verification - Token retrieved:', verifyToken ? 'YES ✓' : 'NO ❌');
-          console.log('Verification - Tokens match:', verifyToken === token ? 'YES ✓' : 'NO ❌');
-          console.log('=== TOKEN STORAGE END ===');
-        } else {
-          console.log('⚠️  WARNING: No token could be extracted from signup response!');
-          console.log('Response keys:', Object.keys(response.data));
-        }
-        
-        // Also store user info for later use
+        // Keep user info for post-verification login bootstrap
         if (response.data.user) {
           await AsyncStorage.setItem('user', JSON.stringify({
             ...response.data.user,
@@ -280,13 +252,16 @@ export default function SignUpScreen() {
           console.log('User info stored:', response.data.user.email);
         }
 
-        // ✅ TEMPORARY: Skip email verification entirely - go straight to home
-        console.log('✅ Signup successful! Redirecting to home screen...');
-        toast('Welcome! Your account is ready.', 'success');
-        
-        // Clear guest mode and redirect to home
-        await AsyncStorage.removeItem('guestMode');
-        router.replace('/(tabs)');
+        // Restore email verification flow
+        await axios.post(`${API_CONFIG.BASE_URL}/api/auth/send-verification-email`, {
+          email,
+        });
+        console.log('✅ Verification code sent, redirecting to verify-email screen');
+        toast('Verification code sent to your email', 'success');
+        router.replace({
+          pathname: '/verify-email',
+          params: { email },
+        } as any);
       } catch (error) {
         console.log('Signup error:', error);
         let errorMessage = 'Signup failed. Please try again.';

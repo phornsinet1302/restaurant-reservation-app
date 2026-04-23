@@ -2,17 +2,20 @@ const supabase = require('../config/supabase');
 const { supabaseAdmin } = require('../config/supabase');
 
 // ==================== HELPER FUNCTION - CREATE NOTIFICATIONS ====================
-const createNotification = async (userId, title, message, type = 'booking') => {
+const createNotification = async (userId, title, message, type = 'booking', relatedId = null) => {
   try {
+    const row = {
+      user_id: userId,
+      title,
+      message,
+      type,
+      is_read: false,
+    };
+    if (relatedId) row.related_id = relatedId;
+
     const { data, error } = await supabaseAdmin
       .from('notifications')
-      .insert([{
-        user_id: userId,
-        title,
-        message,
-        type,
-        is_read: false,
-      }])
+      .insert([row])
       .select();
     
     if (error) {
@@ -361,7 +364,8 @@ exports.createReservation = async (req, res) => {
         customerId,
         '✅ Booking Created Successfully!',
         `Your reservation at ${restaurantDataForNotif.name} on ${reservation_date} at ${reservation_time} has been recorded. Waiting for confirmation.`,
-        'booking_created'
+        'booking_created',
+        reservationId
       );
       
       // Notification for merchant
@@ -369,7 +373,8 @@ exports.createReservation = async (req, res) => {
         restaurantDataForNotif.merchant_id,
         '📥 New Booking Request',
         `New reservation request for ${party_size} guests at ${reservation_date} ${reservation_time}. Please confirm or reject.`,
-        'booking_received'
+        'booking_received',
+        reservationId
       );
       
       // 📧 Send confirmation email to customer
@@ -391,14 +396,16 @@ exports.createReservation = async (req, res) => {
           io,
           customerId,
           '✅ Booking Created',
-          `Your reservation at ${restaurantDataForNotif.name} is pending confirmation`
+          `Your reservation at ${restaurantDataForNotif.name} is pending confirmation`,
+          { type: 'booking_created', related_id: reservationId }
         );
         
         emitNotificationEvent(
           io,
           restaurantDataForNotif.merchant_id,
           '📥 New Booking',
-          `${party_size} guests on ${reservation_date} at ${reservation_time}`
+          `${party_size} guests on ${reservation_date} at ${reservation_time}`,
+          { type: 'booking_received', related_id: reservationId }
         );
       }
     }
@@ -485,16 +492,35 @@ exports.getMyReservations = async (req, res) => {
   }
 };
 
-// 3. GET RESERVATION DETAILS (GET)
+// 3. GET RESERVATION DETAILS (GET) — customer can only read their own booking
 exports.getReservationDetails = async (req, res) => {
-  const { data, error } = await supabase
-    .from('reservations')
-    .select('*, restaurants(*), tables(*)')
-    .eq('id', req.params.id)
-    .single();
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
-  if (error) return res.status(400).json({ error: error.message });
-  res.status(200).json(data);
+    const { data: row, error: fetchError } = await supabaseAdmin
+      .from('reservations')
+      .select('*, restaurants(*), tables(*)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchError || !row) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+
+    const merchantId = row.restaurants?.merchant_id;
+    const isCustomer = row.customer_id === userId;
+    const isMerchant = merchantId === userId;
+    if (!isCustomer && !isMerchant) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    res.status(200).json(row);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 };
 
 // 4. UPDATE RESERVATION STATUS (PATCH)
@@ -556,7 +582,8 @@ exports.cancelReservation = async (req, res) => {
         customerId,
         '❌ Booking Cancelled',
         `Your reservation at ${restaurantCancelInfo.name} has been cancelled.`,
-        'booking_cancelled'
+        'booking_cancelled',
+        reservationId
       );
       
       // Notification for merchant
@@ -564,7 +591,8 @@ exports.cancelReservation = async (req, res) => {
         restaurantCancelInfo.merchant_id,
         '🚫 Booking Cancelled',
         `A customer has cancelled their reservation. The table is now available.`,
-        'booking_cancelled'
+        'booking_cancelled',
+        reservationId
       );
     }
 
@@ -675,7 +703,8 @@ exports.updateReservationDetails = async (req, res) => {
       customerId,
       '✏️ Booking Modified',
       `Your reservation at ${restaurantName} has been updated to ${reservation_date} at ${reservation_time} for ${party_size} guests.`,
-      'booking_modified'
+      'booking_modified',
+      reservationId
     );
     
     if (merchantId) {
@@ -683,7 +712,8 @@ exports.updateReservationDetails = async (req, res) => {
         merchantId,
         '✏️ Booking Modified',
         `A customer modified their reservation for ${party_size} guests on ${reservation_date} at ${reservation_time}.`,
-        'booking_modified'
+        'booking_modified',
+        reservationId
       );
     }
     
@@ -903,14 +933,16 @@ exports.merchantConfirmReservation = async (req, res) => {
       merchantId,
       '✅ Booking Confirmed',
       `You confirmed a reservation for ${reservationData.party_size} guests on ${reservationData.reservation_date} at ${reservationData.reservation_time}.`,
-      'booking_confirmed'
+      'booking_confirmed',
+      reservationId
     );
     
     await createNotification(
       reservationData.customer_id,
       '✅ Booking Confirmed!',
       `Your reservation at ${restaurantName} on ${reservationData.reservation_date} at ${reservationData.reservation_time} has been confirmed!`,
-      'booking_confirmed'
+      'booking_confirmed',
+      reservationId
     );
     
     // 📧 Send confirmation email to customer
@@ -1056,14 +1088,16 @@ exports.merchantRejectReservation = async (req, res) => {
       merchantId,
       '❌ Booking Rejected',
       `You rejected a reservation. Reason: ${reason.trim()}`,
-      'booking_rejected'
+      'booking_rejected',
+      reservationId
     );
     
     await createNotification(
       reservationData.customer_id,
       '❌ Booking Rejected',
       `Your reservation at ${restaurantName} has been rejected. Reason: ${reason.trim()}`,
-      'booking_rejected'
+      'booking_rejected',
+      reservationId
     );
     
     // 📧 Send rejection email to customer
@@ -1534,7 +1568,8 @@ exports.merchantMarkCompleted = async (req, res) => {
         customerId,
         '✅ Booking Completed',
         `Your booking at ${restaurantName} has been marked as completed.`,
-        'booking_completed'
+        'booking_completed',
+        reservationId
       );
 
       // Create notification for merchant
@@ -1542,7 +1577,8 @@ exports.merchantMarkCompleted = async (req, res) => {
         merchantId,
         '✅ Booking Completed',
         `You have marked the booking as completed.`,
-        'booking_completed'
+        'booking_completed',
+        reservationId
       );
 
       // Get IO instance from app

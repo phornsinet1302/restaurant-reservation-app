@@ -89,6 +89,25 @@ const formatDistance = (distanceKm: number): string => {
   return `${distanceKm.toFixed(1)}km`;
 };
 
+/** Prefer district / neighbourhood, then city — de-duplicated for reverse geocode */
+function lineFromGeocode(a: Location.LocationGeocodedAddress): string {
+  const parts = [a.district, a.subregion, a.city, a.region].filter(
+    (p): p is string => typeof p === 'string' && p.trim().length > 0
+  );
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const p of parts) {
+    const key = p.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(p.trim());
+    if (unique.length >= 2) break;
+  }
+  if (unique.length > 0) return unique.join(' · ');
+  if (a.name) return a.name;
+  return 'Your area';
+}
+
 /* ── Component ── */
 
 export default function HomeScreen() {
@@ -141,8 +160,16 @@ export default function HomeScreen() {
       } else {
         console.warn('⚠️ Location permission denied');
         setLocationError('Location permission denied. Using default location.');
-        // Use default location (Phnom Penh, Cambodia)
-        setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+        const fallback = { latitude: 11.5564, longitude: 104.9282 };
+        setUserLocation(fallback);
+        try {
+          const addresses = await Location.reverseGeocodeAsync(fallback);
+          if (addresses?.[0]) {
+            setUserLocationAddress(lineFromGeocode(addresses[0]));
+          }
+        } catch {
+          setUserLocationAddress('Phnom Penh');
+        }
       }
     } catch (error) {
       console.error('❌ Error requesting location permission:', error);
@@ -168,10 +195,9 @@ export default function HomeScreen() {
       try {
         const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
         if (addresses && addresses.length > 0) {
-          const address = addresses[0];
-          const cityName = address.district || address.city || address.region || 'Your Location';
-          setUserLocationAddress(cityName);
-          console.log(`📍 Location address: ${cityName}`);
+          const line = lineFromGeocode(addresses[0]);
+          setUserLocationAddress(line);
+          console.log(`📍 Location address: ${line}`);
         }
       } catch (geoError) {
         console.warn('⚠️ Could not get location address:', geoError);
@@ -426,12 +452,12 @@ export default function HomeScreen() {
             <Text style={styles.subGreeting}>
               Welcome, {isGuest ? 'Guest' : userName}
             </Text>
-            {!isGuest && userLocationAddress && (
+            {userLocationAddress ? (
               <View style={styles.locationRow}>
                 <Ionicons name="location-outline" size={14} color={Colors.gray} />
                 <Text style={styles.userEmail}>{userLocationAddress}</Text>
               </View>
-            )}
+            ) : null}
           </View>
         </View>
         <TouchableOpacity style={styles.bellButton} onPress={() => router.push('../notifications' as any)}>
@@ -491,8 +517,8 @@ export default function HomeScreen() {
 
       {/* ── Top Restaurants ── */}
       <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>Top restaurants in London</Text>
-        <TouchableOpacity onPress={() => toast('Coming soon', 'info')}>
+        <Text style={styles.sectionTitle}>Top restaurants in Phnom Penh</Text>
+        <TouchableOpacity onPress={() => router.push('./search' as any)}>
           <Text style={styles.seeAll}>See all</Text>
         </TouchableOpacity>
       </View>

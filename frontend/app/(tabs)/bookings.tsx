@@ -35,15 +35,77 @@ type Booking = {
   guests: number;
   table?: number;
   status: BookingStatus;
+  /** Badge text — e.g. "No response" when pending expired after 24h past slot */
+  statusLabel?: string;
   dbStatus?: string;
   image: ImageSourcePropType | string;
   imageUrl?: string;
   address?: string;
   restaurantId?: string;
+  reservationDateRaw: string;
+  reservationTimeRaw: string;
   special_requests?: string;
   customer_name?: string;
   customer_email?: string;
 };
+
+const MS_24H = 24 * 60 * 60 * 1000;
+
+/** Parse reservation_date + reservation_time (API) into a local Date */
+function parseReservationStart(dateStr: string, timeStr: string): Date | null {
+  if (!dateStr) return null;
+  const t = (timeStr || '12:00:00').toString();
+  const parts = t.split(':');
+  const hh = String(parseInt(parts[0], 10) || 0).padStart(2, '0');
+  const mm = String(parseInt(parts[1] || '0', 10)).padStart(2, '0');
+  const secPart = (parts[2] || '00').split('.')[0];
+  const ss = String(parseInt(secPart, 10) || 0).padStart(2, '0');
+  const d = new Date(`${dateStr}T${hh}:${mm}:${ss}`);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** True when now is more than 24 hours after the scheduled reservation start */
+function isPast24HoursAfterSlot(dateStr: string, timeStr: string): boolean {
+  const start = parseReservationStart(dateStr, timeStr);
+  if (!start) return false;
+  return Date.now() > start.getTime() + MS_24H;
+}
+
+function formatTimeFromApi(time: string) {
+  if (!time) return '';
+  const [h, m] = time.split(':');
+  const hour = parseInt(h, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour % 12 || 12;
+  return `${h12}:${m}${ampm}`;
+}
+
+function getBookingStatusAndLabel(
+  dbStatus: string,
+  reservationDate: string,
+  reservationTime: string,
+): { status: BookingStatus; statusLabel?: string } {
+  const expiredByTime = isPast24HoursAfterSlot(reservationDate, reservationTime);
+
+  if (dbStatus === 'completed' || dbStatus === 'past') {
+    return { status: 'Past' };
+  }
+  if (dbStatus === 'cancelled' || dbStatus === 'rejected') {
+    return { status: 'Cancelled' };
+  }
+
+  if (expiredByTime && dbStatus === 'pending') {
+    return { status: 'Past', statusLabel: 'No response' };
+  }
+  if (expiredByTime && (dbStatus === 'confirmed' || dbStatus === 'arrived')) {
+    return { status: 'Past' };
+  }
+
+  if (dbStatus === 'confirmed' || dbStatus === 'arrived') {
+    return { status: 'Confirmed' };
+  }
+  return { status: 'Upcoming' };
+}
 
 const TABS = ['Upcoming', 'Past', 'Cancelled / Modified'] as const;
 
@@ -117,7 +179,13 @@ export default function BookingsScreen() {
 
       // Transform API data to UI format
       const transformedBookings: Booking[] = (response.data || []).map((apiBooking: any) => {
-        const bookingStatus = getBookingStatus(apiBooking.status);
+        const dateRaw = apiBooking.reservation_date || '';
+        const timeRaw = apiBooking.reservation_time || '';
+        const { status: bookingStatus, statusLabel } = getBookingStatusAndLabel(
+          apiBooking.status,
+          dateRaw,
+          timeRaw,
+        );
         const restaurantImageUrl = apiBooking.restaurants?.image_url;
         
         console.log(`📸 Booking: ${apiBooking.restaurants?.name || 'Unknown'}`);
@@ -130,15 +198,18 @@ export default function BookingsScreen() {
           name: apiBooking.restaurants?.name || 'Restaurant',
           ref: `RRA-${apiBooking.id.slice(0, 5).toUpperCase()}`,
           date: apiBooking.reservation_date,
-          time: formatTime(apiBooking.reservation_time),
+          time: formatTimeFromApi(apiBooking.reservation_time),
           guests: apiBooking.party_size,
           table: apiBooking.tables?.table_number,
           status: bookingStatus,
+          statusLabel,
           dbStatus: apiBooking.status,
           image: restaurantImageUrl ? { uri: restaurantImageUrl } : require('@/assets/restaurant-1.jpg'),
           imageUrl: restaurantImageUrl,
           address: apiBooking.restaurant_address,
           restaurantId: apiBooking.restaurant_id,
+          reservationDateRaw: dateRaw,
+          reservationTimeRaw: timeRaw,
           special_requests: apiBooking.special_request || '',
           customer_name: apiBooking.customer_name || '',
           customer_email: apiBooking.customer_email || '',
@@ -173,34 +244,29 @@ export default function BookingsScreen() {
     }, [loadBookings])
   );
 
-  // Convert DB status to UI status
-  const getBookingStatus = (dbStatus: string): BookingStatus => {
-    if (dbStatus === 'completed' || dbStatus === 'past') return 'Past';
-    if (dbStatus === 'cancelled' || dbStatus === 'rejected') return 'Cancelled';
-    if (dbStatus === 'confirmed' || dbStatus === 'arrived') return 'Confirmed';
-    return 'Upcoming'; // pending only
-  };
-
-  // Format time from HH:MM to 12-hour format
-  const formatTime = (time: string) => {
-    if (!time) return '';
-    const [h, m] = time.split(':');
-    const hour = parseInt(h);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const h12 = hour % 12 || 12;
-    return `${h12}:${m}${ampm}`;
-  };
-
-  // Check if current time is more than 30 minutes away from reservation
   const canModifyBooking = (booking: Booking): boolean => {
     if (booking.status !== 'Upcoming' && booking.status !== 'Confirmed') return false;
-    
-    const reservationDateTime = new Date(`${booking.date}T${booking.time.replace(/[APM]/g, '').trim()}`);
-    const now = new Date();
-    const timeDiffMs = reservationDateTime.getTime() - now.getTime();
-    const timeDiffMinutes = timeDiffMs / (1000 * 60);
-    
-    return timeDiffMinutes > 30; // Can modify if more than 30 minutes away
+
+    const start = parseReservationStart(booking.reservationDateRaw, booking.reservationTimeRaw);
+    if (!start) return false;
+    const timeDiffMinutes = (start.getTime() - Date.now()) / (1000 * 60);
+    return timeDiffMinutes > 30;
+  };
+
+  const handleLeaveReview = (booking: Booking) => {
+    if (!booking.restaurantId) {
+      toast('Missing restaurant for this booking.', 'error');
+      return;
+    }
+    router.push({
+      pathname: '/restaurant-detail',
+      params: {
+        id: booking.restaurantId,
+        name: booking.name,
+        address: booking.address || '',
+        openReview: '1',
+      },
+    } as any);
   };
 
   const tabStatusMap: Record<number, BookingStatus[]> = {
@@ -392,7 +458,7 @@ export default function BookingsScreen() {
                                 { color: getStatusColor(booking.status) },
                               ]}
                             >
-                              {booking.status}
+                              {booking.statusLabel || booking.status}
                             </Text>
                           </View>
                         </View>
@@ -448,7 +514,10 @@ export default function BookingsScreen() {
                     )}
 
                     {booking.status === 'Past' && (
-                      <TouchableOpacity style={styles.reviewBtn} onPress={() => toast('Reviews coming soon', 'info')}>
+                      <TouchableOpacity
+                        style={styles.reviewBtn}
+                        onPress={() => handleLeaveReview(booking)}
+                      >
                         <Text style={styles.reviewText}>Leave Review</Text>
                       </TouchableOpacity>
                     )}

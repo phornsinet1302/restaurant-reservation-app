@@ -12,6 +12,8 @@ export type Notification = {
   type: string;
   is_read: boolean;
   created_at: string;
+  /** Reservation UUID when this notification is tied to a booking */
+  related_id?: string | null;
 };
 
 export const useNotifications = () => {
@@ -176,9 +178,10 @@ export const useNotifications = () => {
             user_id: '',
             title: data.title,
             message: data.message,
-            type: data.type || 'booking',
+            type: typeof data.type === 'string' && data.type !== 'alert' ? data.type : 'booking',
             is_read: false,
             created_at: new Date().toISOString(),
+            related_id: data.related_id ?? data.reservation_id ?? data.reservationId ?? null,
           };
           
           setNotifications((prev) => [newNotification, ...prev]);

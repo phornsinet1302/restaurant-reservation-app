@@ -115,10 +115,24 @@ export default function RestaurantSignupScreen() {
         },
       };
 
-      const response = await axios.post(API_CONFIG.ENDPOINTS.AUTH.REGISTER, payload);
-      confirm('Application Submitted', 'Your restaurant application has been submitted for review. We will contact you soon.', [
-          { text: 'OK', onPress: () => router.replace('/(merchant-tabs)') }
-        ]);
+      await axios.post(API_CONFIG.ENDPOINTS.AUTH.REGISTER, payload);
+      await axios.post(`${API_CONFIG.BASE_URL}/api/auth/send-verification-email`, {
+        email,
+      });
+      confirm(
+        'Verification Required',
+        'We sent a verification code to your email. Please verify your account to continue.',
+        [
+          {
+            text: 'Verify Now',
+            onPress: () =>
+              router.replace({
+                pathname: '/verify-email',
+                params: { email },
+              } as any),
+          },
+        ]
+      );
     } catch (error) {
       let errorMessage = 'Submission failed. Please try again.';
       

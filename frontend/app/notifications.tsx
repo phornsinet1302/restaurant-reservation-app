@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,20 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { Colors } from '@/constants/Colors';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useNotifications, Notification } from '@/hooks/useNotifications';
+import { API_CONFIG } from '@/app/config/apiConfig';
+import { reservationRowToBookingParams } from '@/utils/reservationNavigation';
+import { useAppToast } from '@/components/ToastProvider';
 
 /* ── Component ── */
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const { toast } = useAppToast();
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const {
     notifications,
     loading,
@@ -59,6 +66,18 @@ export default function NotificationsScreen() {
             <Ionicons name="ban" size={20} color={Colors.white} />
           </View>
         );
+      case 'booking_created':
+        return (
+          <View style={[styles.iconCircle, styles.iconDefault]}>
+            <Ionicons name="hourglass-outline" size={20} color={Colors.white} />
+          </View>
+        );
+      case 'booking_completed':
+        return (
+          <View style={[styles.iconCircle, styles.iconConfirmed]}>
+            <Ionicons name="checkmark-done" size={20} color={Colors.white} />
+          </View>
+        );
       default:
         return (
           <View style={[styles.iconCircle, styles.iconDefault]}>
@@ -66,6 +85,94 @@ export default function NotificationsScreen() {
           </View>
         );
     }
+  };
+
+  const navigateForNotification = async (n: Notification) => {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      toast('Please log in to open this notification.', 'warning');
+      return;
+    }
+
+    const relatedId = n.related_id?.trim();
+    if (!relatedId) {
+      router.push('/(tabs)/bookings' as any);
+      return;
+    }
+
+    setOpeningId(n.id);
+    try {
+      const { data: row } = await axios.get(
+        `${API_CONFIG.BASE_URL}/api/reservations/${relatedId}`,
+        { headers: { Authorization: `Bearer ${token}` }, timeout: 20000 }
+      );
+      const base = reservationRowToBookingParams(row);
+      const status = (row.status || '').toLowerCase();
+
+      switch (n.type) {
+        case 'booking_created':
+          if (status === 'pending' || status === 'modified') {
+            router.push({
+              pathname: '/booking-waiting-confirmation',
+              params: {
+                bookingId: base.bookingId,
+                name: base.name,
+                ref: base.ref,
+                date: base.date,
+                time: base.time,
+                guests: base.guests,
+                table: base.table,
+                bookingName: base.bookingName,
+                bookingEmail: base.bookingEmail,
+                address: base.address,
+              },
+            } as any);
+          } else if (status === 'confirmed' || status === 'arrived') {
+            router.push({
+              pathname: '/booking-confirmation',
+              params: { ...base, initialStep: 'success' },
+            } as any);
+          } else {
+            router.push('/(tabs)/bookings' as any);
+          }
+          break;
+        case 'booking_confirmed':
+        case 'booking_completed':
+          router.push({
+            pathname: '/booking-confirmation',
+            params: { ...base, initialStep: 'success' },
+          } as any);
+          break;
+        case 'booking_modified':
+          router.push('/(tabs)/bookings' as any);
+          break;
+        case 'booking_rejected':
+        case 'booking_cancelled':
+          router.push('/(tabs)/bookings' as any);
+          break;
+        case 'booking_received':
+          router.push('/(merchant-tabs)/bookings' as any);
+          break;
+        default:
+          router.push('/(tabs)/bookings' as any);
+      }
+    } catch (e: any) {
+      console.warn('Notification deep link failed:', e?.response?.data || e?.message);
+      toast(
+        e?.response?.status === 403
+          ? 'You do not have access to this booking.'
+          : 'Could not load booking details. Try Bookings.',
+        'error'
+      );
+      router.push('/(tabs)/bookings' as any);
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
+  const onNotificationPress = async (n: Notification) => {
+    await markAsRead(n.id);
+    await navigateForNotification(n);
   };
 
   const formatTime = (timestamp: string) => {
@@ -121,31 +228,40 @@ export default function NotificationsScreen() {
           showsVerticalScrollIndicator={false}
         >
           {notifications.map((n) => (
-            <TouchableOpacity
+            <View
               key={n.id}
               style={[
                 styles.card,
                 !n.is_read && styles.cardUnread,
               ]}
-              activeOpacity={0.8}
-              onPress={() => markAsRead(n.id)}
             >
               <View style={styles.cardRow}>
-                {getIcon(n.type)}
-                <View style={styles.cardContent}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{n.title}</Text>
-                  <Text style={styles.cardBody} numberOfLines={2}>{n.message}</Text>
-                  <Text style={styles.cardTime}>{formatTime(n.created_at)}</Text>
-                </View>
                 <TouchableOpacity
-                  style={styles.deleteBtn}
-                  onPress={() => deleteNotification(n.id)}
+                  style={styles.cardTapArea}
+                  activeOpacity={0.8}
+                  disabled={openingId === n.id}
+                  onPress={() => onNotificationPress(n)}
                 >
-                  <Ionicons name="trash-outline" size={16} color={Colors.gray} />
+                  {getIcon(n.type)}
+                  <View style={styles.cardContent}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{n.title}</Text>
+                    <Text style={styles.cardBody} numberOfLines={2}>{n.message}</Text>
+                    <Text style={styles.cardTime}>{formatTime(n.created_at)}</Text>
+                  </View>
                 </TouchableOpacity>
+                {openingId === n.id ? (
+                  <ActivityIndicator size="small" color={Colors.primary} style={{ marginTop: 6 }} />
+                ) : (
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => deleteNotification(n.id)}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={Colors.gray} />
+                  </TouchableOpacity>
+                )}
               </View>
               {!n.is_read && <View style={styles.unreadDot} />}
-            </TouchableOpacity>
+            </View>
           ))}
         </ScrollView>
       )}
@@ -257,6 +373,12 @@ const styles = StyleSheet.create({
     borderColor: '#E5DBBD',
   },
   cardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  cardTapArea: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,

@@ -3,17 +3,20 @@ const { supabaseAdmin } = require('../config/supabase');
 const sendEmail = require('../utils/emailService');
 
 // ==================== HELPER FUNCTION - CREATE NOTIFICATIONS ====================
-const createNotification = async (userId, title, message, type = 'booking') => {
+const createNotification = async (userId, title, message, type = 'booking', relatedId = null) => {
   try {
+    const row = {
+      user_id: userId,
+      title,
+      message,
+      type,
+      is_read: false,
+    };
+    if (relatedId) row.related_id = relatedId;
+
     const { data, error } = await supabaseAdmin
       .from('notifications')
-      .insert([{
-        user_id: userId,
-        title,
-        message,
-        type,
-        is_read: false,
-      }])
+      .insert([row])
       .select();
     
     if (error) {
@@ -104,7 +107,8 @@ const autoRejectConflictingBookings = async (confirmedReservation, io) => {
         booking.customer_id,
         '❌ Booking Rejected',
         `Your reservation at ${restaurantData?.name} for ${reservation_date} at ${reservation_time} was rejected. The table slot was taken by another customer. Please try booking at a different time.`,
-        'booking_rejected'
+        'booking_rejected',
+        booking.id
       );
 
       // Send WebSocket notification
@@ -172,12 +176,16 @@ exports.getDashboardOverview = async (req, res) => {
 
     console.log(`🏪 Restaurant found: ${restaurant.name} (ID: ${restaurant.id})`);
 
-    // B. Get available dishes count (items with availability = 'available')
+    // B. Get available dishes count (menu_items.is_available = true)
     const { count: availableCount, error: availErr } = await supabase
       .from('menu_items')
       .select('*', { count: 'exact', head: true })
       .eq('restaurant_id', restaurant.id)
-      .eq('availability', 'available');
+      .eq('is_available', true);
+
+    if (availErr) {
+      console.error('❌ Error fetching available dishes count:', availErr.message);
+    }
 
     // Also get total menu items
     const { count: totalMenuCount } = await supabase
@@ -371,7 +379,8 @@ exports.confirmReservation = async (req, res) => {
       reservation.customer_id,
       '✅ Booking Confirmed!',
       `Your reservation at ${restaurantData.name} on ${reservation.reservation_date} at ${reservation.reservation_time} has been confirmed!`,
-      'booking_confirmed'
+      'booking_confirmed',
+      id
     );
 
     // Notification for merchant
@@ -379,7 +388,8 @@ exports.confirmReservation = async (req, res) => {
       merchant_id,
       '✅ Booking Confirmed',
       `You confirmed the reservation for ${reservation.party_size} guests on ${reservation.reservation_date} at ${reservation.reservation_time}`,
-      'booking_confirmed'
+      'booking_confirmed',
+      id
     );
 
     // 6. Send real-time socket notifications to BOTH parties
@@ -507,7 +517,8 @@ exports.rejectReservation = async (req, res) => {
       reservation.customer_id,
       '❌ Booking Rejected',
       `Your reservation at ${restaurantData.name} on ${reservation.reservation_date} at ${reservation.reservation_time} has been rejected. Please try another time.`,
-      'booking_rejected'
+      'booking_rejected',
+      id
     );
 
     // Notification for merchant
@@ -515,7 +526,8 @@ exports.rejectReservation = async (req, res) => {
       merchant_id,
       '✅ Booking Rejected',
       `You rejected the reservation for ${reservation.party_size} guests on ${reservation.reservation_date} at ${reservation.reservation_time}`,
-      'booking_rejected'
+      'booking_rejected',
+      id
     );
 
     // 6. Send real-time socket notifications to BOTH parties
