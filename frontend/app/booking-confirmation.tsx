@@ -48,6 +48,8 @@ export default function BookingConfirmationScreen() {
     id?: string;
     bookingId?: string;
     reservationId?: string;
+    /** When set to "success" (e.g. from notifications), show the confirmation success step */
+    initialStep?: string;
     name: string;
     ref: string;
     date: string;
@@ -72,6 +74,15 @@ export default function BookingConfirmationScreen() {
   const bookingId = params.bookingId || params.id || '';
   const reservationId = params.reservationId || ''; // Get reservation ID for updates
   const isUpdating = !!reservationId && reservationId.trim().length > 0;
+
+  useEffect(() => {
+    const wantSuccess =
+      params.initialStep === 'success' &&
+      !!(params.bookingId || params.id);
+    if (!wantSuccess) return;
+    setStep('success');
+    setConfirmationId(String(params.bookingId || params.id || ''));
+  }, [params.initialStep, params.bookingId, params.id]);
 
   const details = [
     { icon: 'pricetag-outline' as const, label: 'Reference', value: params.ref || 'N/A' },

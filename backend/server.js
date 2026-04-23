@@ -18,6 +18,7 @@ const favoritesRoutes = require('./routes/favoritesRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 const storiesRoutes = require('./routes/storiesRoutes');
 const menuPhotosRoutes = require('./routes/menuPhotosRoutes');
+const reviewRoutes = require('./routes/reviewRoutes');
 const app = express();
 const { Server } = require('socket.io');
 
@@ -404,6 +405,7 @@ app.use('/api/favorites', favoritesRoutes);
 app.use('/api/location', locationRoutes);
 app.use('/api/stories', storiesRoutes);
 app.use('/api/menu-photos', menuPhotosRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 
 // --- NEW: SOCKET.IO SETUP ---

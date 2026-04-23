@@ -287,24 +287,26 @@ export default function ManageStoriesScreen() {
 
     if (!result.canceled && result.assets[0]) {
       const video = result.assets[0];
-      // Duration from ImagePicker is in milliseconds, convert to seconds
       const durationInSeconds = video.duration ? Math.round(video.duration / 1000) : 0;
-      const fileSizeMB = video.fileSize ? (video.fileSize / 1024 / 1024).toFixed(1) : 'unknown';
+      const fileSizeBytes = video.fileSize ?? 0;
+      const fileSizeMB = fileSizeBytes > 0 ? (fileSizeBytes / 1024 / 1024).toFixed(1) : 'unknown';
       console.log('🎥 [pickVideo] Selected video:');
       console.log('   Duration:', durationInSeconds, 'seconds (raw:', video.duration, 'ms)');
       console.log('   File size:', fileSizeMB, 'MB');
-      
-      // Validate video duration (max 1 minute = 60 seconds)
+
       if (durationInSeconds > 60) {
         toast(`Video must be under 1 minute. Yours is ${durationInSeconds}s.`, 'warning');
         console.log('   ❌ Video rejected: too long');
         return;
       }
 
-      // Validate file size (max 50MB)
-      if (video.fileSize && video.fileSize > 50 * 1024 * 1024) {
-        toast(`Video is too large (${fileSizeMB}MB). Please use a shorter or lower quality video (max 50MB).`, 'warning');
-        console.log('   ❌ Video rejected: too large');
+      const MAX_VIDEO_MB = 10;
+      if (fileSizeBytes > MAX_VIDEO_MB * 1024 * 1024) {
+        toast(
+          `Video is too large (${fileSizeMB} MB). The free plan only supports up to ${MAX_VIDEO_MB} MB. Try trimming the clip or recording at a lower resolution.`,
+          'warning',
+        );
+        console.log('   ❌ Video rejected: over', MAX_VIDEO_MB, 'MB limit');
         return;
       }
 
@@ -408,7 +410,6 @@ export default function ManageStoriesScreen() {
           console.log('   📤 Sending form data to backend...');
           console.log('   Endpoint: /api/media/upload-video');
           
-          // Upload to backend endpoint that handles file upload
           const uploadRes = await axios.post(
             `${API_CONFIG.BASE_URL}/api/media/upload-video`,
             formData,
@@ -417,7 +418,7 @@ export default function ManageStoriesScreen() {
                 Authorization: `Bearer ${token}`,
                 'Content-Type': 'multipart/form-data',
               },
-              timeout: 60000, // 60 second timeout for large videos
+              timeout: 120000,
             }
           );
           
@@ -427,11 +428,32 @@ export default function ManageStoriesScreen() {
         } catch (uploadError: any) {
           console.error('   ❌ Video upload failed:', uploadError.message);
           console.error('   Response:', uploadError.response?.data);
-          
-          // Fail with error message - don't use local paths
-          toast(`Could not upload video to cloud storage: ${uploadError.response?.data?.error || uploadError.message}. Please try again or use a smaller video file.`, 'error');
-          
-          // Stop processing - require successful upload
+
+          const isTimeout = uploadError.code === 'ECONNABORTED' || uploadError.message?.includes('timeout');
+          const serverMsg = uploadError.response?.data?.error;
+          const isFileTooLarge =
+            uploadError.response?.status === 413 ||
+            serverMsg?.toLowerCase().includes('too large') ||
+            serverMsg?.toLowerCase().includes('exceeded') ||
+            serverMsg?.toLowerCase().includes('payload');
+
+          if (isTimeout) {
+            toast(
+              'Upload timed out — your video may be too large for the free plan. Try a shorter clip under 10 MB.',
+              'error',
+            );
+          } else if (isFileTooLarge) {
+            toast(
+              'Video exceeds the storage size limit. Please use a shorter or lower-quality clip (max 10 MB).',
+              'error',
+            );
+          } else {
+            toast(
+              `Upload failed: ${serverMsg || uploadError.message}. Try a smaller video.`,
+              'error',
+            );
+          }
+
           setPublishing(false);
           return;
         }

@@ -21,10 +21,15 @@ const protect = async (req, res, next) => {
     if (jwtSecret) {
       try {
         const decoded = jwt.verify(token, jwtSecret);
+        // Accept both custom JWT shape ({ id }) and Supabase-like shape ({ sub })
+        const userId = decoded.id || decoded.sub;
+        if (!userId) {
+          return res.status(401).json({ error: "Invalid token payload. Missing user id." });
+        }
         req.user = {
-          id: decoded.id,
-          email: decoded.email || decoded.email,
-          role: decoded.role || 'customer'
+          id: userId,
+          email: decoded.email || null,
+          role: decoded.role || decoded.user_metadata?.role || 'customer'
         };
         return next();
       } catch (jwtErr) {

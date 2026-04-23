@@ -42,7 +42,6 @@ export default function MerchantProfileScreen() {
 
       const storedToken = await AsyncStorage.getItem('token');
       if (storedToken) {
-        setToken(storedToken);
         const dashRes = await axios.get(`${API_CONFIG.BASE_URL}/api/merchant/dashboard`, {
           headers: { Authorization: `Bearer ${storedToken}` },
         });
@@ -133,7 +132,7 @@ export default function MerchantProfileScreen() {
 
   const menuItems = [
     { icon: 'notifications-outline' as const, label: 'Notifications', route: '../notifications' },
-    { icon: 'star-outline' as const, label: 'Reviews', route: null },
+    { icon: 'star-outline' as const, label: 'Reviews', route: '/merchant-reviews' },
     { icon: 'shield-outline' as const, label: 'Privacy & Security', route: '../privacy-security' },
     { icon: 'help-circle-outline' as const, label: 'Help & Support', route: '../merchant-help-support' },
     { icon: 'settings-outline' as const, label: 'Settings', route: '../merchant-settings' },

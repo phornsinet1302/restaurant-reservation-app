@@ -162,49 +162,69 @@ export default function MerchantDashboard() {
         {/* Stat cards */}
         <View style={styles.statsGrid}>
           {/* Available Dishes */}
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(merchant-tabs)/menu' as any)}
+          >
             <View style={[styles.statIcon, { backgroundColor: '#F0EFDF' }]}>
               <Ionicons name="restaurant-outline" size={16} color={Colors.primary} />
             </View>
             <Text style={styles.statValue}>{availableDishes}</Text>
             <Text style={styles.statLabel}>Available Dishes</Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Pending Bookings */}
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(merchant-tabs)/bookings' as any)}
+          >
             <View style={[styles.statIcon, { backgroundColor: '#F0EFDF' }]}>
               <Ionicons name="calendar-outline" size={16} color={Colors.primary} />
             </View>
             <Text style={styles.statValue}>{pendingBookings}</Text>
             <Text style={styles.statLabel}>Pending Bookings</Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Confirmed Bookings */}
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(merchant-tabs)/bookings' as any)}
+          >
             <View style={[styles.statIcon, { backgroundColor: '#DCFCE7' }]}>
               <Ionicons name="checkmark-circle-outline" size={16} color="#10b981" />
             </View>
             <Text style={styles.statValue}>{confirmedBookings}</Text>
             <Text style={styles.statLabel}>Confirmed</Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Arrived Bookings */}
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(merchant-tabs)/bookings' as any)}
+          >
             <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
               <Ionicons name="person-add-outline" size={16} color="#F59E0B" />
             </View>
             <Text style={styles.statValue}>{arrivedBookings}</Text>
             <Text style={styles.statLabel}>Arrived</Text>
-          </View>
+          </TouchableOpacity>
 
           {/* Completed Bookings */}
-          <View style={styles.statCard}>
+          <TouchableOpacity
+            style={styles.statCard}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(merchant-tabs)/bookings' as any)}
+          >
             <View style={[styles.statIcon, { backgroundColor: '#EDE9FE' }]}>
               <Ionicons name="flag-outline" size={16} color="#8B5CF6" />
             </View>
             <Text style={styles.statValue}>{completedBookings}</Text>
             <Text style={styles.statLabel}>Completed</Text>
-          </View>
+          </TouchableOpacity>
         </View>
 
         {/* Weekly Overview */}
