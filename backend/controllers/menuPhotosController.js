@@ -1,4 +1,3 @@
-const supabase = require('../config/supabase');
 const { supabaseAdmin } = require('../config/supabase');
 const multer = require('multer');
 
@@ -9,7 +8,8 @@ exports.getMenuPhotos = async (req, res) => {
 
     console.log(`📸 [getMenuPhotos] Fetching photos for restaurant: ${restaurantId}`);
 
-    const { data, error } = await supabase
+    // Use admin client for consistent reads after merchant uploads (avoids RLS mismatch).
+    const { data, error } = await supabaseAdmin
       .from('menu_photos')
       .select('*')
       .eq('restaurant_id', restaurantId)

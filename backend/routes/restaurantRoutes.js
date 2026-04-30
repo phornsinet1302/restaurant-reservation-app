@@ -31,11 +31,11 @@ router.post('/admin/set-image-url', restaurantController.setRestaurantImageUrl);
 // 1. Search/List Restaurants
 router.get('/', restaurantController.searchRestaurants);
 
-// 2. Get Specific Restaurant Details (GENERIC ROUTE LAST)
-router.get('/:id', restaurantController.getRestaurantDetails);
-
-// 3. Get Required Fields for Restaurant Listing
+// 2. Get Required Fields for Restaurant Listing
 router.get('/info/required-fields', restaurantController.getRequiredFields);
+
+// 3. Get Specific Restaurant Details (GENERIC ROUTE LAST)
+router.get('/:id', restaurantController.getRestaurantDetails);
 
 // --- PROTECTED ROUTES (Merchant Only) ---
 

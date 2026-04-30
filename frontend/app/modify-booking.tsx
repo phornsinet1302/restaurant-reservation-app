@@ -12,6 +12,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 function decodeJwtPayload(token: string): any | null {
@@ -111,6 +112,7 @@ export default function ModifyBookingScreen() {
   }>();
   const { toast, confirm } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   /* State */
   const baseDate = new Date();
@@ -479,7 +481,10 @@ export default function ModifyBookingScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: Math.max(insets.top + 12, 60), paddingBottom: Math.max(insets.bottom + 96, 120) },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -842,7 +847,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 120,
   },

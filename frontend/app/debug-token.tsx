@@ -5,12 +5,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function DebugTokenScreen() {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
   const { toast } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     loadTokenInfo();
@@ -49,7 +51,10 @@ export default function DebugTokenScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 12, 60) }]}
+    >
       {/* Header */}
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => router.back()}>
@@ -101,10 +106,10 @@ export default function DebugTokenScreen() {
               <Text style={styles.label}>ID:</Text> {user.id?.substring(0, 20)}...
             </Text>
             <Text style={styles.infoLine}>
-              <Text style={styles.label}>Email:</Text> {user.email || 'N/A'}
+              <Text style={styles.label}>Email:</Text> {user.email || 'Not available'}
             </Text>
             <Text style={styles.infoLine}>
-              <Text style={styles.label}>Role:</Text> {user.role || 'N/A'}
+              <Text style={styles.label}>Role:</Text> {user.role || 'Not available'}
             </Text>
           </>
         ) : (
@@ -147,7 +152,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },

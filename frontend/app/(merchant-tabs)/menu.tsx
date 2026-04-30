@@ -12,6 +12,7 @@ import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface MenuItem {
   id: string;
@@ -27,6 +28,7 @@ interface MenuItem {
 export default function MerchantMenuScreen() {
   const { toast, confirm } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
@@ -277,7 +279,7 @@ export default function MerchantMenuScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
           <View>
             <Text style={styles.title}>Menu</Text>
             <Text style={styles.subtitle}>Manage what customers see on your public{'\n'}restaurant page</Text>
@@ -497,7 +499,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
   header: {
-    paddingTop: 60, paddingHorizontal: 20, paddingBottom: 16,
+    paddingHorizontal: 20, paddingBottom: 16,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
   },
   title: { fontFamily: 'PlusJakartaSans-Bold', fontSize: 26, color: Colors.text },

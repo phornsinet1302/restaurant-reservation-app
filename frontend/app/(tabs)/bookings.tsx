@@ -21,6 +21,9 @@ import { API_CONFIG } from '@/app/config/apiConfig';
 import { useBookingUpdates } from '@/hooks/useBookingUpdates';
 import CustomButton from '@/components/CustomButton';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+let LAST_BOOKINGS_REFRESH_GLOBAL_MS = 0;
 
 function decodeJwtPayload(token: string): any | null {
   try {
@@ -130,12 +133,13 @@ const TABS = ['Upcoming', 'Past', 'Cancelled'] as const;
 
 export default function BookingsScreen() {
   const { toast, confirm } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState(0);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
-  const lastBookingsRefreshRef = React.useRef(0);
+  const lastBookingsRefreshRef = React.useRef(LAST_BOOKINGS_REFRESH_GLOBAL_MS);
   const BOOKINGS_REFRESH_COOLDOWN_MS = 30000;
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const router = useRouter();
@@ -144,10 +148,12 @@ export default function BookingsScreen() {
   // Fetch bookings from API
   const loadBookings = useCallback(async (force = false) => {
     const now = Date.now();
-    if (!force && now - lastBookingsRefreshRef.current < BOOKINGS_REFRESH_COOLDOWN_MS) {
+    const lastSeen = Math.max(lastBookingsRefreshRef.current, LAST_BOOKINGS_REFRESH_GLOBAL_MS);
+    if (!force && now - lastSeen < BOOKINGS_REFRESH_COOLDOWN_MS) {
       return;
     }
     lastBookingsRefreshRef.current = now;
+    LAST_BOOKINGS_REFRESH_GLOBAL_MS = now;
     try {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
@@ -381,9 +387,13 @@ export default function BookingsScreen() {
     <View style={styles.container}>
       {isGuest ? (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
           showsVerticalScrollIndicator={false}
         >
+          {/* Header */}
+          <Text style={styles.heading}>Booking History</Text>
+          <Text style={styles.subHeading}>Manage your reservations</Text>
+
           {/* Guest view */}
           <View style={styles.guestViewContainer}>
             <View style={styles.guestIcon}>
@@ -403,7 +413,7 @@ export default function BookingsScreen() {
         </ScrollView>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -573,7 +583,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },

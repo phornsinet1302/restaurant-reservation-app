@@ -25,6 +25,8 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
+let LAST_HOME_REFRESH_GLOBAL_MS = 0;
+let LAST_HOME_PROFILE_SYNC_GLOBAL_MS = 0;
 
 /* ── Data ── */
 
@@ -42,6 +44,7 @@ type Restaurant = {
   description?: string;
   category?: string;
   cuisine?: string;
+  reviews_count?: number;
 };
 
 const CATEGORIES = [
@@ -89,6 +92,26 @@ const formatDistance = (distanceKm: number): string => {
   return `${distanceKm.toFixed(1)}km`;
 };
 
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
+};
+
 /** Prefer district / neighbourhood, then city — de-duplicated for reverse geocode */
 function lineFromGeocode(a: Location.LocationGeocodedAddress): string {
   const parts = [a.district, a.subregion, a.city, a.region].filter(
@@ -134,8 +157,8 @@ export default function HomeScreen() {
   const refreshingRef = useRef(false);
   const loadingRestaurantsRef = useRef(false);
   const currentLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
-  const lastRefreshAtRef = useRef(0);
-  const lastProfileSyncAtRef = useRef(0);
+  const lastRefreshAtRef = useRef(LAST_HOME_REFRESH_GLOBAL_MS);
+  const lastProfileSyncAtRef = useRef(LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
   const lastLocationPermissionCheckRef = useRef(0);
   const lastLocationResolveRef = useRef(0);
   const HOME_REFRESH_COOLDOWN_MS = 30000;
@@ -260,10 +283,12 @@ export default function HomeScreen() {
 
   const refreshHomeData = useCallback(async () => {
     const now = Date.now();
-    if (now - lastRefreshAtRef.current < HOME_REFRESH_COOLDOWN_MS) return;
+    const lastSeen = Math.max(lastRefreshAtRef.current, LAST_HOME_REFRESH_GLOBAL_MS);
+    if (now - lastSeen < HOME_REFRESH_COOLDOWN_MS) return;
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     lastRefreshAtRef.current = now;
+    LAST_HOME_REFRESH_GLOBAL_MS = now;
     try {
       await loadUserData();
       const resolvedLocation = await requestLocationPermission();
@@ -279,7 +304,8 @@ export default function HomeScreen() {
       const storedToken = await AsyncStorage.getItem('token');
       if (storedToken) {
         setToken(storedToken);
-        if (now - lastProfileSyncAtRef.current > PROFILE_SYNC_COOLDOWN_MS) {
+        const lastProfileSync = Math.max(lastProfileSyncAtRef.current, LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+        if (now - lastProfileSync > PROFILE_SYNC_COOLDOWN_MS) {
           await fetchFavorites(storedToken);
         }
       }
@@ -295,7 +321,8 @@ export default function HomeScreen() {
 
         // Fetch latest profile data from backend (includes profile_picture_url)
         try {
-          if (now - lastProfileSyncAtRef.current <= PROFILE_SYNC_COOLDOWN_MS) {
+          const lastProfileSync = Math.max(lastProfileSyncAtRef.current, LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+          if (now - lastProfileSync <= PROFILE_SYNC_COOLDOWN_MS) {
             if (parsedUser.profile_picture_url) {
               setProfileImageUri(parsedUser.profile_picture_url);
             }
@@ -319,11 +346,13 @@ export default function HomeScreen() {
             parsedUser.profile_picture_url = response.data.user.profile_picture_url;
             await AsyncStorage.setItem('user', JSON.stringify(parsedUser));
             lastProfileSyncAtRef.current = now;
+            LAST_HOME_PROFILE_SYNC_GLOBAL_MS = now;
             console.log('   ✅ Saved to local storage');
           } else {
             console.log('📸 [HomeScreen] ❌ No profile picture found in backend');
             setProfileImageUri(null);
             lastProfileSyncAtRef.current = now;
+            LAST_HOME_PROFILE_SYNC_GLOBAL_MS = now;
           }
         } catch (error: any) {
           console.warn('📸 [HomeScreen] ❌ Failed to fetch profile from backend:', error.message);
@@ -403,7 +432,7 @@ export default function HomeScreen() {
           name: r.name || 'Restaurant',
           hours: r.opening_hours || 'Check hours',
           distance: distance,
-          rating: r.rating || '4.5',
+          rating: formatRestaurantRating(r.rating),
           latitude: r.latitude || null,
           longitude: r.longitude || null,
           // Use uploaded cover image if available, otherwise fall back to default
@@ -413,6 +442,7 @@ export default function HomeScreen() {
           address: r.address || '',
           category: r.category || '',
           cuisine: r.cuisine || '',
+          reviews_count: typeof r.reviews_count === 'number' ? r.reviews_count : 0,
         };
       }) || [];
       
@@ -614,9 +644,9 @@ export default function HomeScreen() {
                       id: restaurant.id,
                       name: restaurant.name,
                       rating: restaurant.rating,
-                      reviews: '3.2k',
-                      address: restaurant.address || '42 Fleet Street, City',
-                      description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                      reviews: formatReviewsCount(restaurant.reviews_count),
+                      address: restaurant.address || 'Address unavailable',
+                      description: restaurant.description || 'Description unavailable',
                       hours: restaurant.hours,
                       distance: restaurant.distance,
                       latitude: restaurant.latitude || '',
@@ -651,7 +681,7 @@ export default function HomeScreen() {
                       <View style={styles.metaDivider} />
                       <View style={styles.metaItem}>
                         <Ionicons name="location-outline" size={12} color={Colors.gray} />
-                        <Text style={styles.metaText}>{restaurant.distance || 'N/A'}</Text>
+                        <Text style={styles.metaText}>{restaurant.distance || 'Distance unavailable'}</Text>
                       </View>
                     </View>
                   </View>
@@ -678,9 +708,9 @@ export default function HomeScreen() {
                             id: restaurant.id,
                             name: restaurant.name,
                             rating: restaurant.rating,
-                            reviews: '3.2k',
-                            address: restaurant.address || '42 Fleet Street, City',
-                            description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                            reviews: formatReviewsCount(restaurant.reviews_count),
+                            address: restaurant.address || 'Address unavailable',
+                            description: restaurant.description || 'Description unavailable',
                             hours: restaurant.hours,
                             distance: restaurant.distance,
                             latitude: restaurant.latitude || '',

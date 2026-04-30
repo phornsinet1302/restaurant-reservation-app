@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import StoryViewer, { StoryGroup } from '@/components/StoryViewer';
@@ -14,15 +14,15 @@ export default function StoryScreen() {
   const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const lastCountRef = useRef(0);
-
-  // Initial load
-  useEffect(() => {
-    loadStories();
-  }, []);
+  const lastRefreshRef = useRef(0);
+  const STORY_SCREEN_REFRESH_COOLDOWN_MS = 15000;
 
   // Refresh when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
+      const now = Date.now();
+      if (now - lastRefreshRef.current < STORY_SCREEN_REFRESH_COOLDOWN_MS) return;
+      lastRefreshRef.current = now;
       console.log('👁️ Story screen focused, refreshing stories');
       loadStories();
     }, [])
@@ -30,7 +30,10 @@ export default function StoryScreen() {
 
   const loadStories = async () => {
     try {
-      const token = await AsyncStorage.getItem('authToken');
+      // Prefer canonical token key; keep legacy fallback for older sessions.
+      const token =
+        (await AsyncStorage.getItem('token')) ||
+        (await AsyncStorage.getItem('authToken'));
       
       // Fetch active stories from API
       const response = await axios.get(`${API_URL}/api/stories/active`, {

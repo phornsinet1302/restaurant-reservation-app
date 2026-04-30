@@ -14,6 +14,7 @@ import {
   } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
@@ -35,7 +36,7 @@ type Restaurant = {
   name: string;
   address?: string;
   description?: string;
-  rating?: number;
+  rating?: number | string;
   image_url?: string;
   latitude?: number;
   longitude?: number;
@@ -43,10 +44,32 @@ type Restaurant = {
   hours?: string;
   opening_hours?: string;
   category?: string;
+  reviews_count?: number;
+};
+
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
 };
 
 export default function SearchScreen() {
   const { toast } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -59,7 +82,6 @@ export default function SearchScreen() {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const { isGuest } = useAuth();
-  const isInitialMountRef = useRef(true);
   const requestSeqRef = useRef(0);
   const latestAppliedSeqRef = useRef(0);
   const inFlightKeyRef = useRef<string | null>(null);
@@ -237,6 +259,8 @@ export default function SearchScreen() {
           
           return {
             ...restaurant,
+            rating: formatRestaurantRating(restaurant.rating),
+            reviews_count: typeof restaurant.reviews_count === 'number' ? restaurant.reviews_count : 0,
             distance: distance,
             hours: restaurant.opening_hours || 'Check hours',
           };
@@ -245,6 +269,8 @@ export default function SearchScreen() {
         // Set default values if no user location
         restaurantsWithDistance = restaurantsWithDistance.map((restaurant: Restaurant) => ({
           ...restaurant,
+          rating: formatRestaurantRating(restaurant.rating),
+          reviews_count: typeof restaurant.reviews_count === 'number' ? restaurant.reviews_count : 0,
           distance: 'Unknown',
           hours: restaurant.opening_hours || 'Check hours',
         }));
@@ -297,35 +323,16 @@ export default function SearchScreen() {
     }
   };
 
-  // Debounce search - skip on initial mount to avoid redundant fetch
+  // Unified fetch trigger: query and location changes
   useEffect(() => {
-    // Skip the initial mount since location watcher handles the initial empty search
-    if (isInitialMountRef.current) {
-      isInitialMountRef.current = false;
-      return;
-    }
+    if (!userLocation) return;
 
     const timer = setTimeout(() => {
-      if (searchTerm.length > 0) {
-        fetchRestaurants(searchTerm);
-      } else {
-        fetchRestaurants('');
-      }
+      fetchRestaurants(searchTerm.length > 0 ? searchTerm : '');
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Reload restaurants when location changes
-  useEffect(() => {
-    if (userLocation && searchTerm.length >= 0) {
-      if (searchTerm.length > 0) {
-        fetchRestaurants(searchTerm);
-      } else {
-        fetchRestaurants('');
-      }
-    }
-  }, [userLocation]);
+  }, [searchTerm, userLocation]);
 
   // Map filter IDs to restaurant categories
   const categoryMap: Record<string, string[]> = {
@@ -353,16 +360,12 @@ export default function SearchScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
         showsVerticalScrollIndicator={false}
       >
       {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Search restaurants</Text>
-      </View>
+      <Text style={styles.heading}>Search</Text>
+      <Text style={styles.subHeading}>Find your next table</Text>
 
       {/* Search bar */}
       <View style={styles.searchBox}>
@@ -375,7 +378,11 @@ export default function SearchScreen() {
           onChangeText={setSearchTerm}
         />
         {searchTerm ? (
-          <TouchableOpacity onPress={() => setSearchTerm('')}>
+          <TouchableOpacity
+            style={styles.clearSearchButton}
+            onPress={() => setSearchTerm('')}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
             <Ionicons name="close" size={18} color={Colors.gray} />
           </TouchableOpacity>
         ) : null}
@@ -464,11 +471,11 @@ export default function SearchScreen() {
               params: {
                 id: r.id,
                 name: r.name,
-                rating: r.rating || '4.5',
-                reviews: '3.2k',
-                address: r.address || 'No address provided',
-                description: r.description || 'No description',
-                hours: r.hours || 'Check hours',
+                rating: r.rating || 'New',
+                reviews: formatReviewsCount(r.reviews_count),
+                address: r.address || 'Address unavailable',
+                description: r.description || 'Description unavailable',
+                hours: r.hours || 'Hours unavailable',
                 distance: r.distance || 'Unknown',
                 latitude: r.latitude || '',
                 longitude: r.longitude || '',
@@ -487,7 +494,7 @@ export default function SearchScreen() {
             )}
             <View style={styles.ratingBadge}>
               <Ionicons name="star" size={13} color="#FFFBF0" />
-              <Text style={styles.ratingText}>{r.rating || '4.5'}</Text>
+              <Text style={styles.ratingText}>{r.rating || 'New'}</Text>
             </View>
           </View>
 
@@ -518,11 +525,11 @@ export default function SearchScreen() {
                     params: {
                       id: r.id,
                       name: r.name,
-                      rating: r.rating || '4.5',
-                      reviews: '3.2k',
-                      address: r.address || 'No address provided',
-                      description: r.description || 'No description',
-                      hours: r.hours || 'Check hours',
+                      rating: r.rating || 'New',
+                      reviews: formatReviewsCount(r.reviews_count),
+                      address: r.address || 'Address unavailable',
+                      description: r.description || 'Description unavailable',
+                      hours: r.hours || 'Hours unavailable',
                       distance: r.distance || 'Unknown',
                       latitude: r.latitude || '',
                       longitude: r.longitude || '',
@@ -540,7 +547,7 @@ export default function SearchScreen() {
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{r.hours || 'Check hours'}</Text>
+              <Text style={styles.metaText}>{r.hours || 'Hours unavailable'}</Text>
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="location-outline" size={14} color={Colors.gray} />
@@ -568,28 +575,23 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingTop: 60,
     paddingBottom: 30,
   },
 
   /* Header */
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    gap: 12,
-    marginBottom: 20,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  headerTitle: {
+  heading: {
     fontFamily: 'PlusJakartaSans-Bold',
-    fontSize: 20,
+    fontSize: 24,
     color: Colors.text,
+    paddingHorizontal: 20,
+  },
+  subHeading: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 4,
+    marginBottom: 18,
+    paddingHorizontal: 20,
   },
 
   /* Search */
@@ -609,6 +611,13 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Regular',
     color: Colors.text,
     fontSize: 14,
+  },
+  clearSearchButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   /* Filters */

@@ -15,11 +15,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const API_URL = API_CONFIG.BASE_URL;
 
 export default function VerifyEmailScreen() {
   const { toast } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [codes, setCodes] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
@@ -48,7 +50,7 @@ export default function VerifyEmailScreen() {
     }
 
     // Auto-submit when all codes are filled
-    if (newCodes.every(c => c)) {
+    if (!loading && newCodes.every(c => c)) {
       handleVerify(newCodes.join(''));
     }
   };
@@ -60,6 +62,7 @@ export default function VerifyEmailScreen() {
   };
 
   const handleVerify = async (code?: string) => {
+    if (loading) return;
     const verificationCode = (code || codes.join('')).trim(); // Ensure trimmed
     
     if (verificationCode.length !== 6) {
@@ -145,9 +148,24 @@ export default function VerifyEmailScreen() {
       
       // Add a small delay to ensure everything is flushed to disk
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Navigate directly to home page (profile was already created during signup)
-      router.replace('/(tabs)');
+
+      // Route by role: prefer verified response, then stored user, then pending signup role.
+      const responseRole = response.data?.user?.role;
+      const storedUserRaw = await AsyncStorage.getItem('user');
+      const storedUserRole = storedUserRaw ? JSON.parse(storedUserRaw)?.role : null;
+      const pendingSignupRole = await AsyncStorage.getItem('pendingSignupRole');
+      const selectedRole = await AsyncStorage.getItem('selectedRole');
+      const effectiveRole = responseRole || storedUserRole || pendingSignupRole || selectedRole;
+
+      // Cleanup transient role hints after verification succeeds.
+      await AsyncStorage.removeItem('pendingSignupRole');
+      await AsyncStorage.removeItem('selectedRole');
+
+      if (effectiveRole === 'merchant' || effectiveRole === 'restaurant') {
+        router.replace('/(merchant-tabs)');
+      } else {
+        router.replace('/(tabs)');
+      }
     } catch (error) {
       let errorMessage = 'Failed to verify email. Please try again.';
       
@@ -194,7 +212,12 @@ export default function VerifyEmailScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.content}>
+      <View
+        style={[
+          styles.content,
+          { paddingTop: Math.max(insets.top + 12, 20), paddingBottom: Math.max(insets.bottom + 12, 20) },
+        ]}
+      >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()}>
@@ -317,11 +340,14 @@ const styles = StyleSheet.create({
   },
   codeContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 8,
     marginBottom: 40,
   },
   codeInput: {
-    width: '14%',
+    flex: 1,
+    maxWidth: 56,
+    minWidth: 44,
     height: 54,
     borderWidth: 2,
     borderColor: Colors.border,

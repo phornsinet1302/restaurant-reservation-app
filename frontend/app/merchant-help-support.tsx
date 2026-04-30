@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /* ── FAQ Data (Merchant-focused) ── */
 
@@ -62,6 +63,7 @@ const FAQS: FAQ[] = [
 
 export default function MerchantHelpSupportScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [expanded, setExpanded] = useState<string | null>('faq1');
 
   const toggleFaq = (id: string) => {
@@ -71,7 +73,7 @@ export default function MerchantHelpSupportScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
@@ -188,7 +190,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 16,
     gap: 12,

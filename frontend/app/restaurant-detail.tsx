@@ -184,20 +184,20 @@ export default function RestaurantDetailScreen() {
 
   const restaurantId = (params.id || '').trim();
   const [name, setName] = useState(params.name || '');
-  const [rating, setRating] = useState(params.rating || '4.0');
+  const [rating, setRating] = useState(params.rating || 'New');
   const [reviewsCount, setReviewsCount] = useState(params.reviews || '0');
   const [address, setAddress] = useState(params.address || '');
   const [latitude, setLatitude] = useState<number | null>(params.latitude ? parseFloat(params.latitude) : null);
   const [longitude, setLongitude] = useState<number | null>(params.longitude ? parseFloat(params.longitude) : null);
   const [description, setDescription] = useState(params.description || '');
   const [hours, setHours] = useState(params.hours || '');
-  const [distance] = useState(params.distance || '0.2 miles');
+  const [distance] = useState(params.distance || 'Distance unavailable');
 
   // Use uploaded cover image if available, otherwise fall back to static map
   const heroImage = heroImageUrl
     ? { uri: heroImageUrl }
     : RESTAURANT_IMAGES[name] || require('@/assets/restaurant-4.jpg');
-  const closingTime = (hours || 'Open Until 3:00pm').replace('Open Until ', '');
+  const closingTime = hours ? hours.replace('Open Until ', '') : 'Hours unavailable';
 
   // Build combined photos list for the viewer
   const buildAllPhotos = (): ImageSourcePropType[] => {
@@ -644,8 +644,8 @@ export default function RestaurantDetailScreen() {
           <View style={styles.heroInfo}>
             <Text style={styles.heroName}>{name}</Text>
             <View style={styles.heroMetaRow}>
-              <View style={styles.openDot} />
-              <Text style={styles.heroMetaText}>Open now</Text>
+              <Ionicons name="time-outline" size={14} color={Colors.white} />
+              <Text style={styles.heroMetaText}>{hours ? 'Hours available' : 'Hours unavailable'}</Text>
               <Text style={styles.heroMetaDivider}>•</Text>
               <TouchableOpacity
                 onPress={scrollToReviews}

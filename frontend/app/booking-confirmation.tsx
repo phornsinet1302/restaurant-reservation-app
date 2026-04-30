@@ -85,14 +85,14 @@ export default function BookingConfirmationScreen() {
   }, [params.initialStep, params.bookingId, params.id]);
 
   const details = [
-    { icon: 'pricetag-outline' as const, label: 'Reference', value: params.ref || 'N/A' },
+    { icon: 'pricetag-outline' as const, label: 'Reference', value: params.ref || 'Not provided' },
     { icon: 'calendar-outline' as const, label: 'Date', value: formatDate(params.date ?? '') },
-    { icon: 'time-outline' as const, label: 'Time', value: params.time || 'N/A' },
+    { icon: 'time-outline' as const, label: 'Time', value: params.time || 'Not provided' },
     { icon: 'people-outline' as const, label: 'Guests', value: `${params.guests || '0'} Guest${Number(params.guests) > 1 ? 's' : ''}` },
-    { icon: 'grid-outline' as const, label: 'Table', value: `Table ${params.table || 'N/A'}` },
-    { icon: 'person-outline' as const, label: 'Name', value: params.bookingName || 'N/A' },
-    { icon: 'mail-outline' as const, label: 'Email', value: params.bookingEmail || 'N/A' },
-    { icon: 'location-outline' as const, label: 'Location', value: params.address || 'N/A' },
+    { icon: 'grid-outline' as const, label: 'Table', value: params.table ? `Table ${params.table}` : 'Not provided' },
+    { icon: 'person-outline' as const, label: 'Name', value: params.bookingName || 'Not provided' },
+    { icon: 'mail-outline' as const, label: 'Email', value: params.bookingEmail || 'Not provided' },
+    { icon: 'location-outline' as const, label: 'Location', value: params.address || 'Not provided' },
   ];
 
   // CREATE OR UPDATE BOOKING API CALL

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SETTINGS_ITEMS: { icon: keyof typeof Ionicons.glyphMap; label: string; route: string | null }[] = [
   { icon: 'person-outline', label: 'Edit Profile', route: '/edit-profile' },
@@ -18,12 +19,13 @@ const SETTINGS_ITEMS: { icon: keyof typeof Ionicons.glyphMap; label: string; rou
 
 export default function MerchantSettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={Colors.text} />
           </TouchableOpacity>
@@ -71,7 +73,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 24,
   },
