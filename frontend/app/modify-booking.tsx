@@ -14,6 +14,23 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => `%${`00${c.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join('')
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
@@ -189,16 +206,11 @@ export default function ModifyBookingScreen() {
         const token = await AsyncStorage.getItem('token');
         if (token) {
           // Decode JWT to get email from claims
-          try {
-            const parts = token.split('.');
-            if (parts.length === 3) {
-              const decoded = JSON.parse(
-                Buffer.from(parts[1], 'base64').toString('utf-8')
-              );
-              setBookingEmail(decoded.email || '');
-            }
-          } catch (e) {
-            console.log('Could not decode JWT:', e);
+          const decoded = decodeJwtPayload(token);
+          if (decoded?.email) {
+            setBookingEmail(decoded.email);
+          } else {
+            console.log('Could not decode JWT: missing email claim');
           }
         }
       } catch (err) {

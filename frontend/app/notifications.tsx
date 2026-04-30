@@ -208,6 +208,7 @@ export default function NotificationsScreen() {
             <Text style={styles.markAllText}>Mark all read</Text>
           </TouchableOpacity>
         )}
+        {unreadCount === 0 && <View style={styles.headerRightPlaceholder} />}
       </View>
 
       {/* Notification List */}
@@ -254,6 +255,7 @@ export default function NotificationsScreen() {
                 ) : (
                   <TouchableOpacity
                     style={styles.deleteBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     onPress={() => deleteNotification(n.id)}
                   >
                     <Ionicons name="trash-outline" size={16} color={Colors.gray} />
@@ -280,7 +282,7 @@ const styles = StyleSheet.create({
   /* Header */
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 60,
     paddingHorizontal: 20,
@@ -316,6 +318,10 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 13,
     color: Colors.primary,
+  },
+  headerRightPlaceholder: {
+    width: 120,
+    height: 28,
   },
 
   /* Loading */
@@ -434,11 +440,11 @@ const styles = StyleSheet.create({
 
   /* Delete button */
   deleteBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: -4,
   },
 
   /* Unread dot */

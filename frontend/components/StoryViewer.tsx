@@ -132,6 +132,7 @@ export default function StoryViewer({
   const validSlideIdx = group && group.slides ? Math.min(slideIdx, Math.max(0, group.slides.length - 1)) : 0;
   const slide = group?.slides?.[validSlideIdx];
   const totalSlides = group?.slides?.length || 0;
+  const hasValidStoryData = !!(groups && groups.length > 0 && group && group.slides && group.slides.length > 0);
 
   // Detect if current group/story was deleted
   useEffect(() => {
@@ -161,39 +162,11 @@ export default function StoryViewer({
     }
   }, [groups, groupIdx, slideIdx, onStoryDeleted]);
 
-  // Safety check: if no groups or current group has no slides, close
-  if (!groups || groups.length === 0 || !group || !group.slides || group.slides.length === 0) {
+  useEffect(() => {
+    if (hasValidStoryData) return;
     console.warn('⚠️ No valid stories to display - closing story viewer');
     onClose();
-    return null;
-  }
-
-  /* Start / restart the timer bar */
-  const startTimer = useCallback(() => {
-    // Validate slide before starting timer
-    if (!slide) {
-      console.warn('⚠️ Invalid slide, skipping timer');
-      return;
-    }
-    
-    progress.setValue(0);
-    animRef.current?.stop();
-    const anim = Animated.timing(progress, {
-      toValue: 1,
-      duration: STORY_DURATION,
-      useNativeDriver: false,
-    });
-    animRef.current = anim;
-    anim.start(({ finished }) => {
-      if (finished) goNext();
-    });
-  }, [validSlideIdx, groupIdx]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    startTimer();
-    setVideoError(false); // Reset video error when slide changes
-    return () => animRef.current?.stop();
-  }, [startTimer]);
+  }, [hasValidStoryData, onClose]);
 
   /* Navigation */
   const goNext = useCallback(() => {
@@ -232,6 +205,36 @@ export default function StoryViewer({
       }
     }
   }, [slideIdx, groupIdx, groups]);
+
+  /* Start / restart the timer bar */
+  const startTimer = useCallback(() => {
+    if (!hasValidStoryData || !slide) {
+      return;
+    }
+
+    progress.setValue(0);
+    animRef.current?.stop();
+    const anim = Animated.timing(progress, {
+      toValue: 1,
+      duration: STORY_DURATION,
+      useNativeDriver: false,
+    });
+    animRef.current = anim;
+    anim.start(({ finished }) => {
+      if (finished) goNext();
+    });
+  }, [hasValidStoryData, slide, progress, goNext]);
+
+  useEffect(() => {
+    if (!hasValidStoryData) return;
+    startTimer();
+    setVideoError(false); // Reset video error when slide changes
+    return () => animRef.current?.stop();
+  }, [startTimer, hasValidStoryData]);
+
+  if (!hasValidStoryData) {
+    return null;
+  }
 
   return (
     <View style={styles.container}>
@@ -429,12 +432,14 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   arrowCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
   },
 
   /* Bottom */

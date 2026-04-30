@@ -54,12 +54,16 @@ export default function SearchScreen() {
   const [error, setError] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [token, setToken] = useState<string>('');
-  const [toggleLoading, setToggleLoading] = useState(false);
+  const [favoriteLoadingId, setFavoriteLoadingId] = useState<string | null>(null);
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const { isGuest } = useAuth();
   const isInitialMountRef = useRef(true);
+  const requestSeqRef = useRef(0);
+  const latestAppliedSeqRef = useRef(0);
+  const inFlightKeyRef = useRef<string | null>(null);
+  const activeRequestSeqRef = useRef(0);
   const router = useRouter();
 
   // Calculate distance between two coordinates using Haversine formula
@@ -160,7 +164,7 @@ export default function SearchScreen() {
       return;
     }
 
-    setToggleLoading(true);
+    setFavoriteLoadingId(restaurantId);
     try {
       const isFavorited = favorites.includes(restaurantId);
 
@@ -183,12 +187,23 @@ export default function SearchScreen() {
       console.error('Favorite toggle error:', error.response?.data || error.message);
       toast('Failed to update favorite. Please try again.', 'error');
     } finally {
-      setToggleLoading(false);
+      setFavoriteLoadingId(null);
     }
   };
 
   // Fetch restaurants based on search term
   const fetchRestaurants = async (query: string, retryCount = 0) => {
+    const locationKey = userLocation
+      ? `${userLocation.latitude.toFixed(4)},${userLocation.longitude.toFixed(4)}`
+      : 'no-location';
+    const requestKey = `${query.trim().toLowerCase()}|${locationKey}|retry:${retryCount}`;
+    if (retryCount === 0 && inFlightKeyRef.current === requestKey) {
+      return;
+    }
+
+    const seq = ++requestSeqRef.current;
+    activeRequestSeqRef.current = seq;
+    inFlightKeyRef.current = requestKey;
     try {
       setLoading(true);
       setError('');
@@ -242,6 +257,9 @@ export default function SearchScreen() {
         hours: r.hours,
       })));
 
+      // Ignore stale responses from older requests
+      if (seq < latestAppliedSeqRef.current) return;
+      latestAppliedSeqRef.current = seq;
       setRestaurants(restaurantsWithDistance);
     } catch (err: any) {
       console.error('❌ Search error:', err.message);
@@ -252,6 +270,7 @@ export default function SearchScreen() {
         console.log('⏱️ Timeout occurred, retrying... (' + (retryCount + 1) + '/2)');
         // Wait 2 seconds before retrying
         await new Promise(r => setTimeout(r, 2000));
+        inFlightKeyRef.current = null;
         return fetchRestaurants(query, retryCount + 1);
       }
       
@@ -264,9 +283,17 @@ export default function SearchScreen() {
         setError('Unable to load restaurants. Please try again.');
       }
       
-      setRestaurants([]);
+      if (seq >= latestAppliedSeqRef.current) {
+        latestAppliedSeqRef.current = seq;
+        setRestaurants([]);
+      }
     } finally {
-      setLoading(false);
+      if (seq === activeRequestSeqRef.current) {
+        setLoading(false);
+      }
+      if (inFlightKeyRef.current === requestKey) {
+        inFlightKeyRef.current = null;
+      }
     }
   };
 
@@ -393,16 +420,30 @@ export default function SearchScreen() {
       {/* Error message */}
       {error && !loading && (
         <View style={styles.centerContent}>
+          <Ionicons name="warning-outline" size={42} color={Colors.error} />
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => fetchRestaurants(searchTerm)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.retryBtnText}>Try again</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {/* No results */}
-      {!loading && filteredRestaurants.length === 0 && searchTerm && (
+      {!loading && !error && filteredRestaurants.length === 0 && (
         <View style={styles.centerContent}>
           <Ionicons name="search" size={48} color={Colors.gray} style={{ marginBottom: 12 }} />
-          <Text style={styles.noResultsText}>No restaurants found</Text>
-          <Text style={styles.noResultsSubText}>Try searching with different keywords</Text>
+          <Text style={styles.noResultsText}>
+            {searchTerm ? 'No restaurants found' : 'No restaurants match this filter'}
+          </Text>
+          <Text style={styles.noResultsSubText}>
+            {searchTerm
+              ? 'Try searching with different keywords'
+              : 'Try another category or clear your filter'}
+          </Text>
         </View>
       )}
 
@@ -458,13 +499,17 @@ export default function SearchScreen() {
             <View style={styles.cardActions}>
               <TouchableOpacity
                 onPress={() => handleToggleFavorite(r.id, r.name)}
-                disabled={toggleLoading}
+                disabled={favoriteLoadingId === r.id}
               >
-                <Ionicons
-                  name={favorites.includes(r.id) ? 'heart' : 'heart-outline'}
-                  size={22}
-                  color={favorites.includes(r.id) ? Colors.accent : Colors.text}
-                />
+                {favoriteLoadingId === r.id ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={favorites.includes(r.id) ? 'heart' : 'heart-outline'}
+                    size={22}
+                    color={favorites.includes(r.id) ? Colors.accent : Colors.text}
+                  />
+                )}
               </TouchableOpacity>
               <TouchableOpacity style={styles.detailsBtn}
                 onPress={() =>
@@ -652,11 +697,13 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginTop: 12,
+    gap: 10,
   },
   nameCol: {
     flex: 1,
+    minWidth: 0,
   },
   cardName: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -666,7 +713,8 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
+    flexShrink: 0,
   },
   detailsBtn: {
     flexDirection: 'row',
@@ -675,7 +723,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
   detailsBtnText: {
@@ -718,6 +766,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.error,
     textAlign: 'center',
+    marginTop: 10,
+  },
+  retryBtn: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#FFF',
+  },
+  retryBtnText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 13,
+    color: Colors.primary,
   },
   noResultsText: {
     fontFamily: 'PlusJakartaSans-Bold',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { Colors } from '@/constants/Colors';
@@ -38,20 +38,22 @@ export default function StoryRow() {
   const router = useRouter();
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(false);
+  const lastRefreshRef = useRef(0);
+  const STORY_REFRESH_COOLDOWN_MS = 10000;
 
   useEffect(() => {
-    loadRecentStories();
+    void loadRecentStories();
   }, []);
 
-  // Refresh stories whenever screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      loadRecentStories();
-    }, [])
-  );
-
   const loadRecentStories = async () => {
+    if (loadingRef.current) return;
+    const now = Date.now();
+    if (now - lastRefreshRef.current < STORY_REFRESH_COOLDOWN_MS) return;
+
     try {
+      loadingRef.current = true;
+      lastRefreshRef.current = now;
       setLoading(true);
       console.log('📖 Refreshing stories from customer view...');
       
@@ -81,6 +83,7 @@ export default function StoryRow() {
       console.error('❌ Status:', error.response?.status);
       setRestaurants([]); // Fail gracefully
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   };
@@ -244,7 +247,7 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.46)',
   },
   videoBadge: {
     position: 'absolute',
@@ -286,13 +289,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   restaurantName: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
     color: '#fff',
     marginBottom: 2,
   },
   time: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#e0e0e0',
   },
   badge: {
