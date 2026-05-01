@@ -10,6 +10,7 @@ import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useRealtimeTableUpdates } from '@/hooks/useRealtimeTableUpdates';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface Table {
   id: string;
@@ -23,6 +24,7 @@ interface Table {
 }
 
 export default function MerchantTablesScreen() {
+  const insets = useSafeAreaInsets();
   const [tables, setTables] = useState<Table[]>([]);
   const [restaurantId, setRestaurantId] = useState<string | null>(null);
   const { toast, confirm } = useAppToast();
@@ -273,7 +275,7 @@ export default function MerchantTablesScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
       >
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
           <Text style={styles.title}>Tables Management</Text>
           <Text style={styles.subtitle}>Manage seating and availability</Text>
         </View>
@@ -418,7 +420,7 @@ export default function MerchantTablesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 8 },
+  header: { paddingHorizontal: 20, paddingBottom: 8 },
   title: { fontFamily: 'PlusJakartaSans-Bold', fontSize: 26, color: Colors.text },
   subtitle: { fontFamily: 'PlusJakartaSans-Regular', fontSize: 13, color: Colors.gray, marginTop: 4 },
 

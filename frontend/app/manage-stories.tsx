@@ -7,6 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
@@ -116,6 +117,7 @@ function VideoPreviewContent({ story, isPlayingVideo, onPlayPress }: VideoPrevie
 export default function ManageStoriesScreen() {
   const { toast, confirm } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [restaurantName, setRestaurantName] = useState('');
   const [restaurantId, setRestaurantId] = useState('');
@@ -599,7 +601,7 @@ export default function ManageStoriesScreen() {
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={Colors.text} />
           </TouchableOpacity>
@@ -820,7 +822,12 @@ export default function ManageStoriesScreen() {
           setShowPreview(false);
         }}
       >
-        <View style={styles.previewContainer}>
+        <View
+          style={[
+            styles.previewContainer,
+            { paddingTop: Math.max(insets.top + 12, 60), paddingBottom: Math.max(insets.bottom + 24, 40) },
+          ]}
+        >
           {/* Close Button */}
           <TouchableOpacity
             style={styles.previewClose}
@@ -910,7 +917,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 20,
     gap: 12,
@@ -1255,7 +1261,6 @@ const styles = StyleSheet.create({
   previewContainer: {
     flex: 1,
     backgroundColor: Colors.background,
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },

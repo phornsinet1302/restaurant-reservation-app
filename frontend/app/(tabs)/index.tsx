@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,8 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
+let LAST_HOME_REFRESH_GLOBAL_MS = 0;
+let LAST_HOME_PROFILE_SYNC_GLOBAL_MS = 0;
 
 /* ── Data ── */
 
@@ -42,6 +44,7 @@ type Restaurant = {
   description?: string;
   category?: string;
   cuisine?: string;
+  reviews_count?: number;
 };
 
 const CATEGORIES = [
@@ -89,6 +92,26 @@ const formatDistance = (distanceKm: number): string => {
   return `${distanceKm.toFixed(1)}km`;
 };
 
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
+};
+
 /** Prefer district / neighbourhood, then city — de-duplicated for reverse geocode */
 function lineFromGeocode(a: Location.LocationGeocodedAddress): string {
   const parts = [a.district, a.subregion, a.city, a.region].filter(
@@ -115,7 +138,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const [favorites, setFavorites] = useState<string[]>([]);
   const [token, setToken] = useState<string>('');
-  const [loading, setLoading] = useState(false);
+  const [favoriteLoadingId, setFavoriteLoadingId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('Guest');
   const [userEmail, setUserEmail] = useState<string>('');
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
@@ -131,37 +154,59 @@ export default function HomeScreen() {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [userLocationAddress, setUserLocationAddress] = useState<string>('Phnom Penh');
   const { unreadCount } = useNotifications();
+  const refreshingRef = useRef(false);
+  const loadingRestaurantsRef = useRef(false);
+  const currentLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastRefreshAtRef = useRef(LAST_HOME_REFRESH_GLOBAL_MS);
+  const lastProfileSyncAtRef = useRef(LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+  const lastLocationPermissionCheckRef = useRef(0);
+  const lastLocationResolveRef = useRef(0);
+  const HOME_REFRESH_COOLDOWN_MS = 30000;
+  const PROFILE_SYNC_COOLDOWN_MS = 60000;
+  const LOCATION_RESOLVE_COOLDOWN_MS = 15000;
 
   useEffect(() => {
-    loadUserData();
-    requestLocationPermission();
-    loadRestaurants();
     updateGreeting();
   }, []);
 
   // Refresh user data whenever screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      loadUserData();
-      requestLocationPermission();
-      loadRestaurants();
-    }, [])
+      void refreshHomeData();
+    }, [refreshHomeData])
   );
 
   // Request location permission and get current location
-  const requestLocationPermission = async () => {
+  const requestLocationPermission = async (): Promise<{ latitude: number; longitude: number }> => {
+    const fallback = { latitude: 11.5564, longitude: 104.9282 };
     try {
+      const now = Date.now();
+      if (
+        currentLocationRef.current &&
+        now - lastLocationResolveRef.current < LOCATION_RESOLVE_COOLDOWN_MS
+      ) {
+        return currentLocationRef.current;
+      }
+
       console.log('📍 Requesting location permission...');
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const existingPerm = await Location.getForegroundPermissionsAsync();
+      let status = existingPerm.status;
+      if (status !== 'granted' && now - lastLocationPermissionCheckRef.current > LOCATION_RESOLVE_COOLDOWN_MS) {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        status = requested.status;
+        lastLocationPermissionCheckRef.current = now;
+      }
       
       if (status === 'granted') {
         console.log('✅ Location permission granted');
-        await getCurrentLocation();
+        const loc = await getCurrentLocation();
+        lastLocationResolveRef.current = now;
+        return loc;
       } else {
         console.warn('⚠️ Location permission denied');
         setLocationError('Location permission denied. Using default location.');
-        const fallback = { latitude: 11.5564, longitude: 104.9282 };
         setUserLocation(fallback);
+        currentLocationRef.current = fallback;
         try {
           const addresses = await Location.reverseGeocodeAsync(fallback);
           if (addresses?.[0]) {
@@ -170,17 +215,20 @@ export default function HomeScreen() {
         } catch {
           setUserLocationAddress('Phnom Penh');
         }
+        return fallback;
       }
     } catch (error) {
       console.error('❌ Error requesting location permission:', error);
       setLocationError('Could not get location');
-      // Use default location as fallback
-      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      setUserLocation(fallback);
+      currentLocationRef.current = fallback;
+      setUserLocationAddress('Phnom Penh');
+      return fallback;
     }
   };
 
   // Get user's current location
-  const getCurrentLocation = async () => {
+  const getCurrentLocation = async (): Promise<{ latitude: number; longitude: number }> => {
     try {
       console.log('📍 Getting current location...');
       const location = await Location.getCurrentPositionAsync({
@@ -189,7 +237,9 @@ export default function HomeScreen() {
       
       const { latitude, longitude } = location.coords;
       console.log(`✅ Current location: ${latitude}, ${longitude}`);
-      setUserLocation({ latitude, longitude });
+      const nextLocation = { latitude, longitude };
+      setUserLocation(nextLocation);
+      currentLocationRef.current = nextLocation;
       
       // Get address from coordinates using reverse geocoding
       try {
@@ -205,13 +255,17 @@ export default function HomeScreen() {
       }
       
       // Store location for later use
-      await AsyncStorage.setItem('userLocation', JSON.stringify({ latitude, longitude }));
+      await AsyncStorage.setItem('userLocation', JSON.stringify(nextLocation));
+      return nextLocation;
     } catch (error) {
       console.error('❌ Error getting location:', error);
       setLocationError('Could not get your location');
       // Use default location as fallback
-      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      const fallback = { latitude: 11.5564, longitude: 104.9282 };
+      setUserLocation(fallback);
+      currentLocationRef.current = fallback;
       setUserLocationAddress('Phnom Penh');
+      return fallback;
     }
   };
 
@@ -227,20 +281,33 @@ export default function HomeScreen() {
     }
   };
 
-  // Reload restaurants when user location changes
-  useEffect(() => {
-    if (userLocation) {
-      console.log('📍 User location updated, recalculating distances...');
-      loadRestaurants();
+  const refreshHomeData = useCallback(async () => {
+    const now = Date.now();
+    const lastSeen = Math.max(lastRefreshAtRef.current, LAST_HOME_REFRESH_GLOBAL_MS);
+    if (now - lastSeen < HOME_REFRESH_COOLDOWN_MS) return;
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    lastRefreshAtRef.current = now;
+    LAST_HOME_REFRESH_GLOBAL_MS = now;
+    try {
+      await loadUserData();
+      const resolvedLocation = await requestLocationPermission();
+      await loadRestaurants(0, resolvedLocation);
+    } finally {
+      refreshingRef.current = false;
     }
-  }, [userLocation]);
+  }, []);
 
   const loadUserData = async () => {
     try {
+      const now = Date.now();
       const storedToken = await AsyncStorage.getItem('token');
       if (storedToken) {
         setToken(storedToken);
-        await fetchFavorites(storedToken);
+        const lastProfileSync = Math.max(lastProfileSyncAtRef.current, LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+        if (now - lastProfileSync > PROFILE_SYNC_COOLDOWN_MS) {
+          await fetchFavorites(storedToken);
+        }
       }
 
       // Load user profile data
@@ -254,6 +321,13 @@ export default function HomeScreen() {
 
         // Fetch latest profile data from backend (includes profile_picture_url)
         try {
+          const lastProfileSync = Math.max(lastProfileSyncAtRef.current, LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+          if (now - lastProfileSync <= PROFILE_SYNC_COOLDOWN_MS) {
+            if (parsedUser.profile_picture_url) {
+              setProfileImageUri(parsedUser.profile_picture_url);
+            }
+            return;
+          }
           console.log('📸 [HomeScreen] Fetching profile data from backend...');
           const response = await axios.get(`${API_URL}/api/auth/me`, {
             headers: { Authorization: `Bearer ${token}` },
@@ -271,10 +345,14 @@ export default function HomeScreen() {
             // Update AsyncStorage with latest profile picture URL
             parsedUser.profile_picture_url = response.data.user.profile_picture_url;
             await AsyncStorage.setItem('user', JSON.stringify(parsedUser));
+            lastProfileSyncAtRef.current = now;
+            LAST_HOME_PROFILE_SYNC_GLOBAL_MS = now;
             console.log('   ✅ Saved to local storage');
           } else {
             console.log('📸 [HomeScreen] ❌ No profile picture found in backend');
             setProfileImageUri(null);
+            lastProfileSyncAtRef.current = now;
+            LAST_HOME_PROFILE_SYNC_GLOBAL_MS = now;
           }
         } catch (error: any) {
           console.warn('📸 [HomeScreen] ❌ Failed to fetch profile from backend:', error.message);
@@ -310,15 +388,20 @@ export default function HomeScreen() {
     }
   };
 
-  const loadRestaurants = async (retryCount = 0) => {
+  const loadRestaurants = async (
+    retryCount = 0,
+    forcedLocation?: { latitude: number; longitude: number } | null
+  ) => {
+    if (loadingRestaurantsRef.current) return;
     try {
+      loadingRestaurantsRef.current = true;
       setRestaurantsLoading(true);
       console.log('📱 Loading restaurants...', retryCount > 0 ? `(Retry ${retryCount})` : '');
       // Use 30s timeout for consistency with search screen
       const response = await axios.get(`${API_URL}/api/restaurants`, { timeout: 30000 });
       
       // Get user location from state or storage
-      let currentLocation = userLocation;
+      let currentLocation = forcedLocation ?? currentLocationRef.current ?? userLocation;
       if (!currentLocation) {
         const storedLocation = await AsyncStorage.getItem('userLocation');
         if (storedLocation) {
@@ -349,7 +432,7 @@ export default function HomeScreen() {
           name: r.name || 'Restaurant',
           hours: r.opening_hours || 'Check hours',
           distance: distance,
-          rating: r.rating || '4.5',
+          rating: formatRestaurantRating(r.rating),
           latitude: r.latitude || null,
           longitude: r.longitude || null,
           // Use uploaded cover image if available, otherwise fall back to default
@@ -359,6 +442,7 @@ export default function HomeScreen() {
           address: r.address || '',
           category: r.category || '',
           cuisine: r.cuisine || '',
+          reviews_count: typeof r.reviews_count === 'number' ? r.reviews_count : 0,
         };
       }) || [];
       
@@ -377,11 +461,13 @@ export default function HomeScreen() {
         console.log('⏱️ Timeout occurred, retrying... (' + (retryCount + 1) + '/2)');
         // Wait 2 seconds before retrying
         await new Promise(r => setTimeout(r, 2000));
-        return loadRestaurants(retryCount + 1);
+        loadingRestaurantsRef.current = false;
+        return loadRestaurants(retryCount + 1, forcedLocation);
       }
       
       setRestaurants([]);
     } finally {
+      loadingRestaurantsRef.current = false;
       setRestaurantsLoading(false);
     }
   };
@@ -397,7 +483,7 @@ export default function HomeScreen() {
       return;
     }
 
-    setLoading(true);
+    setFavoriteLoadingId(restaurantId);
     try {
       const isFavorited = favorites.includes(restaurantId);
       
@@ -422,7 +508,7 @@ export default function HomeScreen() {
       console.error('Favorite toggle error:', error.response?.data || error.message);
       toast('Failed to update favorite. Please try again.', 'error');
     } finally {
-      setLoading(false);
+      setFavoriteLoadingId(null);
     }
   };
 
@@ -558,9 +644,9 @@ export default function HomeScreen() {
                       id: restaurant.id,
                       name: restaurant.name,
                       rating: restaurant.rating,
-                      reviews: '3.2k',
-                      address: restaurant.address || '42 Fleet Street, City',
-                      description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                      reviews: formatReviewsCount(restaurant.reviews_count),
+                      address: restaurant.address || 'Address unavailable',
+                      description: restaurant.description || 'Description unavailable',
                       hours: restaurant.hours,
                       distance: restaurant.distance,
                       latitude: restaurant.latitude || '',
@@ -595,20 +681,24 @@ export default function HomeScreen() {
                       <View style={styles.metaDivider} />
                       <View style={styles.metaItem}>
                         <Ionicons name="location-outline" size={12} color={Colors.gray} />
-                        <Text style={styles.metaText}>{restaurant.distance || 'N/A'}</Text>
+                        <Text style={styles.metaText}>{restaurant.distance || 'Distance unavailable'}</Text>
                       </View>
                     </View>
                   </View>
                   <View style={styles.restaurantActions}>
                     <TouchableOpacity 
                       onPress={() => handleToggleFavorite(restaurant.id, restaurant.name)}
-                      disabled={loading}
+                      disabled={favoriteLoadingId === restaurant.id}
                     >
-                      <Ionicons 
-                        name={favorites.includes(restaurant.id) ? 'heart' : 'heart-outline'} 
-                        size={22} 
-                        color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
-                      />
+                      {favoriteLoadingId === restaurant.id ? (
+                        <ActivityIndicator size="small" color={Colors.primary} />
+                      ) : (
+                        <Ionicons 
+                          name={favorites.includes(restaurant.id) ? 'heart' : 'heart-outline'} 
+                          size={22} 
+                          color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
+                        />
+                      )}
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.detailsButton}
                       onPress={() =>
@@ -618,9 +708,9 @@ export default function HomeScreen() {
                             id: restaurant.id,
                             name: restaurant.name,
                             rating: restaurant.rating,
-                            reviews: '3.2k',
-                            address: restaurant.address || '42 Fleet Street, City',
-                            description: restaurant.description || 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
+                            reviews: formatReviewsCount(restaurant.reviews_count),
+                            address: restaurant.address || 'Address unavailable',
+                            description: restaurant.description || 'Description unavailable',
                             hours: restaurant.hours,
                             distance: restaurant.distance,
                             latitude: restaurant.latitude || '',
@@ -742,8 +832,8 @@ const styles = StyleSheet.create({
   },
   notifBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
+    top: 1,
+    right: 1,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -933,11 +1023,13 @@ const styles = StyleSheet.create({
   restaurantInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginTop: 12,
+    gap: 10,
   },
   restaurantNameCol: {
     flex: 1,
+    minWidth: 0,
   },
   restaurantName: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -968,7 +1060,8 @@ const styles = StyleSheet.create({
   restaurantActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
+    flexShrink: 0,
   },
   detailsButton: {
     flexDirection: 'row',
@@ -977,7 +1070,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
   detailsText: {

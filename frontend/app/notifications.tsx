@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Colors } from '@/constants/Colors';
@@ -21,6 +22,7 @@ import { useAppToast } from '@/components/ToastProvider';
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { toast } = useAppToast();
   const [openingId, setOpeningId] = useState<string | null>(null);
   const {
@@ -194,7 +196,7 @@ export default function NotificationsScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
@@ -208,6 +210,7 @@ export default function NotificationsScreen() {
             <Text style={styles.markAllText}>Mark all read</Text>
           </TouchableOpacity>
         )}
+        {unreadCount === 0 && <View style={styles.headerRightPlaceholder} />}
       </View>
 
       {/* Notification List */}
@@ -254,6 +257,7 @@ export default function NotificationsScreen() {
                 ) : (
                   <TouchableOpacity
                     style={styles.deleteBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     onPress={() => deleteNotification(n.id)}
                   >
                     <Ionicons name="trash-outline" size={16} color={Colors.gray} />
@@ -280,9 +284,8 @@ const styles = StyleSheet.create({
   /* Header */
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 16,
   },
@@ -316,6 +319,10 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-SemiBold',
     fontSize: 13,
     color: Colors.primary,
+  },
+  headerRightPlaceholder: {
+    width: 120,
+    height: 28,
   },
 
   /* Loading */
@@ -434,11 +441,11 @@ const styles = StyleSheet.create({
 
   /* Delete button */
   deleteBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
+    marginTop: -4,
   },
 
   /* Unread dot */

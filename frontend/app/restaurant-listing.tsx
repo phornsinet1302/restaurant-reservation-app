@@ -188,6 +188,8 @@ export default function RestaurantListingScreen() {
     loadRestaurantData();
   }, []);
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   const loadMenuPhotos = async (restId: string) => {
     try {
       if (!restId) {
@@ -197,8 +199,13 @@ export default function RestaurantListingScreen() {
       const endpoint = `${API_CONFIG.BASE_URL}/api/menu-photos/${restId}`;
       console.log(`[loadMenuPhotos] Fetching from: ${endpoint}`);
       const res = await axios.get(endpoint);
-      setMenuPhotos(res.data.data || []);
-      console.log(`[loadMenuPhotos] Loaded ${res.data.data?.length || 0} photos`);
+      const photos = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.data)
+          ? res.data.data
+          : [];
+      setMenuPhotos(photos);
+      console.log(`[loadMenuPhotos] Loaded ${photos.length} photos`);
     } catch (error: any) {
       console.log('Loading menu photos error:', error.message);
     }
@@ -209,7 +216,7 @@ export default function RestaurantListingScreen() {
       console.log(`[pickMenuPhoto] Opening image picker for photo slot ${photoIndex}`);
       
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -289,14 +296,22 @@ export default function RestaurantListingScreen() {
       );
 
       console.log(`[uploadMenuPhoto] Response:`, uploadRes.data);
-      
-      if (uploadRes.data?.data) {
-        await loadMenuPhotos(restaurantId);
-        toast('Menu photo uploaded!', 'success');
-      } else if (uploadRes.data?.success) {
-        await loadMenuPhotos(restaurantId);
-        toast('Menu photo uploaded!', 'success');
+
+      const uploadedPhoto = uploadRes.data?.photo || uploadRes.data?.data;
+      if (uploadedPhoto?.id) {
+        setMenuPhotos((prev) => {
+          const next = prev.filter((p) => p.display_order !== uploadedPhoto.display_order && p.id !== uploadedPhoto.id);
+          next.push(uploadedPhoto);
+          return next.sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+        });
       }
+
+      // Backend/storage propagation can be delayed on device networks; retry photo refresh.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await sleep(attempt === 0 ? 250 : 600);
+        await loadMenuPhotos(restaurantId);
+      }
+      toast('Menu photo uploaded!', 'success');
     } catch (error: any) {
       console.error('Upload error:', error);
       console.error('Upload error details:', {
@@ -318,6 +333,8 @@ export default function RestaurantListingScreen() {
         toast(msg, 'error');
       } else if (error?.code === 'ECONNREFUSED') {
         toast('Cannot connect to backend. Is the server running on port 3000?', 'error');
+      } else if (error?.message === 'Network Error' || error?.code === 'ERR_NETWORK') {
+        toast('Network unstable during upload. Please try again.', 'error');
       } else {
         const msg = error?.response?.data?.error || error?.message || 'Failed to upload photo';
         toast(msg, 'error');
@@ -361,7 +378,7 @@ export default function RestaurantListingScreen() {
       console.log('[pickCoverImage] Launching image library...');
       
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [16, 9],
         quality: 0.8,

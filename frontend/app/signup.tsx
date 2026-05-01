@@ -16,6 +16,7 @@ import {
   } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
 import DatePickerInput from '@/components/DatePickerInput';
@@ -26,6 +27,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function SignUpScreen() {
   const { toast, confirm } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -117,7 +119,12 @@ export default function SignUpScreen() {
           // Critical: ensure we leave guest mode after OAuth sign up
           await AsyncStorage.removeItem('guestMode');
           toast('Signed up with Google successfully!', 'success');
-          router.replace('/(tabs)');
+          const oauthRole = authUser?.role;
+          if (oauthRole === 'merchant' || oauthRole === 'restaurant') {
+            router.replace('/(merchant-tabs)');
+          } else {
+            router.replace('/(tabs)');
+          }
         } else {
           toast('No token received from backend', 'error');
         }
@@ -167,7 +174,12 @@ export default function SignUpScreen() {
           await AsyncStorage.removeItem('guestMode');
           
           toast('Signed up with Apple successfully!', 'success');
-          router.replace('/(tabs)');
+          const appleRole = response.data.user?.role;
+          if (appleRole === 'merchant' || appleRole === 'restaurant') {
+            router.replace('/(merchant-tabs)');
+          } else {
+            router.replace('/(tabs)');
+          }
         } else {
           toast('No token received', 'error');
         }
@@ -251,6 +263,8 @@ export default function SignUpScreen() {
           }));
           console.log('User info stored:', response.data.user.email);
         }
+        // Persist intended role until verification completes.
+        await AsyncStorage.setItem('pendingSignupRole', selectedRole);
 
         // Restore email verification flow
         await axios.post(`${API_CONFIG.BASE_URL}/api/auth/send-verification-email`, {
@@ -304,7 +318,7 @@ export default function SignUpScreen() {
         }
       } finally {
         setLoading(false);
-        // Clear the selected role after signup attempt
+        // Clear transient selection; verification uses pendingSignupRole.
         await AsyncStorage.removeItem('selectedRole');
       }
     }
@@ -317,7 +331,10 @@ export default function SignUpScreen() {
     >
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: Math.max(insets.top + 16, 60), paddingBottom: Math.max(insets.bottom + 20, 40) },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -508,8 +525,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 40,
     flexGrow: 1,
   },
   backButton: {

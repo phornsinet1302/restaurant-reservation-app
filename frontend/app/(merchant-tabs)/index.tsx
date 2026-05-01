@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -40,6 +41,7 @@ function getTodayIndex() {
 
 export default function MerchantDashboard() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { unreadCount } = useNotifications();
   const [restaurantName, setRestaurantName] = useState('My Restaurant');
   const [restaurantAddress, setRestaurantAddress] = useState('');
@@ -134,7 +136,7 @@ export default function MerchantDashboard() {
         {/* Header with gradient */}
         <LinearGradient
           colors={[Colors.primary, '#D4A821', '#C49B1D']}
-          style={styles.headerGradient}
+          style={[styles.headerGradient, { paddingTop: Math.max(insets.top + 12, 60) }]}
         >
           <View style={styles.headerTop}>
             <View style={styles.badge}>
@@ -320,7 +322,6 @@ const styles = StyleSheet.create({
 
   /* Header gradient */
   headerGradient: {
-    paddingTop: 60,
     paddingBottom: 30,
     paddingHorizontal: 20,
     borderBottomLeftRadius: 0,

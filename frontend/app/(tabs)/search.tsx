@@ -14,6 +14,7 @@ import {
   } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
@@ -35,7 +36,7 @@ type Restaurant = {
   name: string;
   address?: string;
   description?: string;
-  rating?: number;
+  rating?: number | string;
   image_url?: string;
   latitude?: number;
   longitude?: number;
@@ -43,10 +44,32 @@ type Restaurant = {
   hours?: string;
   opening_hours?: string;
   category?: string;
+  reviews_count?: number;
+};
+
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
 };
 
 export default function SearchScreen() {
   const { toast } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -54,12 +77,15 @@ export default function SearchScreen() {
   const [error, setError] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [token, setToken] = useState<string>('');
-  const [toggleLoading, setToggleLoading] = useState(false);
+  const [favoriteLoadingId, setFavoriteLoadingId] = useState<string | null>(null);
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const { isGuest } = useAuth();
-  const isInitialMountRef = useRef(true);
+  const requestSeqRef = useRef(0);
+  const latestAppliedSeqRef = useRef(0);
+  const inFlightKeyRef = useRef<string | null>(null);
+  const activeRequestSeqRef = useRef(0);
   const router = useRouter();
 
   // Calculate distance between two coordinates using Haversine formula
@@ -160,7 +186,7 @@ export default function SearchScreen() {
       return;
     }
 
-    setToggleLoading(true);
+    setFavoriteLoadingId(restaurantId);
     try {
       const isFavorited = favorites.includes(restaurantId);
 
@@ -183,12 +209,23 @@ export default function SearchScreen() {
       console.error('Favorite toggle error:', error.response?.data || error.message);
       toast('Failed to update favorite. Please try again.', 'error');
     } finally {
-      setToggleLoading(false);
+      setFavoriteLoadingId(null);
     }
   };
 
   // Fetch restaurants based on search term
   const fetchRestaurants = async (query: string, retryCount = 0) => {
+    const locationKey = userLocation
+      ? `${userLocation.latitude.toFixed(4)},${userLocation.longitude.toFixed(4)}`
+      : 'no-location';
+    const requestKey = `${query.trim().toLowerCase()}|${locationKey}|retry:${retryCount}`;
+    if (retryCount === 0 && inFlightKeyRef.current === requestKey) {
+      return;
+    }
+
+    const seq = ++requestSeqRef.current;
+    activeRequestSeqRef.current = seq;
+    inFlightKeyRef.current = requestKey;
     try {
       setLoading(true);
       setError('');
@@ -222,6 +259,8 @@ export default function SearchScreen() {
           
           return {
             ...restaurant,
+            rating: formatRestaurantRating(restaurant.rating),
+            reviews_count: typeof restaurant.reviews_count === 'number' ? restaurant.reviews_count : 0,
             distance: distance,
             hours: restaurant.opening_hours || 'Check hours',
           };
@@ -230,6 +269,8 @@ export default function SearchScreen() {
         // Set default values if no user location
         restaurantsWithDistance = restaurantsWithDistance.map((restaurant: Restaurant) => ({
           ...restaurant,
+          rating: formatRestaurantRating(restaurant.rating),
+          reviews_count: typeof restaurant.reviews_count === 'number' ? restaurant.reviews_count : 0,
           distance: 'Unknown',
           hours: restaurant.opening_hours || 'Check hours',
         }));
@@ -242,6 +283,9 @@ export default function SearchScreen() {
         hours: r.hours,
       })));
 
+      // Ignore stale responses from older requests
+      if (seq < latestAppliedSeqRef.current) return;
+      latestAppliedSeqRef.current = seq;
       setRestaurants(restaurantsWithDistance);
     } catch (err: any) {
       console.error('❌ Search error:', err.message);
@@ -252,6 +296,7 @@ export default function SearchScreen() {
         console.log('⏱️ Timeout occurred, retrying... (' + (retryCount + 1) + '/2)');
         // Wait 2 seconds before retrying
         await new Promise(r => setTimeout(r, 2000));
+        inFlightKeyRef.current = null;
         return fetchRestaurants(query, retryCount + 1);
       }
       
@@ -264,41 +309,30 @@ export default function SearchScreen() {
         setError('Unable to load restaurants. Please try again.');
       }
       
-      setRestaurants([]);
+      if (seq >= latestAppliedSeqRef.current) {
+        latestAppliedSeqRef.current = seq;
+        setRestaurants([]);
+      }
     } finally {
-      setLoading(false);
+      if (seq === activeRequestSeqRef.current) {
+        setLoading(false);
+      }
+      if (inFlightKeyRef.current === requestKey) {
+        inFlightKeyRef.current = null;
+      }
     }
   };
 
-  // Debounce search - skip on initial mount to avoid redundant fetch
+  // Unified fetch trigger: query and location changes
   useEffect(() => {
-    // Skip the initial mount since location watcher handles the initial empty search
-    if (isInitialMountRef.current) {
-      isInitialMountRef.current = false;
-      return;
-    }
+    if (!userLocation) return;
 
     const timer = setTimeout(() => {
-      if (searchTerm.length > 0) {
-        fetchRestaurants(searchTerm);
-      } else {
-        fetchRestaurants('');
-      }
+      fetchRestaurants(searchTerm.length > 0 ? searchTerm : '');
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Reload restaurants when location changes
-  useEffect(() => {
-    if (userLocation && searchTerm.length >= 0) {
-      if (searchTerm.length > 0) {
-        fetchRestaurants(searchTerm);
-      } else {
-        fetchRestaurants('');
-      }
-    }
-  }, [userLocation]);
+  }, [searchTerm, userLocation]);
 
   // Map filter IDs to restaurant categories
   const categoryMap: Record<string, string[]> = {
@@ -326,16 +360,12 @@ export default function SearchScreen() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
         showsVerticalScrollIndicator={false}
       >
       {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Search restaurants</Text>
-      </View>
+      <Text style={styles.heading}>Search</Text>
+      <Text style={styles.subHeading}>Find your next table</Text>
 
       {/* Search bar */}
       <View style={styles.searchBox}>
@@ -348,7 +378,11 @@ export default function SearchScreen() {
           onChangeText={setSearchTerm}
         />
         {searchTerm ? (
-          <TouchableOpacity onPress={() => setSearchTerm('')}>
+          <TouchableOpacity
+            style={styles.clearSearchButton}
+            onPress={() => setSearchTerm('')}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
             <Ionicons name="close" size={18} color={Colors.gray} />
           </TouchableOpacity>
         ) : null}
@@ -393,16 +427,30 @@ export default function SearchScreen() {
       {/* Error message */}
       {error && !loading && (
         <View style={styles.centerContent}>
+          <Ionicons name="warning-outline" size={42} color={Colors.error} />
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => fetchRestaurants(searchTerm)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.retryBtnText}>Try again</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {/* No results */}
-      {!loading && filteredRestaurants.length === 0 && searchTerm && (
+      {!loading && !error && filteredRestaurants.length === 0 && (
         <View style={styles.centerContent}>
           <Ionicons name="search" size={48} color={Colors.gray} style={{ marginBottom: 12 }} />
-          <Text style={styles.noResultsText}>No restaurants found</Text>
-          <Text style={styles.noResultsSubText}>Try searching with different keywords</Text>
+          <Text style={styles.noResultsText}>
+            {searchTerm ? 'No restaurants found' : 'No restaurants match this filter'}
+          </Text>
+          <Text style={styles.noResultsSubText}>
+            {searchTerm
+              ? 'Try searching with different keywords'
+              : 'Try another category or clear your filter'}
+          </Text>
         </View>
       )}
 
@@ -423,11 +471,11 @@ export default function SearchScreen() {
               params: {
                 id: r.id,
                 name: r.name,
-                rating: r.rating || '4.5',
-                reviews: '3.2k',
-                address: r.address || 'No address provided',
-                description: r.description || 'No description',
-                hours: r.hours || 'Check hours',
+                rating: r.rating || 'New',
+                reviews: formatReviewsCount(r.reviews_count),
+                address: r.address || 'Address unavailable',
+                description: r.description || 'Description unavailable',
+                hours: r.hours || 'Hours unavailable',
                 distance: r.distance || 'Unknown',
                 latitude: r.latitude || '',
                 longitude: r.longitude || '',
@@ -446,7 +494,7 @@ export default function SearchScreen() {
             )}
             <View style={styles.ratingBadge}>
               <Ionicons name="star" size={13} color="#FFFBF0" />
-              <Text style={styles.ratingText}>{r.rating || '4.5'}</Text>
+              <Text style={styles.ratingText}>{r.rating || 'New'}</Text>
             </View>
           </View>
 
@@ -458,13 +506,17 @@ export default function SearchScreen() {
             <View style={styles.cardActions}>
               <TouchableOpacity
                 onPress={() => handleToggleFavorite(r.id, r.name)}
-                disabled={toggleLoading}
+                disabled={favoriteLoadingId === r.id}
               >
-                <Ionicons
-                  name={favorites.includes(r.id) ? 'heart' : 'heart-outline'}
-                  size={22}
-                  color={favorites.includes(r.id) ? Colors.accent : Colors.text}
-                />
+                {favoriteLoadingId === r.id ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : (
+                  <Ionicons
+                    name={favorites.includes(r.id) ? 'heart' : 'heart-outline'}
+                    size={22}
+                    color={favorites.includes(r.id) ? Colors.accent : Colors.text}
+                  />
+                )}
               </TouchableOpacity>
               <TouchableOpacity style={styles.detailsBtn}
                 onPress={() =>
@@ -473,11 +525,11 @@ export default function SearchScreen() {
                     params: {
                       id: r.id,
                       name: r.name,
-                      rating: r.rating || '4.5',
-                      reviews: '3.2k',
-                      address: r.address || 'No address provided',
-                      description: r.description || 'No description',
-                      hours: r.hours || 'Check hours',
+                      rating: r.rating || 'New',
+                      reviews: formatReviewsCount(r.reviews_count),
+                      address: r.address || 'Address unavailable',
+                      description: r.description || 'Description unavailable',
+                      hours: r.hours || 'Hours unavailable',
                       distance: r.distance || 'Unknown',
                       latitude: r.latitude || '',
                       longitude: r.longitude || '',
@@ -495,7 +547,7 @@ export default function SearchScreen() {
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{r.hours || 'Check hours'}</Text>
+              <Text style={styles.metaText}>{r.hours || 'Hours unavailable'}</Text>
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="location-outline" size={14} color={Colors.gray} />
@@ -523,28 +575,23 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingTop: 60,
     paddingBottom: 30,
   },
 
   /* Header */
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    gap: 12,
-    marginBottom: 20,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  headerTitle: {
+  heading: {
     fontFamily: 'PlusJakartaSans-Bold',
-    fontSize: 20,
+    fontSize: 24,
     color: Colors.text,
+    paddingHorizontal: 20,
+  },
+  subHeading: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 4,
+    marginBottom: 18,
+    paddingHorizontal: 20,
   },
 
   /* Search */
@@ -564,6 +611,13 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Regular',
     color: Colors.text,
     fontSize: 14,
+  },
+  clearSearchButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   /* Filters */
@@ -652,11 +706,13 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginTop: 12,
+    gap: 10,
   },
   nameCol: {
     flex: 1,
+    minWidth: 0,
   },
   cardName: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -666,7 +722,8 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
+    flexShrink: 0,
   },
   detailsBtn: {
     flexDirection: 'row',
@@ -675,7 +732,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
   detailsBtnText: {
@@ -718,6 +775,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.error,
     textAlign: 'center',
+    marginTop: 10,
+  },
+  retryBtn: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#FFF',
+  },
+  retryBtnText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 13,
+    color: Colors.primary,
   },
   noResultsText: {
     fontFamily: 'PlusJakartaSans-Bold',

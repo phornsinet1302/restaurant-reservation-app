@@ -54,7 +54,10 @@ export default function ManageStoriesScreen() {
   const loadUserData = async () => {
     try {
       setLoading(true);
-      const token = await AsyncStorage.getItem('authToken');
+      // Prefer canonical token key; keep legacy fallback for older sessions.
+      const token =
+        (await AsyncStorage.getItem('token')) ||
+        (await AsyncStorage.getItem('authToken'));
       const restaurantId = await AsyncStorage.getItem('restaurantId');
 
       if (!token || !restaurantId) {

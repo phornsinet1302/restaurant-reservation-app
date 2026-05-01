@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +21,26 @@ import GuestLoginModal from '@/components/GuestLoginModal';
 import { useAppToast } from '@/components/ToastProvider';
 
 const API_URL = API_CONFIG.BASE_URL;
+
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
+};
 
 /* ── Data ── */
 
@@ -39,6 +60,7 @@ type FavoriteRestaurant = {
   latitude?: string;
   longitude?: string;
   category?: string;
+  reviews_count?: number;
 };
 
 /* ── Component ── */
@@ -46,6 +68,7 @@ type FavoriteRestaurant = {
 export default function FavoritesScreen() {
   const { toast } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [favorites, setFavorites] = useState<FavoriteRestaurant[]>([]);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string>('');
@@ -166,7 +189,7 @@ export default function FavoritesScreen() {
           restaurant_id: item.restaurant_id,
           name: restaurant?.name || 'Restaurant',
           location: restaurant?.address || 'No address',
-          rating: restaurant?.rating || '4.5',
+          rating: formatRestaurantRating(restaurant?.rating),
           distance: distance,
           image_url: restaurant?.image_url || '',
           tags: restaurant?.category || 'Restaurant',
@@ -179,6 +202,7 @@ export default function FavoritesScreen() {
           category: restaurant?.category || '',
           phone: restaurant?.phone || '',
           cuisine: restaurant?.cuisine || '',
+          reviews_count: typeof restaurant?.reviews_count === 'number' ? restaurant.reviews_count : 0,
         };
       });
 
@@ -209,7 +233,7 @@ export default function FavoritesScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
@@ -246,10 +270,10 @@ export default function FavoritesScreen() {
                       id: item.restaurant_id,
                       name: item.name,
                       rating: item.rating,
-                      reviews: '3.2k',
-                      address: item.address || item.location || 'No address',
-                      description: item.description || 'No description available',
-                      hours: item.hours || 'Check hours',
+                      reviews: formatReviewsCount(item.reviews_count),
+                      address: item.address || item.location || 'Address unavailable',
+                      description: item.description || 'Description unavailable',
+                      hours: item.hours || 'Hours unavailable',
                       distance: item.distance,
                       latitude: item.latitude || '',
                       longitude: item.longitude || '',
@@ -329,7 +353,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 16,
     gap: 12,

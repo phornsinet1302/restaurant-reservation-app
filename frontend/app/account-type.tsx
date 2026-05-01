@@ -2,10 +2,12 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AccountTypeScreen() {
+  const insets = useSafeAreaInsets();
   const handleSelectRole = async (role: 'customer' | 'restaurant') => {
     try {
       await AsyncStorage.setItem('selectedRole', role);
@@ -21,7 +23,10 @@ export default function AccountTypeScreen() {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: Math.max(insets.top + 16, 60), paddingBottom: Math.max(insets.bottom + 20, 40) },
+      ]}
       showsVerticalScrollIndicator={false}
     >
       {/* Back button */}
@@ -84,8 +89,6 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 40,
     flexGrow: 1,
   },
   backButton: {

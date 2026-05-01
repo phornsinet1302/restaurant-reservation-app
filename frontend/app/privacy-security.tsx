@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -13,6 +14,7 @@ import { useAppToast } from '@/components/ToastProvider';
 export default function PrivacySecurityScreen() {
   const { toast, confirm } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [restaurantName, setRestaurantName] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -73,7 +75,7 @@ export default function PrivacySecurityScreen() {
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color={Colors.text} />
           </TouchableOpacity>
@@ -92,7 +94,7 @@ export default function PrivacySecurityScreen() {
             </View>
             <View style={styles.rowContent}>
               <Text style={styles.rowLabel}>Account email</Text>
-              <Text style={styles.rowValue}>{email || 's@gmail.com'}</Text>
+              <Text style={styles.rowValue}>{email || 'Not available'}</Text>
             </View>
           </View>
 
@@ -239,7 +241,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 20,
     gap: 12,

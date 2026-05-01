@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -126,6 +127,7 @@ function StarRow({ rating, size = 18 }: { rating: number; size?: number }) {
 export default function RestaurantDetailScreen() {
   const { toast } = useAppToast();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     id: string;
     name: string;
@@ -142,7 +144,6 @@ export default function RestaurantDetailScreen() {
   }>();
 
   const [isFav, setIsFav] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [token, setToken] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -183,20 +184,20 @@ export default function RestaurantDetailScreen() {
 
   const restaurantId = (params.id || '').trim();
   const [name, setName] = useState(params.name || '');
-  const [rating, setRating] = useState(params.rating || '4.0');
+  const [rating, setRating] = useState(params.rating || 'New');
   const [reviewsCount, setReviewsCount] = useState(params.reviews || '0');
   const [address, setAddress] = useState(params.address || '');
   const [latitude, setLatitude] = useState<number | null>(params.latitude ? parseFloat(params.latitude) : null);
   const [longitude, setLongitude] = useState<number | null>(params.longitude ? parseFloat(params.longitude) : null);
   const [description, setDescription] = useState(params.description || '');
   const [hours, setHours] = useState(params.hours || '');
-  const [distance] = useState(params.distance || '0.2 miles');
+  const [distance] = useState(params.distance || 'Distance unavailable');
 
   // Use uploaded cover image if available, otherwise fall back to static map
   const heroImage = heroImageUrl
     ? { uri: heroImageUrl }
     : RESTAURANT_IMAGES[name] || require('@/assets/restaurant-4.jpg');
-  const closingTime = (hours || 'Open Until 3:00pm').replace('Open Until ', '');
+  const closingTime = hours ? hours.replace('Open Until ', '') : 'Hours unavailable';
 
   // Build combined photos list for the viewer
   const buildAllPhotos = (): ImageSourcePropType[] => {
@@ -509,6 +510,11 @@ export default function RestaurantDetailScreen() {
   };
 
   const handleToggleFavorite = async () => {
+    if (isGuest) {
+      setShowGuestModal(true);
+      return;
+    }
+
     if (!token) {
       toast('You must be logged in to favorite restaurants', 'error');
       return;
@@ -621,13 +627,13 @@ export default function RestaurantDetailScreen() {
         {/* Transparent spacer so hero shows through */}
         <View style={styles.heroSpacer}>
           {/* Back button */}
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={[styles.backBtn, { top: insets.top + 8 }]} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color={Colors.white} />
           </TouchableOpacity>
 
           {/* Favorite button */}
           <TouchableOpacity 
-            style={styles.favBtn} 
+            style={[styles.favBtn, { top: insets.top + 8 }]} 
             onPress={handleToggleFavorite}
             disabled={loading}
           >
@@ -638,8 +644,8 @@ export default function RestaurantDetailScreen() {
           <View style={styles.heroInfo}>
             <Text style={styles.heroName}>{name}</Text>
             <View style={styles.heroMetaRow}>
-              <View style={styles.openDot} />
-              <Text style={styles.heroMetaText}>Open now</Text>
+              <Ionicons name="time-outline" size={14} color={Colors.white} />
+              <Text style={styles.heroMetaText}>{hours ? 'Hours available' : 'Hours unavailable'}</Text>
               <Text style={styles.heroMetaDivider}>•</Text>
               <TouchableOpacity
                 onPress={scrollToReviews}
@@ -754,18 +760,18 @@ export default function RestaurantDetailScreen() {
               <Text style={styles.openMapsLink}>Open in Google Maps</Text>
             </TouchableOpacity>
           </View>
-          
-          <TouchableOpacity style={styles.mapImageWrapper} onPress={openGoogleMaps}>
-            <Image
-              source={require('@/assets/map/Screenshot 2026-03-08 at 12.04.44 in the afternoon.png')}
-              style={styles.mapImage}
-              resizeMode="cover"
-            />
-            <View style={styles.mapOverlay}>
-              <Text style={styles.mapOverlayText}>Tap map for directions</Text>
+
+          <TouchableOpacity style={styles.mapCtaCard} onPress={openGoogleMaps} activeOpacity={0.8}>
+            <View style={styles.mapCtaIconWrap}>
+              <Ionicons name="navigate-circle-outline" size={30} color={Colors.primary} />
             </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.mapCtaTitle}>Get live directions</Text>
+              <Text style={styles.mapCtaSub}>Opens Google Maps with this restaurant location</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={Colors.primary} />
           </TouchableOpacity>
-          
+
           <Text style={styles.mapAddress}>{address}</Text>
           <Text style={styles.mapDirectionsNote}>
             Directions use your current location as the starting point.
@@ -856,15 +862,9 @@ export default function RestaurantDetailScreen() {
           <Text style={styles.sectionTitle}>Available slots for today</Text>
           <View style={styles.slotsRow}>
             {TIME_SLOTS.map((slot) => (
-              <TouchableOpacity
-                key={slot}
-                style={[styles.slotChip, selectedSlot === slot && styles.slotChipActive]}
-                onPress={() => setSelectedSlot(slot)}
-              >
-                <Text style={[styles.slotText, selectedSlot === slot && styles.slotTextActive]}>
-                  {slot}
-                </Text>
-              </TouchableOpacity>
+              <View key={slot} style={styles.slotChip}>
+                <Text style={styles.slotText}>{slot}</Text>
+              </View>
             ))}
           </View>
         </View>
@@ -1265,31 +1265,36 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.primary,
   },
-  mapImageWrapper: {
+  mapCtaCard: {
     borderRadius: 12,
-    overflow: 'hidden',
-    height: 180,
-    position: 'relative',
+    minHeight: 88,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     borderWidth: 1,
     borderColor: Colors.border,
+    backgroundColor: '#FFFDF6',
   },
-  mapImage: {
-    width: '100%',
-    height: '100%',
-  },
-  mapOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    paddingVertical: 10,
+  mapCtaIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#F5EFDC',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  mapOverlayText: {
-    fontFamily: 'PlusJakartaSans-Medium',
-    fontSize: 13,
+  mapCtaTitle: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 14,
     color: Colors.text,
+  },
+  mapCtaSub: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.gray,
+    marginTop: 2,
   },
   mapAddress: {
     fontFamily: 'PlusJakartaSans-SemiBold',
@@ -1554,7 +1559,7 @@ const styles = StyleSheet.create({
   },
   bookTableBtn: {
     flex: 1,
-    backgroundColor: Colors.primary,
+    backgroundColor: '#C99700',
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
@@ -1562,7 +1567,7 @@ const styles = StyleSheet.create({
   bookTableText: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 16,
-    color: Colors.white,
+    color: '#FFFFFF',
   },
 
   /* Menu card */

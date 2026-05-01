@@ -12,6 +12,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useReservationSocket } from '@/hooks/useReservationSocket';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type TabKey = 'upcoming' | 'completed' | 'cancelled';
 
@@ -37,6 +38,7 @@ interface Reservation {
 }
 
 export default function MerchantBookingsScreen() {
+  const insets = useSafeAreaInsets();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>('upcoming');
   const { toast } = useAppToast();
@@ -375,7 +377,7 @@ export default function MerchantBookingsScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <Text style={styles.title}>Bookings</Text>
         <Text style={styles.subtitle}>Manage your reservations</Text>
       </View>
@@ -519,7 +521,7 @@ export default function MerchantBookingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingTop: 60, paddingHorizontal: 20, paddingBottom: 8 },
+  header: { paddingHorizontal: 20, paddingBottom: 8 },
   title: { fontFamily: 'PlusJakartaSans-Bold', fontSize: 26, color: Colors.text },
   subtitle: { fontFamily: 'PlusJakartaSans-Regular', fontSize: 13, color: Colors.gray, marginTop: 4 },
 

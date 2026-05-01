@@ -21,6 +21,26 @@ import { API_CONFIG } from '@/app/config/apiConfig';
 import { useBookingUpdates } from '@/hooks/useBookingUpdates';
 import CustomButton from '@/components/CustomButton';
 import { useAppToast } from '@/components/ToastProvider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+let LAST_BOOKINGS_REFRESH_GLOBAL_MS = 0;
+
+function decodeJwtPayload(token: string): any | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => `%${`00${c.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join('')
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
 
 /* ── Types ── */
 
@@ -107,42 +127,33 @@ function getBookingStatusAndLabel(
   return { status: 'Upcoming' };
 }
 
-const TABS = ['Upcoming', 'Past', 'Cancelled / Modified'] as const;
+const TABS = ['Upcoming', 'Past', 'Cancelled'] as const;
 
 /* ── Component ── */
 
 export default function BookingsScreen() {
   const { toast, confirm } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState(0);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+  const lastBookingsRefreshRef = React.useRef(LAST_BOOKINGS_REFRESH_GLOBAL_MS);
+  const BOOKINGS_REFRESH_COOLDOWN_MS = 30000;
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const router = useRouter();
   const { isGuest } = useAuth();
 
-  // Handle real-time booking updates from WebSocket
-  const handleBookingUpdate = useCallback((update: any) => {
-    console.log('📢 Real-time booking update received:', update);
-    
-    // Show notification
-    if (update.action === 'confirmed') {
-      toast('The restaurant has confirmed your booking!', 'success');
-    } else if (update.action === 'rejected') {
-      toast(update.reason || 'Your booking has been rejected by the restaurant.', 'info');
-    } else if (update.action === 'cancelled') {
-      toast('Your booking has been cancelled.', 'info');
-    }
-    
-    // Refresh bookings list immediately
-    loadBookings();
-  }, []);
-
-  // WebSocket hook for real-time updates
-  useBookingUpdates(customerId, handleBookingUpdate);
-
   // Fetch bookings from API
-  const loadBookings = useCallback(async () => {
+  const loadBookings = useCallback(async (force = false) => {
+    const now = Date.now();
+    const lastSeen = Math.max(lastBookingsRefreshRef.current, LAST_BOOKINGS_REFRESH_GLOBAL_MS);
+    if (!force && now - lastSeen < BOOKINGS_REFRESH_COOLDOWN_MS) {
+      return;
+    }
+    lastBookingsRefreshRef.current = now;
+    LAST_BOOKINGS_REFRESH_GLOBAL_MS = now;
     try {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
@@ -155,25 +166,22 @@ export default function BookingsScreen() {
       const response = await axios.get(`${API_CONFIG.BASE_URL}/api/reservations/my-reservations`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      setBookingError(null);
 
       console.log('✅ Bookings loaded:', response.data);
 
       // Extract customer ID from token or first booking (for WebSocket)
       if (!customerId && response.data && response.data.length > 0) {
         // Try to decode JWT to get user ID
-        try {
-          const parts = token.split('.');
-          if (parts.length === 3) {
-            const decoded = JSON.parse(
-              Buffer.from(parts[1], 'base64').toString('utf-8')
-            );
-            if (decoded.sub) {
-              setCustomerId(decoded.sub);
-              console.log('🆔 Customer ID set from token:', decoded.sub);
-            }
-          }
-        } catch (e) {
-          console.log('Could not decode JWT:', e);
+        const decoded = decodeJwtPayload(token);
+        if (decoded?.sub) {
+          setCustomerId(decoded.sub);
+          console.log('🆔 Customer ID set from token:', decoded.sub);
+        } else if (decoded?.id) {
+          setCustomerId(decoded.id);
+          console.log('🆔 Customer ID set from token:', decoded.id);
+        } else {
+          console.log('Could not decode JWT: missing id/sub claim');
         }
       }
 
@@ -227,21 +235,43 @@ export default function BookingsScreen() {
       setBookings(transformedBookings);
     } catch (error: any) {
       console.error('❌ Error loading bookings:', error);
+      setBookingError('Could not load bookings. Please check your connection and try again.');
+      setBookings([]);
     } finally {
       setLoading(false);
     }
   }, [customerId]);
 
+  // Handle real-time booking updates from WebSocket
+  const handleBookingUpdate = useCallback((update: any) => {
+    console.log('📢 Real-time booking update received:', update);
+
+    if (update.action === 'confirmed') {
+      toast('The restaurant has confirmed your booking!', 'success');
+    } else if (update.action === 'rejected') {
+      toast(update.reason || 'Your booking has been rejected by the restaurant.', 'info');
+    } else if (update.action === 'cancelled') {
+      toast('Your booking has been cancelled.', 'info');
+    }
+
+    // Force refresh after critical booking state changes.
+    void loadBookings(true);
+  }, [toast, loadBookings]);
+
+  // WebSocket hook for real-time updates
+  useBookingUpdates(customerId, handleBookingUpdate);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadBookings();
+    await loadBookings(true);
     setRefreshing(false);
   }, [loadBookings]);
 
   useFocusEffect(
     useCallback(() => {
+      if (loading || refreshing) return;
       loadBookings();
-    }, [loadBookings])
+    }, [loadBookings, loading, refreshing])
   );
 
   const canModifyBooking = (booking: Booking): boolean => {
@@ -343,7 +373,7 @@ export default function BookingsScreen() {
 
               console.log('✅ Booking cancelled successfully');
               toast('Your booking has been cancelled', 'success');
-              loadBookings(); // Refresh the list
+              loadBookings(true); // Force refresh after mutation
             } catch (error: any) {
               console.error('❌ Error cancelling booking:', error);
               toast('Failed to cancel booking', 'error');
@@ -357,9 +387,13 @@ export default function BookingsScreen() {
     <View style={styles.container}>
       {isGuest ? (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
           showsVerticalScrollIndicator={false}
         >
+          {/* Header */}
+          <Text style={styles.heading}>Booking History</Text>
+          <Text style={styles.subHeading}>Manage your reservations</Text>
+
           {/* Guest view */}
           <View style={styles.guestViewContainer}>
             <View style={styles.guestIcon}>
@@ -379,7 +413,7 @@ export default function BookingsScreen() {
         </ScrollView>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -396,6 +430,15 @@ export default function BookingsScreen() {
             </View>
           ) : (
             <>
+              {bookingError ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>{bookingError}</Text>
+                  <TouchableOpacity style={styles.retryBtn} onPress={() => void loadBookings(true)}>
+                    <Text style={styles.retryText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
               {/* Tab selector */}
               <View style={styles.tabRow}>
                 {TABS.map((tab, idx) => (
@@ -540,7 +583,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   content: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },
@@ -613,6 +655,34 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 15,
     color: Colors.gray,
+  },
+  errorBox: {
+    borderWidth: 1,
+    borderColor: '#F3C4C4',
+    backgroundColor: '#FFF6F6',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  errorText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 13,
+    color: '#A13A3A',
+  },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#E4B3B3',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#FFF',
+  },
+  retryText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 12,
+    color: '#7A1E1E',
   },
 
   /* Booking card */

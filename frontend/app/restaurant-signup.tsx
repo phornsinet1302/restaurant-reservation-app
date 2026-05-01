@@ -13,6 +13,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
@@ -43,6 +44,7 @@ const CUISINE_OPTIONS = [
 
 export default function RestaurantSignupScreen() {
   const { toast, confirm } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
 
   // Step 1 — Account
@@ -116,6 +118,8 @@ export default function RestaurantSignupScreen() {
       };
 
       await axios.post(API_CONFIG.ENDPOINTS.AUTH.REGISTER, payload);
+      // Persist intended role until verification completes.
+      await AsyncStorage.setItem('pendingSignupRole', selectedRole);
       await axios.post(`${API_CONFIG.BASE_URL}/api/auth/send-verification-email`, {
         email,
       });
@@ -171,7 +175,7 @@ export default function RestaurantSignupScreen() {
       }
     } finally {
       setLoading(false);
-      // Clear the selected role after signup attempt
+      // Clear transient selection; verification uses pendingSignupRole.
       await AsyncStorage.removeItem('selectedRole');
     }
   };
@@ -405,7 +409,7 @@ export default function RestaurantSignupScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
@@ -511,7 +515,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
