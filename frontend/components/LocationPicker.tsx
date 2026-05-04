@@ -40,6 +40,11 @@ export default function LocationPicker({ onLocationSelected, initialLocation }: 
 
   const requestLocationPermission = async () => {
     try {
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        Alert.alert('Location Unavailable', 'Please enable location services in your device settings.');
+        return;
+      }
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         setPermissionGranted(true);
@@ -48,7 +53,7 @@ export default function LocationPicker({ onLocationSelected, initialLocation }: 
         Alert.alert('Permission Denied', 'Location permission is required to select a location');
       }
     } catch (error) {
-      console.error('Permission error:', error);
+      console.warn('Permission error:', error);
     }
   };
 

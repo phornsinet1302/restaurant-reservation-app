@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, RefreshControl, Modal, TextInput, ToastAndroid,
+  ActivityIndicator, RefreshControl, Modal, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -37,6 +37,11 @@ interface Reservation {
   };
 }
 
+const BOOKING_RELOAD_TYPES = new Set([
+  'booking_received', 'booking_confirmed', 'booking_rejected',
+  'booking_cancelled', 'booking_modified', 'booking_arrived', 'booking_completed',
+]);
+
 export default function MerchantBookingsScreen() {
   const insets = useSafeAreaInsets();
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -62,52 +67,46 @@ export default function MerchantBookingsScreen() {
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         console.log('No token found');
+        setLoading(false);
+        setRefreshing(false);
         return;
       }
 
-      console.log('🔄 Loading bookings...');
       const res = await axios.get(`${API_CONFIG.BASE_URL}/api/reservations/merchant/pending-reservations`, {
         headers: { Authorization: `Bearer ${token}` },
+        timeout: 25000,
       });
-      
-      console.log('✅ Bookings loaded:', res.data);
+
       setReservations(res.data || []);
 
-      // Extract restaurant ID from first reservation (all reservations are from same restaurant)
       if (res.data && res.data.length > 0) {
-        const restId = res.data[0].restaurant_id;
-        setRestaurantId(restId);
-        console.log('🏪 Restaurant ID set:', restId);
+        setRestaurantId(res.data[0].restaurant_id);
       }
-
-      // Restaurant name is already shown in card - no need to fetch separately
-      // The booking cards display the restaurant name from state
     } catch (error: any) {
-      console.error('❌ Error loading bookings:', error);
-      console.error('Error response:', error.response?.data);
-      console.error('Error status:', error.response?.status);
-      toast('Failed to load bookings. Please check the backend server.', 'error');
+      const isNetworkError =
+        !error.response &&
+        (error.message === 'Network Error' ||
+          error.code === 'ECONNABORTED' ||
+          error.code === 'ERR_NETWORK');
+
+      if (isNetworkError) {
+        console.warn('⚠️ [MerchantBookings] No internet connection');
+        toast('No internet connection. Please check your network and try again.', 'warning');
+      } else {
+        console.warn('⚠️ [MerchantBookings] Error loading bookings:', error.response?.status, error.message);
+        toast('Failed to load bookings. Please try again.', 'error');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  // Listen for incoming notifications
+  // Reload bookings list whenever a new booking-related notification arrives
   useEffect(() => {
-    if (notifications.length > 0) {
-      const latestNotif = notifications[0];
-      
-      // Show toast for booking confirmations/rejections
-      if (latestNotif.type === 'booking_confirmed') {
-        ToastAndroid.show(`✅ ${latestNotif.title}`, ToastAndroid.LONG);
-        console.log('🔔 Toast shown for booking confirmation');
-        loadData(); // Refresh bookings list
-      } else if (latestNotif.type === 'booking_rejected') {
-        ToastAndroid.show(`❌ ${latestNotif.title}`, ToastAndroid.LONG);
-        console.log('🔔 Toast shown for booking rejection');
-        loadData(); // Refresh bookings list
-      }
+    if (notifications.length > 0 && BOOKING_RELOAD_TYPES.has(notifications[0].type)) {
+      console.log('🔔 [MerchantBookings] Reloading due to notification:', notifications[0].type);
+      loadData();
     }
   }, [notifications, loadData]);
 
@@ -213,11 +212,18 @@ export default function MerchantBookingsScreen() {
         loadData();
       }, 500);
     } catch (error: any) {
-      console.error(`❌ Error ${actionType}ing booking:`);
-      console.error('  Error message:', error.message);
-      console.error('  Status:', error.response?.status);
-      console.error('  Error data:', error.response?.data);
-      toast(error.response?.data?.error || `Failed to ${actionType} booking`, 'error');
+      const isNetworkError =
+        !error.response &&
+        (error.message === 'Network Error' ||
+          error.code === 'ECONNABORTED' ||
+          error.code === 'ERR_NETWORK');
+
+      if (isNetworkError) {
+        toast('No internet connection. Please check your network and try again.', 'warning');
+      } else {
+        console.warn(`⚠️ Error ${actionType}ing booking:`, error.response?.status, error.message);
+        toast(error.response?.data?.error || `Failed to ${actionType} booking`, 'error');
+      }
     } finally {
       setActioning(false);
     }

@@ -23,11 +23,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-// import RestaurantMap from '@/components/RestaurantMap'; // Disabled - requires native build
+import RestaurantMap from '@/components/RestaurantMap';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAuth } from '@/hooks/useAuth';
 import GuestLoginModal from '@/components/GuestLoginModal';
 import { useAppToast } from '@/components/ToastProvider';
+import { generateTimeSlots } from '@/utils/timeSlots';
 
 const API_URL = API_CONFIG.BASE_URL;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -51,7 +52,6 @@ const FOOD_PHOTOS: ImageSourcePropType[] = [
 
 /* ── Static data ── */
 
-const TIME_SLOTS = ['11:00am', '11:30am', '12:00pm', '12:30pm', '1:00pm'];
 
 type MenuItem = {
   id: string;
@@ -191,6 +191,9 @@ export default function RestaurantDetailScreen() {
   const [longitude, setLongitude] = useState<number | null>(params.longitude ? parseFloat(params.longitude) : null);
   const [description, setDescription] = useState(params.description || '');
   const [hours, setHours] = useState(params.hours || '');
+  const [openingHours, setOpeningHours] = useState('');
+  const [closingHours, setClosingHours] = useState('');
+  const [savedTimeSlots, setSavedTimeSlots] = useState<string[]>([]);
   const [distance] = useState(params.distance || 'Distance unavailable');
 
   // Use uploaded cover image if available, otherwise fall back to static map
@@ -454,7 +457,14 @@ export default function RestaurantDetailScreen() {
         if (r.address) setAddress(r.address);
         if (r.description) setDescription(r.description);
         if (r.rating != null) setRating(String(r.rating));
-        if (r.closing_hours) setHours(`Open Until ${r.closing_hours}`);
+        if (r.closing_hours) {
+          setHours(`Open Until ${r.closing_hours}`);
+          setClosingHours(r.closing_hours);
+        }
+        if (r.opening_hours) setOpeningHours(r.opening_hours);
+        if (Array.isArray(r.time_slots) && r.time_slots.length > 0) {
+          setSavedTimeSlots(r.time_slots);
+        }
         if (r.latitude != null) setLatitude(parseFloat(r.latitude));
         if (r.longitude != null) setLongitude(parseFloat(r.longitude));
       }
@@ -761,6 +771,21 @@ export default function RestaurantDetailScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Interactive map — shown when coordinates are available */}
+          {latitude && longitude ? (
+            <RestaurantMap
+              location={{ latitude, longitude, address, name }}
+              height={220}
+            />
+          ) : (
+            <View style={styles.mapNoCoords}>
+              <Ionicons name="map-outline" size={36} color={Colors.gray} />
+              <Text style={styles.mapNoCoordsText}>Map not available for this location</Text>
+            </View>
+          )}
+
+          {/* Address + directions button */}
+          {address ? <Text style={styles.mapAddress}>{address}</Text> : null}
           <TouchableOpacity style={styles.mapCtaCard} onPress={openGoogleMaps} activeOpacity={0.8}>
             <View style={styles.mapCtaIconWrap}>
               <Ionicons name="navigate-circle-outline" size={30} color={Colors.primary} />
@@ -771,11 +796,6 @@ export default function RestaurantDetailScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.primary} />
           </TouchableOpacity>
-
-          <Text style={styles.mapAddress}>{address}</Text>
-          <Text style={styles.mapDirectionsNote}>
-            Directions use your current location as the starting point.
-          </Text>
         </View>
 
         {/* ── Ratings & Reviews ── */}
@@ -861,7 +881,10 @@ export default function RestaurantDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available slots for today</Text>
           <View style={styles.slotsRow}>
-            {TIME_SLOTS.map((slot) => (
+            {(savedTimeSlots.length > 0
+              ? savedTimeSlots
+              : generateTimeSlots(openingHours, closingHours)
+            ).map((slot) => (
               <View key={slot} style={styles.slotChip}>
                 <Text style={styles.slotText}>{slot}</Text>
               </View>
@@ -871,7 +894,10 @@ export default function RestaurantDetailScreen() {
 
         {/* ── Food Menu / Book Table buttons ── */}
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.foodMenuBtn} onPress={() => toast('Food menu coming soon', 'info')}>
+          <TouchableOpacity
+            style={styles.foodMenuBtn}
+            onPress={() => router.push({ pathname: '/food-menu', params: { restaurantId, restaurantName: name } } as any)}
+          >
             <Text style={styles.foodMenuText}>Food Menu</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -886,6 +912,9 @@ export default function RestaurantDetailScreen() {
                     restaurantId,
                     name,
                     address,
+                    openingHours,
+                    closingHours,
+                    timeSlots: savedTimeSlots.length > 0 ? JSON.stringify(savedTimeSlots) : '',
                   },
                 } as any);
               }
@@ -1267,7 +1296,7 @@ const styles = StyleSheet.create({
   },
   mapCtaCard: {
     borderRadius: 12,
-    minHeight: 88,
+    minHeight: 72,
     paddingHorizontal: 12,
     paddingVertical: 12,
     flexDirection: 'row',
@@ -1276,6 +1305,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: '#FFFDF6',
+    marginTop: 4,
   },
   mapCtaIconWrap: {
     width: 42,
@@ -1301,12 +1331,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.text,
     marginTop: 12,
+    marginBottom: 10,
   },
-  mapDirectionsNote: {
+  mapNoCoords: {
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: '#F5F3EE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  mapNoCoordsText: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
     color: Colors.gray,
-    marginTop: 4,
   },
   mapLoadingContainer: {
     height: 300,

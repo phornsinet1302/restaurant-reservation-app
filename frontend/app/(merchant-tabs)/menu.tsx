@@ -103,10 +103,14 @@ export default function MerchantMenuScreen() {
       console.log(`✅ Found ${items.length} menu items:`, items);
       setMenuItems(items);
     } catch (error: any) {
-      console.error('❌ Error loading menu:', error.message);
-      console.error('   Status:', error.response?.status);
-      console.error('   Data:', error.response?.data);
-      console.error('   Full error:', error);
+      // If there's no response property it's likely a network error
+      if (!error || !error.response) {
+        toast('No internet connection. Please check your network.', 'error');
+      } else {
+        console.error('❌ Error loading menu:', error.message);
+        console.error('   Status:', error.response?.status);
+        console.error('   Data:', error.response?.data);
+      }
       setMenuItems([]);
     } finally {
       setLoading(false);
@@ -227,7 +231,11 @@ export default function MerchantMenuScreen() {
       closeEditModal();
       toast('Menu item updated successfully', 'success');
     } catch (error: any) {
-      toast(error.response?.data?.error || 'Failed to update menu item', 'error');
+      if (!error || !error.response) {
+        toast('No internet connection. Please check your network.', 'error');
+      } else {
+        toast(error.response?.data?.error || 'Failed to update menu item', 'error');
+      }
     } finally {
       setSaving(false);
     }
@@ -244,8 +252,12 @@ export default function MerchantMenuScreen() {
               headers: { Authorization: `Bearer ${token}` },
             });
             setMenuItems(prev => prev.filter(m => m.id !== item.id));
-          } catch {
-            toast('Failed to delete item', 'error');
+          } catch (error: any) {
+            if (!error || !error.response) {
+              toast('No internet connection. Please check your network.', 'error');
+            } else {
+              toast('Failed to delete item', 'error');
+            }
           }
         },
       },
@@ -286,7 +298,7 @@ export default function MerchantMenuScreen() {
           </View>
           <TouchableOpacity style={styles.addButton} onPress={() => router.push('/add-menu-item' as any)}>
             <Ionicons name="add" size={20} color={Colors.white} />
-            <Text style={styles.addButtonText}>Add Item</Text>
+            <Text style={styles.addButtonText}>Add</Text>
           </TouchableOpacity>
         </View>
 
@@ -505,11 +517,14 @@ const styles = StyleSheet.create({
   title: { fontFamily: 'PlusJakartaSans-Bold', fontSize: 26, color: Colors.text },
   subtitle: { fontFamily: 'PlusJakartaSans-Regular', fontSize: 13, color: Colors.gray, marginTop: 4 },
   addButton: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.primary, paddingHorizontal: 16, paddingVertical: 10,
     borderRadius: 24,
+    marginTop: Platform.OS === 'android' ? 8 : 2,
+    // Slight elevation so it stands out on Android
+    ...Platform.select({ android: { elevation: 3 }, ios: { shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } } }),
   },
-  addButtonText: { fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 14, color: Colors.white },
+  addButtonText: { fontFamily: 'PlusJakartaSans-SemiBold', fontSize: 14, color: Colors.white, marginLeft: 8 },
 
   syncCard: {
     marginHorizontal: 20, marginBottom: 16,

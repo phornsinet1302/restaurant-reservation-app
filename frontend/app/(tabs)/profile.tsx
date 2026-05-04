@@ -370,7 +370,8 @@ export default function ProfileScreen() {
               await AsyncStorage.removeItem('token');
               await AsyncStorage.removeItem('user');
               await AsyncStorage.removeItem('userEmail');
-              
+              await AsyncStorage.removeItem('guestMode');
+
               // Route to login page
               router.replace('/login');
             } catch (error) {

@@ -11,6 +11,16 @@ interface BookingUpdate {
   reason?: string;
 }
 
+// Maps notification type → action string for handleBookingUpdate callback
+const TYPE_TO_ACTION: Record<string, string> = {
+  booking_confirmed: 'confirmed',
+  booking_rejected: 'rejected',
+  booking_cancelled: 'cancelled',
+  booking_modified: 'modified',
+  booking_completed: 'completed',
+  booking_arrived: 'arrived',
+};
+
 export const useBookingUpdates = (
   customerId: string | undefined,
   onBookingUpdate: (update: BookingUpdate) => void
@@ -28,60 +38,67 @@ export const useBookingUpdates = (
           return;
         }
 
-        // Create socket connection
         const socket = io(API_CONFIG.BASE_URL, {
-          auth: {
-            token: token,
-          },
+          auth: { token },
           reconnection: true,
           reconnectionDelay: 1000,
           reconnectionDelayMax: 5000,
           reconnectionAttempts: 5,
         });
 
-        socket.on('connect', () => {
-          console.log('✅ WebSocket connected for customer:', socket.id);
-          
-          // Join the customer's private room
+        const joinRoom = () => {
           socket.emit('join_room', customerId);
-          console.log('🚪 Joined customer room:', customerId);
+          console.log('🚪 [useBookingUpdates] Joined customer room:', customerId);
+        };
+
+        socket.on('connect', () => {
+          console.log('✅ [useBookingUpdates] WebSocket connected:', socket.id);
+          joinRoom();
         });
 
-        // Listen for booking confirmation
+        // If already connected, join room immediately
+        if (socket.connected) joinRoom();
+
+        // Primary handler: notification_received (current backend)
+        socket.on('notification_received', (data: any) => {
+          console.log('📥 [useBookingUpdates] notification_received:', data.type);
+          const action = TYPE_TO_ACTION[data.type];
+          if (action) {
+            onBookingUpdate({
+              id: data.related_id || data.reservation_id || '',
+              status: action,
+              action,
+              message: data.message || data.title || '',
+              reason: data.message,
+            });
+          }
+        });
+
+        // Legacy event names — kept as fallback so older backend versions still work
         socket.on('booking_confirmed', (update: BookingUpdate) => {
-          console.log('📥 Booking confirmed event received:', update);
-          onBookingUpdate(update);
+          console.log('📥 [useBookingUpdates] booking_confirmed (legacy)');
+          onBookingUpdate({ ...update, action: update.action || 'confirmed' });
         });
-
-        // Listen for booking rejection
         socket.on('booking_rejected', (update: BookingUpdate) => {
-          console.log('📥 Booking rejected event received:', update);
-          onBookingUpdate(update);
+          console.log('📥 [useBookingUpdates] booking_rejected (legacy)');
+          onBookingUpdate({ ...update, action: update.action || 'rejected' });
         });
-
-        // Listen for booking cancellation
         socket.on('booking_cancelled', (update: BookingUpdate) => {
-          console.log('📥 Booking cancelled event received:', update);
-          onBookingUpdate(update);
+          console.log('📥 [useBookingUpdates] booking_cancelled (legacy)');
+          onBookingUpdate({ ...update, action: update.action || 'cancelled' });
         });
 
-        socket.on('disconnect', () => {
-          console.log('❌ WebSocket disconnected');
-        });
-
-        socket.on('error', (error) => {
-          console.error('❌ WebSocket error:', error);
-        });
+        socket.on('disconnect', () => console.log('❌ [useBookingUpdates] disconnected'));
+        socket.on('error', (error) => console.error('❌ [useBookingUpdates] error:', error));
 
         socketRef.current = socket;
       } catch (error) {
-        console.error('❌ Error setting up WebSocket:', error);
+        console.error('❌ Error setting up useBookingUpdates socket:', error);
       }
     };
 
     setupSocket();
 
-    // Cleanup function
     return () => {
       if (socketRef.current) {
         socketRef.current.disconnect();

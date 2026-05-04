@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
 import { API_CONFIG } from '@/app/config/apiConfig';
+import { generateTimeSlots } from '@/utils/timeSlots';
 function decodeJwtPayload(token: string): any | null {
   try {
     const parts = token.split('.');
@@ -38,14 +39,6 @@ const API_URL = API_CONFIG.BASE_URL;
 
 /* ── Helpers ── */
 
-const TIME_SLOTS = [
-  '12:30pm',
-  '1:30pm',
-  '2:00pm',
-  '4:00pm',
-  '4:30pm',
-  '6:30pm',
-];
 
 function getUpcomingDates(fromDate: Date, count: number) {
   const dates: Date[] = [];
@@ -103,6 +96,9 @@ export default function ModifyBookingScreen() {
     bookingName: string;
     bookingEmail: string;
     address: string;
+    openingHours?: string;
+    closingHours?: string;
+    timeSlots?: string;
     date?: string;
     time?: string;
     guests?: string;
@@ -581,7 +577,10 @@ export default function ModifyBookingScreen() {
             <Text style={styles.sectionLabel}>Time <Text style={{color: '#E74C3C'}}>*</Text></Text>
           </View>
           <View style={styles.timeGrid}>
-            {TIME_SLOTS.map((slot) => {
+            {(params.timeSlots
+              ? JSON.parse(params.timeSlots) as string[]
+              : generateTimeSlots(params.openingHours ?? '', params.closingHours ?? '')
+            ).map((slot) => {
               const isActive = slot === selectedTime;
               return (
                 <TouchableOpacity

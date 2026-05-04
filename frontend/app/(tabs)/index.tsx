@@ -229,18 +229,29 @@ export default function HomeScreen() {
 
   // Get user's current location
   const getCurrentLocation = async (): Promise<{ latitude: number; longitude: number }> => {
+    const fallback = { latitude: 11.5564, longitude: 104.9282 };
     try {
+      // Skip if OS-level location services are disabled (kCLErrorDomain error 1)
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.warn('⚠️ Location services disabled — using default location');
+        setUserLocation(fallback);
+        currentLocationRef.current = fallback;
+        setUserLocationAddress('Phnom Penh');
+        return fallback;
+      }
+
       console.log('📍 Getting current location...');
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      
+
       const { latitude, longitude } = location.coords;
       console.log(`✅ Current location: ${latitude}, ${longitude}`);
       const nextLocation = { latitude, longitude };
       setUserLocation(nextLocation);
       currentLocationRef.current = nextLocation;
-      
+
       // Get address from coordinates using reverse geocoding
       try {
         const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
@@ -253,15 +264,13 @@ export default function HomeScreen() {
         console.warn('⚠️ Could not get location address:', geoError);
         setUserLocationAddress('Your Location');
       }
-      
+
       // Store location for later use
       await AsyncStorage.setItem('userLocation', JSON.stringify(nextLocation));
       return nextLocation;
     } catch (error) {
-      console.error('❌ Error getting location:', error);
+      console.warn('⚠️ Could not get location — using default:', error);
       setLocationError('Could not get your location');
-      // Use default location as fallback
-      const fallback = { latitude: 11.5564, longitude: 104.9282 };
       setUserLocation(fallback);
       currentLocationRef.current = fallback;
       setUserLocationAddress('Phnom Penh');

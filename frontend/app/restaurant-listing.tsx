@@ -16,18 +16,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import WebMapPicker from '@/components/WebMapPicker';
 import { useAppToast } from '@/components/ToastProvider';
 
-// Conditionally import react-native-maps (crashes in Expo Go)
-let MapView: any = null;
-let Marker: any = null;
-let PROVIDER_GOOGLE: any = null;
-try {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-} catch (e) {
-  // react-native-maps not available (Expo Go)
-}
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -509,6 +497,11 @@ export default function RestaurantListingScreen() {
             }
           }
 
+          // Restore saved time slots
+          if (Array.isArray(myRestaurant.time_slots) && myRestaurant.time_slots.length > 0) {
+            setTimeSlots(myRestaurant.time_slots);
+          }
+
           // Load location coordinates
           if (myRestaurant.latitude && myRestaurant.longitude) {
             const lat = parseFloat(myRestaurant.latitude);
@@ -555,20 +548,14 @@ export default function RestaurantListingScreen() {
     }
   };
 
-  const handleMapPress = (e: any) => {
-    const { latitude: lat, longitude: lng } = e.nativeEvent.coordinate;
-    setLatitude(lat);
-    setLongitude(lng);
-    setMapRegion({
-      ...mapRegion,
-      latitude: lat,
-      longitude: lng,
-    });
-    getAddressFromCoordinates(lat, lng);
-  };
-
   const getCurrentLocation = async () => {
     try {
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        toast('Location services are disabled on this device.', 'warning');
+        return;
+      }
+
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         toast('Location permission required', 'warning');
@@ -590,7 +577,8 @@ export default function RestaurantListingScreen() {
       });
       await getAddressFromCoordinates(lat, lng);
     } catch (error) {
-      toast('Could not get current location', 'error');
+      console.warn('⚠️ Could not get current location:', error);
+      toast('Could not get current location', 'warning');
     }
   };
 
@@ -632,6 +620,7 @@ export default function RestaurantListingScreen() {
         closing_hours: closingHours,
         latitude,
         longitude,
+        time_slots: timeSlots,
       };
 
       try {
@@ -698,6 +687,7 @@ export default function RestaurantListingScreen() {
                 latitude,
                 longitude,
                 image_url: coverImage || undefined,
+                time_slots: timeSlots,
               };
 
               try {
@@ -906,49 +896,18 @@ export default function RestaurantListingScreen() {
 
           <Text style={styles.label}>Tap the map or drag the pin to set your restaurant location</Text>
 
-          {MapView ? (
-            <View style={styles.mapContainer}>
-              <MapView
-                provider={PROVIDER_GOOGLE}
-                style={styles.map}
-                region={mapRegion}
-                onRegionChangeComplete={(region: any) => setMapRegion(region)}
-                onPress={handleMapPress}
-              >
-                <Marker
-                  coordinate={{ latitude, longitude }}
-                  draggable
-                  onDragEnd={(e: any) => {
-                    const { latitude: lat, longitude: lng } = e.nativeEvent.coordinate;
-                    setLatitude(lat);
-                    setLongitude(lng);
-                    setMapRegion({ ...mapRegion, latitude: lat, longitude: lng });
-                    getAddressFromCoordinates(lat, lng);
-                  }}
-                />
-              </MapView>
-
-              <TouchableOpacity
-                style={styles.currentLocationButton}
-                onPress={getCurrentLocation}
-              >
-                <Ionicons name="locate" size={22} color={Colors.primary} />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <WebMapPicker
-              latitude={latitude}
-              longitude={longitude}
-              onLocationChange={(lat, lng) => {
-                setLatitude(lat);
-                setLongitude(lng);
-                setMapRegion({ ...mapRegion, latitude: lat, longitude: lng });
-                getAddressFromCoordinates(lat, lng);
-              }}
-              onDetectLocation={getCurrentLocation}
-              height={300}
-            />
-          )}
+          <WebMapPicker
+            latitude={latitude}
+            longitude={longitude}
+            onLocationChange={(lat, lng) => {
+              setLatitude(lat);
+              setLongitude(lng);
+              setMapRegion({ ...mapRegion, latitude: lat, longitude: lng });
+              getAddressFromCoordinates(lat, lng);
+            }}
+            onDetectLocation={getCurrentLocation}
+            height={300}
+          />
 
           {displayAddress ? (
             <View style={styles.addressBox}>

@@ -96,9 +96,16 @@ export default function NotificationsScreen() {
       return;
     }
 
+    // Determine whether the logged-in user is a merchant
+    const userStr = await AsyncStorage.getItem('user');
+    const user = userStr ? JSON.parse(userStr) : null;
+    const isMerchant = user?.role === 'merchant' || user?.role === 'restaurant';
+    const bookingsRoute = isMerchant ? '/(merchant-tabs)/bookings' : '/(tabs)/bookings';
+    const returnTo = isMerchant ? 'merchant' : 'customer';
+
     const relatedId = n.related_id?.trim();
     if (!relatedId) {
-      router.push('/(tabs)/bookings' as any);
+      router.push(bookingsRoute as any);
       return;
     }
 
@@ -114,49 +121,53 @@ export default function NotificationsScreen() {
       switch (n.type) {
         case 'booking_created':
           if (status === 'pending' || status === 'modified') {
-            router.push({
-              pathname: '/booking-waiting-confirmation',
-              params: {
-                bookingId: base.bookingId,
-                name: base.name,
-                ref: base.ref,
-                date: base.date,
-                time: base.time,
-                guests: base.guests,
-                table: base.table,
-                bookingName: base.bookingName,
-                bookingEmail: base.bookingEmail,
-                address: base.address,
-              },
-            } as any);
+            if (isMerchant) {
+              router.push(bookingsRoute as any);
+            } else {
+              router.push({
+                pathname: '/booking-waiting-confirmation',
+                params: {
+                  bookingId: base.bookingId,
+                  name: base.name,
+                  ref: base.ref,
+                  date: base.date,
+                  time: base.time,
+                  guests: base.guests,
+                  table: base.table,
+                  bookingName: base.bookingName,
+                  bookingEmail: base.bookingEmail,
+                  address: base.address,
+                },
+              } as any);
+            }
           } else if (status === 'confirmed' || status === 'arrived') {
             router.push({
               pathname: '/booking-confirmation',
-              params: { ...base, initialStep: 'success' },
+              params: { ...base, initialStep: 'success', returnTo },
             } as any);
           } else {
-            router.push('/(tabs)/bookings' as any);
+            router.push(bookingsRoute as any);
           }
           break;
         case 'booking_confirmed':
         case 'booking_completed':
           router.push({
             pathname: '/booking-confirmation',
-            params: { ...base, initialStep: 'success' },
+            params: { ...base, initialStep: 'success', returnTo },
           } as any);
           break;
         case 'booking_modified':
-          router.push('/(tabs)/bookings' as any);
+          router.push(bookingsRoute as any);
           break;
         case 'booking_rejected':
         case 'booking_cancelled':
-          router.push('/(tabs)/bookings' as any);
+          router.push(bookingsRoute as any);
           break;
         case 'booking_received':
           router.push('/(merchant-tabs)/bookings' as any);
           break;
         default:
-          router.push('/(tabs)/bookings' as any);
+          router.push(bookingsRoute as any);
       }
     } catch (e: any) {
       console.warn('Notification deep link failed:', e?.response?.data || e?.message);
@@ -166,7 +177,7 @@ export default function NotificationsScreen() {
           : 'Could not load booking details. Try Bookings.',
         'error'
       );
-      router.push('/(tabs)/bookings' as any);
+      router.push(bookingsRoute as any);
     } finally {
       setOpeningId(null);
     }

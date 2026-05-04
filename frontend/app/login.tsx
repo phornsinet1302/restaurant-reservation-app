@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, BackHandler } from 'react-native';
 import axios from 'axios';
 import * as WebBrowser from 'expo-web-browser';
 import { useAuthRequest, ResponseType } from 'expo-auth-session';
@@ -26,6 +26,15 @@ export default function LoginScreen() {
   const [appleLoading, setAppleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Override Android hardware back to always go to welcome screen
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      router.replace('/');
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
   const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
@@ -251,13 +260,7 @@ export default function LoginScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Back button */}
-        <TouchableOpacity style={styles.backButton} onPress={() => {
-          if (router.canGoBack()) {
-            router.back();
-          } else {
-            router.replace('/' as any);
-          }
-        }}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/' as any)}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
 

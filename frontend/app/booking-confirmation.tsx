@@ -7,6 +7,7 @@ import {
   Image,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -50,6 +51,8 @@ export default function BookingConfirmationScreen() {
     reservationId?: string;
     /** When set to "success" (e.g. from notifications), show the confirmation success step */
     initialStep?: string;
+    /** 'merchant' routes "Back to Bookings" to merchant tabs; defaults to customer tabs */
+    returnTo?: string;
     name: string;
     ref: string;
     date: string;
@@ -189,10 +192,15 @@ export default function BookingConfirmationScreen() {
       }
 
     } catch (error: any) {
-      console.error('❌ [DEBUG] Booking operation failed:', error.response?.data || error.message);
-      const errorMsg = isUpdating ? 'Failed to update booking' : 'Failed to create booking';
-      toast(`${errorMsg}: ${error.response?.data?.error || error.message}`, 'error');
-      setLoading(false);
+        // If no response, it's likely a network error — show friendly message and avoid noisy console.error
+        if (!error || !error.response) {
+          toast('No internet connection. Please check your network.', 'error');
+        } else {
+          console.error('❌ [DEBUG] Booking operation failed:', error.response?.data || error.message);
+          const errorMsg = isUpdating ? 'Failed to update booking' : 'Failed to create booking';
+          toast(`${errorMsg}: ${error.response?.data?.error || error.message}`, 'error');
+        }
+        setLoading(false);
     }
   };
 
@@ -354,7 +362,7 @@ const styles = StyleSheet.create({
   },
   imageOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
   restaurantName: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -484,7 +492,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: Platform.OS === 'android' ? 80 : 12,
   },
   doneBtnText: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -502,6 +510,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.background,
+    marginBottom: Platform.OS === 'android' ? 24 : 0,
   },
   skipBtnText: {
     fontFamily: 'PlusJakartaSans-SemiBold',
