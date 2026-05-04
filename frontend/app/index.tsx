@@ -10,10 +10,10 @@ import {
   NativeScrollEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import CustomButton from '@/components/CustomButton';
+import { useAuth } from '@/hooks/useAuth';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HERO_HEIGHT = SCREEN_WIDTH * 1.19;
@@ -42,6 +42,7 @@ export default function WelcomeScreen() {
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const autoPlayTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { setIsGuest } = useAuth();
 
   const scrollToIndex = useCallback((index: number) => {
     flatListRef.current?.scrollToIndex({ index, animated: true });
@@ -107,23 +108,10 @@ export default function WelcomeScreen() {
           resizeMode="cover"
         />
         <LinearGradient
-          colors={['transparent', 'transparent', Colors.background]}
+          colors={['rgba(231, 189, 39, 0.00)', 'rgba(231, 189, 39, 0.14)', 'rgba(255, 255, 255, 0.96)']}
           locations={[0, 0.55, 1]}
           style={styles.heroOverlay}
         />
-
-        {/* Feature icons row */}
-        <View style={styles.iconsRow}>
-          <View style={[styles.iconCircle, styles.iconGold]}>
-            <Ionicons name="restaurant-outline" size={24} color={Colors.cream} />
-          </View>
-          <View style={[styles.iconCircle, styles.iconRed]}>
-            <Ionicons name="calendar-outline" size={24} color={Colors.cream} />
-          </View>
-          <View style={[styles.iconCircle, styles.iconGold]}>
-            <Ionicons name="time-outline" size={24} color={Colors.cream} />
-          </View>
-        </View>
       </View>
 
       {/* Content Section */}
@@ -176,7 +164,10 @@ export default function WelcomeScreen() {
           />
           <CustomButton
             title="Continue as Guest"
-            onPress={() => router.replace('/(tabs)')}
+            onPress={async () => {
+              await setIsGuest(true);
+              router.replace('/(tabs)');
+            }}
             variant="text"
           />
         </View>
@@ -188,7 +179,7 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.white,
   },
 
   /* ── Hero ── */
@@ -207,39 +198,6 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
-  iconsRow: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 10,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    gap: 18,
-  },
-  iconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconGold: {
-    backgroundColor: Colors.primary,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 8,
-  },
-  iconRed: {
-    backgroundColor: Colors.accent,
-    shadowColor: Colors.accent,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 8,
-  },
 
   /* ── Content ── */
   contentContainer: {
@@ -248,6 +206,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 20,
     paddingBottom: 40,
+    backgroundColor: Colors.white,
   },
 
   /* ── Carousel ── */

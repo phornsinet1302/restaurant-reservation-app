@@ -2,13 +2,31 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AccountTypeScreen() {
+  const insets = useSafeAreaInsets();
+  const handleSelectRole = async (role: 'customer' | 'restaurant') => {
+    try {
+      await AsyncStorage.setItem('selectedRole', role);
+      if (role === 'customer') {
+        router.push('/signup');
+      } else {
+        router.push('/restaurant-signup');
+      }
+    } catch (error) {
+      console.error('Error storing role:', error);
+    }
+  };
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: Math.max(insets.top + 16, 60), paddingBottom: Math.max(insets.bottom + 20, 40) },
+      ]}
       showsVerticalScrollIndicator={false}
     >
       {/* Back button */}
@@ -26,7 +44,7 @@ export default function AccountTypeScreen() {
       <TouchableOpacity
         style={styles.accountCard}
         activeOpacity={0.7}
-        onPress={() => router.push('/signup')}
+        onPress={() => handleSelectRole('customer')}
       >
         <View style={styles.accountIconCircle}>
           <Ionicons name="person-add-outline" size={24} color={Colors.primary} />
@@ -45,7 +63,7 @@ export default function AccountTypeScreen() {
         <Text style={styles.infoText}>
           Registering as a Cambodia restaurant owner? Use restaurant access and select Create owner account to begin onboarding.
         </Text>
-        <TouchableOpacity onPress={() => router.push('/restaurant-signup')}>
+        <TouchableOpacity onPress={() => handleSelectRole('restaurant')}>
           <Text style={styles.infoLink}>Open restaurant access</Text>
         </TouchableOpacity>
       </View>
@@ -71,8 +89,6 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 40,
     flexGrow: 1,
   },
   backButton: {

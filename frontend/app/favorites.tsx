@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,63 +7,233 @@ import {
   Image,
   TouchableOpacity,
   ImageSourcePropType,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
+import { useAppToast } from '@/components/ToastProvider';
+
+const API_URL = API_CONFIG.BASE_URL;
+
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
+};
 
 /* ── Data ── */
 
 type FavoriteRestaurant = {
   id: string;
+  restaurant_id: string;
   name: string;
-  tags: string;
+  location?: string;
   rating: string;
   distance: string;
-  image: ImageSourcePropType;
+  image?: ImageSourcePropType;
+  image_url?: string;
+  tags?: string;
+  address?: string;
+  description?: string;
+  hours?: string;
+  latitude?: string;
+  longitude?: string;
+  category?: string;
+  reviews_count?: number;
 };
-
-const FAVORITES: FavoriteRestaurant[] = [
-  {
-    id: 'f1',
-    name: 'Romeo Lane',
-    tags: 'Crafted Cocktails \u2022 Gourmet Cuisine \u2022 Best Bar',
-    rating: '4.5',
-    distance: '0.3 miles',
-    image: require('@/assets/restaurant-1.jpg'),
-  },
-  {
-    id: 'f2',
-    name: 'Sakura Sushi Bar',
-    tags: 'Japanese \u2022 Sushi \u2022 Omakase',
-    rating: '4.8',
-    distance: '0.5 miles',
-    image: require('@/assets/restaurant-3.jpg'),
-  },
-  {
-    id: 'f3',
-    name: 'Pret A Manger',
-    tags: 'Coffee \u2022 Sandwiches \u2022 Fresh Food',
-    rating: '4.0',
-    distance: '0.2 miles',
-    image: require('@/assets/restaurant-4.jpg'),
-  },
-];
 
 /* ── Component ── */
 
 export default function FavoritesScreen() {
+  const { toast } = useAppToast();
   const router = useRouter();
-  const [favorites, setFavorites] = useState(FAVORITES);
+  const insets = useSafeAreaInsets();
+  const [favorites, setFavorites] = useState<FavoriteRestaurant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState<string>('');
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
-  const removeFavorite = (id: string) => {
-    setFavorites((prev) => prev.filter((f) => f.id !== id));
+  useFocusEffect(
+    React.useCallback(() => {
+      if (isGuest) {
+        setShowGuestModal(true);
+      } else {
+        loadUserLocation();
+        loadFavorites();
+      }
+    }, [isGuest])
+  );
+
+  // Calculate distance between two coordinates using Haversine formula
+  const calculateDistance = (userLat: number, userLon: number, restLat: number, restLon: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (restLat - userLat) * (Math.PI / 180);
+    const dLon = (restLon - userLon) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(userLat * (Math.PI / 180)) * Math.cos(restLat * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  // Format distance for display
+  const formatDistance = (distanceKm: number): string => {
+    if (distanceKm < 1) {
+      const meters = Math.round(distanceKm * 1000);
+      return `${meters}m`;
+    }
+    return `${distanceKm.toFixed(1)}km`;
+  };
+
+  // Load user location
+  const loadUserLocation = async () => {
+    try {
+      const storedLocation = await AsyncStorage.getItem('userLocation');
+      if (storedLocation) {
+        const location = JSON.parse(storedLocation);
+        setUserLocation(location);
+      } else {
+        // Default location
+        setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      }
+    } catch (error) {
+      console.warn('Failed to load user location:', error);
+      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+    }
+  };
+
+  const loadFavorites = async () => {
+    try {
+      setLoading(true);
+      const storedToken = await AsyncStorage.getItem('token');
+      
+      if (!storedToken) {
+        toast('You must be logged in to view favorites. Please sign up or login first.', 'error');
+        setLoading(false);
+        return;
+      }
+
+      setToken(storedToken);
+      
+      const response = await axios.get(`${API_URL}/api/favorites`, {
+        headers: { 
+          Authorization: `Bearer ${storedToken}`,
+          'Content-Type': 'application/json'
+        },
+      });
+
+      console.log('✅ Raw favorites response:', response.data);
+
+      // Get current user location (wait a bit for it to be loaded)
+      let location = userLocation;
+      if (!location) {
+        await new Promise(r => setTimeout(r, 500));
+        location = userLocation;
+      }
+      if (!location) {
+        location = { latitude: 11.5564, longitude: 104.9282 };
+      }
+
+      // Map backend response to restaurant type with REAL data like home screen
+      const restaurantList = response.data.map((item: any) => {
+        const restaurant = item.restaurants;
+        let distance = 'Unknown';
+
+        // Calculate distance if restaurant has coordinates
+        if (restaurant?.latitude && restaurant?.longitude && location) {
+          try {
+            const distanceKm = calculateDistance(
+              location.latitude,
+              location.longitude,
+              restaurant.latitude,
+              restaurant.longitude
+            );
+            distance = formatDistance(distanceKm);
+          } catch (err) {
+            console.warn('Error calculating distance:', err);
+          }
+        }
+
+        console.log('📍 Restaurant:', {
+          name: restaurant?.name,
+          image_url: restaurant?.image_url,
+          distance: distance,
+        });
+
+        return {
+          id: item.restaurant_id,
+          restaurant_id: item.restaurant_id,
+          name: restaurant?.name || 'Restaurant',
+          location: restaurant?.address || 'No address',
+          rating: formatRestaurantRating(restaurant?.rating),
+          distance: distance,
+          image_url: restaurant?.image_url || '',
+          tags: restaurant?.category || 'Restaurant',
+          // Store real data for detail page
+          address: restaurant?.address || 'No address',
+          description: restaurant?.description || 'No description available',
+          hours: restaurant?.opening_hours || 'Check hours',
+          latitude: restaurant?.latitude?.toString() || '',
+          longitude: restaurant?.longitude?.toString() || '',
+          category: restaurant?.category || '',
+          phone: restaurant?.phone || '',
+          cuisine: restaurant?.cuisine || '',
+          reviews_count: typeof restaurant?.reviews_count === 'number' ? restaurant.reviews_count : 0,
+        };
+      });
+
+      console.log('📱 Mapped favorites with distances:', restaurantList);
+      setFavorites(restaurantList);
+    } catch (error: any) {
+      console.error('Failed to load favorites:', error.response?.data || error.message);
+      toast('Failed to load favorites', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeFavorite = async (restaurantId: string, restaurantName: string) => {
+    try {
+      await axios.delete(`${API_URL}/api/favorites/${restaurantId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setFavorites((prev) => prev.filter((f) => f.restaurant_id !== restaurantId));
+      toast(`${restaurantName} removed from favorites`, 'success');
+    } catch (error: any) {
+      console.error('Remove favorite error:', error.response?.data || error.message);
+      toast('Failed to remove favorite', 'error');
+    }
   };
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
@@ -73,69 +243,102 @@ export default function FavoritesScreen() {
         </View>
       </View>
 
+      {/* Loading */}
+      {loading && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading favorites...</Text>
+        </View>
+      )}
+
       {/* List */}
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-      >
-        {favorites.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={styles.card}
-            activeOpacity={0.9}
-            onPress={() =>
-              router.push({
-                pathname: '/restaurant-detail',
-                params: {
-                  name: item.name,
-                  rating: item.rating,
-                  reviews: '3.2k',
-                  address: '42 Fleet Street, City',
-                  description:
-                    'Fresh, handmade food and organic coffee, served quickly and with a smile.',
-                  hours: 'Open Until 11:00pm',
-                  distance: item.distance,
-                },
-              } as any)
-            }
-          >
-            {/* Image */}
-            <View style={styles.cardImageWrapper}>
-              <Image source={item.image} style={styles.cardImage} />
+      {!loading && (
+        <ScrollView
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        >
+          {favorites.length > 0 ? (
+            favorites.map((item) => (
               <TouchableOpacity
-                style={styles.heartBtn}
-                onPress={() => removeFavorite(item.id)}
+                key={item.restaurant_id}
+                style={styles.card}
+                activeOpacity={0.9}
+                onPress={() =>
+                  router.push({
+                    pathname: '/restaurant-detail',
+                    params: {
+                      id: item.restaurant_id,
+                      name: item.name,
+                      rating: item.rating,
+                      reviews: formatReviewsCount(item.reviews_count),
+                      address: item.address || item.location || 'Address unavailable',
+                      description: item.description || 'Description unavailable',
+                      hours: item.hours || 'Hours unavailable',
+                      distance: item.distance,
+                      latitude: item.latitude || '',
+                      longitude: item.longitude || '',
+                    },
+                  } as any)
+                }
               >
-                <Ionicons name="heart" size={20} color={Colors.accent} />
+                {/* Image */}
+                <View style={styles.cardImageWrapper}>
+                  {item.image_url && !imageErrors[item.restaurant_id] ? (
+                    <Image 
+                      source={{ uri: item.image_url }} 
+                      style={styles.cardImage}
+                      onError={() => {
+                        console.warn(`❌ Failed to load image for ${item.name}:`, item.image_url);
+                        setImageErrors(prev => ({ ...prev, [item.restaurant_id]: true }));
+                      }}
+                    />
+                  ) : (
+                    <View style={[styles.cardImage, { backgroundColor: Colors.border, justifyContent: 'center', alignItems: 'center' }]}>
+                      <Ionicons name="restaurant" size={48} color={Colors.gray} />
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={styles.heartBtn}
+                    onPress={() => removeFavorite(item.restaurant_id, item.name)}
+                  >
+                    <Ionicons name="heart" size={20} color={Colors.accent} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Info */}
+                <View style={styles.cardInfo}>
+                  <Text style={styles.cardName}>{item.name}</Text>
+                  <Text style={styles.cardTags}>{item.tags}</Text>
+                  <View style={styles.cardMeta}>
+                    <Ionicons name="star" size={14} color={Colors.primary} />
+                    <Text style={styles.cardRating}>{item.rating}</Text>
+                    <Ionicons
+                      name="location-outline"
+                      size={14}
+                      color={Colors.gray}
+                      style={{ marginLeft: 12 }}
+                    />
+                    <Text style={styles.cardDistance}>{item.distance}</Text>
+                  </View>
+                  <Text style={styles.cardHours}>{item.hours}</Text>
+                </View>
               </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="heart-outline" size={48} color={Colors.border} />
+              <Text style={styles.emptyText}>No favorites yet</Text>
+              <Text style={styles.emptySubText}>Start adding restaurants to your favorites</Text>
             </View>
+          )}
+        </ScrollView>
+      )}
 
-            {/* Info */}
-            <View style={styles.cardInfo}>
-              <Text style={styles.cardName}>{item.name}</Text>
-              <Text style={styles.cardTags}>{item.tags}</Text>
-              <View style={styles.cardMeta}>
-                <Ionicons name="star" size={14} color={Colors.primary} />
-                <Text style={styles.cardRating}>{item.rating}</Text>
-                <Ionicons
-                  name="location-outline"
-                  size={14}
-                  color={Colors.gray}
-                  style={{ marginLeft: 12 }}
-                />
-                <Text style={styles.cardDistance}>{item.distance}</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        ))}
-
-        {favorites.length === 0 && (
-          <View style={styles.emptyState}>
-            <Ionicons name="heart-outline" size={48} color={Colors.border} />
-            <Text style={styles.emptyText}>No favorites yet</Text>
-          </View>
-        )}
-      </ScrollView>
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Favorites"
+      />
     </View>
   );
 }
@@ -150,7 +353,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 16,
     gap: 12,
@@ -235,6 +437,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.gray,
   },
+  cardHours: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.gray,
+    marginTop: 6,
+  },
 
   /* Empty */
   emptyState: {
@@ -245,6 +453,25 @@ const styles = StyleSheet.create({
   emptyText: {
     fontFamily: 'PlusJakartaSans-Medium',
     fontSize: 16,
+    color: Colors.gray,
+  },
+  emptySubText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+    marginTop: 4,
+  },
+
+  /* Loading */
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
     color: Colors.gray,
   },
 });

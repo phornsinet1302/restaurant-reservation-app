@@ -8,12 +8,17 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
-} from 'react-native';
+  } from 'react-native';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '@/constants/Colors';
+import { API_CONFIG } from '@/app/config/apiConfig';
+import DatePickerInput from '@/components/DatePickerInput';
+import { useAppToast } from '@/components/ToastProvider';
 
 const STEPS = [
   { label: 'Account', progress: 0.17 },
@@ -38,12 +43,16 @@ const CUISINE_OPTIONS = [
 ];
 
 export default function RestaurantSignupScreen() {
+  const { toast, confirm } = useAppToast();
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
 
   // Step 1 — Account
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   // Step 2 — Identity
   const [legalName, setLegalName] = useState('');
@@ -68,6 +77,7 @@ export default function RestaurantSignupScreen() {
 
   // Step 4 — Review
   const [confirmed, setConfirmed] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const handleBack = () => {
     if (step === 0) {
@@ -77,23 +87,118 @@ export default function RestaurantSignupScreen() {
     }
   };
 
+  const submitApplication = async () => {
+    setLoading(true);
+    try {
+      // Retrieve role from AsyncStorage (set during account-type selection)
+      const selectedRole = await AsyncStorage.getItem('selectedRole') || 'restaurant';
+
+      // Convert dob from DD/MM/YYYY to YYYY-MM-DD for PostgreSQL
+      const formatDob = (d: string): string => {
+        const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : d;
+      };
+
+      const payload = {
+        email,
+        password,
+        role: selectedRole,
+        fullName,
+        identity: {
+          legalName,
+          dob: formatDob(dob),
+          nationality,
+          cityProvince: city,
+          currentAddress: address,
+        },
+        restaurantProfile: {
+          nameEn: restNameEnglish,
+          nameKh: restNameKhmer,
+          address: restAddress,
+          city: restCity,
+          phone: restPhone,
+          category,
+          cuisine,
+          mapsLink,
+        },
+      };
+
+      await axios.post(API_CONFIG.ENDPOINTS.AUTH.REGISTER, payload);
+      // Persist intended role until verification completes.
+      await AsyncStorage.setItem('pendingSignupRole', selectedRole);
+      await axios.post(`${API_CONFIG.BASE_URL}/api/auth/send-verification-email`, {
+        email,
+      });
+      confirm(
+        'Verification Required',
+        'We sent a verification code to your email. Please verify your account to continue.',
+        [
+          {
+            text: 'Verify Now',
+            onPress: () =>
+              router.replace({
+                pathname: '/verify-email',
+                params: { email },
+              } as any),
+          },
+        ]
+      );
+    } catch (error) {
+      let errorMessage = 'Submission failed. Please try again.';
+      
+      if (axios.isAxiosError(error)) {
+        const errorData = error.response?.data;
+        if (errorData?.error) {
+          errorMessage = errorData.error;
+        } else if (errorData?.message) {
+          errorMessage = errorData.message;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      // Check if this is a duplicate email error
+      if (errorMessage.includes('already registered')) {
+        console.log('🔄 Email already registered, showing login redirect option...');
+        confirm('Email Already Registered', `${errorMessage}\n\nWould you like to login with this email instead?`, [
+            {
+              text: 'Cancel',
+              onPress: () => console.log('User cancelled'),
+            },
+            {
+              text: 'Go to Login',
+              onPress: async () => {
+                // Clear signup data and redirect to login
+                await AsyncStorage.removeItem('selectedRole');
+                router.replace('/login');
+              },
+            },
+          ]);
+      } else {
+        toast(errorMessage, 'error');
+      }
+    } finally {
+      setLoading(false);
+      // Clear transient selection; verification uses pendingSignupRole.
+      await AsyncStorage.removeItem('selectedRole');
+    }
+  };
+
   const handleContinue = () => {
     if (step < 3) {
       setStep(step + 1);
     } else {
       if (!confirmed) {
-        Alert.alert('Please confirm', 'You must confirm all information is accurate before submitting.');
+        toast('You must confirm all information is accurate before submitting.', 'warning');
         return;
       }
-      Alert.alert(
-        'Application Submitted',
-        'Your restaurant application has been submitted for review. We will contact you soon.',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }],
-      );
+      submitApplication();
     }
   };
 
-  const continueLabel = step === 3 ? 'Submit application' : step === 0 ? 'Save and continue' : 'Continue';
+  const continueLabel = step === 3 ? (loading ? 'Submitting...' : 'Submit application') : step === 0 ? 'Save and continue' : 'Continue';
 
   /* ── Dropdown helper ── */
   const renderDropdown = (
@@ -126,19 +231,27 @@ export default function RestaurantSignupScreen() {
         Choose the Cambodia registration path first, then create the owner account used for verification, review updates, and merchant access.
       </Text>
 
-      <Text style={styles.fieldLabel}>Full name</Text>
+      <Text style={styles.fieldLabel}>Full name <Text style={styles.required}>*</Text></Text>
       <View style={styles.inputWrapper}>
         <TextInput style={styles.input} value={fullName} onChangeText={setFullName} placeholder="Enter full name" placeholderTextColor={Colors.border} />
       </View>
 
-      <Text style={styles.fieldLabel}>Phone number</Text>
+      <Text style={styles.fieldLabel}>Phone number <Text style={styles.required}>*</Text></Text>
       <View style={styles.inputWrapper}>
-        <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="Enter phone number" placeholderTextColor={Colors.border} keyboardType="phone-pad" />
+        <TextInput style={styles.input} value={phone} onChangeText={(t) => setPhone(t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''))} placeholder="Enter phone number" placeholderTextColor={Colors.border} keyboardType="phone-pad" maxLength={15} />
       </View>
 
-      <Text style={styles.fieldLabel}>Email</Text>
+      <Text style={styles.fieldLabel}>Email <Text style={styles.required}>*</Text></Text>
       <View style={styles.inputWrapper}>
         <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Enter email" placeholderTextColor={Colors.border} keyboardType="email-address" autoCapitalize="none" />
+      </View>
+
+      <Text style={styles.fieldLabel}>Password <Text style={styles.required}>*</Text></Text>
+      <View style={[styles.inputWrapper, { flexDirection: 'row', alignItems: 'center' }]}>
+        <TextInput style={[styles.input, { flex: 1 }]} value={password} onChangeText={setPassword} placeholder="Create a password (min 6 chars)" placeholderTextColor={Colors.border} secureTextEntry={!showPassword} />
+        <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ padding: 8 }}>
+          <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color={Colors.gray} />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -153,21 +266,24 @@ export default function RestaurantSignupScreen() {
         Provide the legal identity information that supports Cambodia-focused onboarding and review.
       </Text>
 
-      <Text style={styles.fieldLabel}>Legal full name</Text>
+      <Text style={styles.fieldLabel}>Legal full name <Text style={styles.required}>*</Text></Text>
       <View style={styles.inputWrapper}>
         <TextInput style={styles.input} value={legalName} onChangeText={setLegalName} placeholder="Enter legal full name" placeholderTextColor={Colors.border} />
       </View>
 
       <View style={styles.row}>
         <View style={styles.halfField}>
-          <Text style={styles.fieldLabel}>Date of birth</Text>
-          <View style={styles.inputWrapper}>
-            <TextInput style={[styles.input, { flex: 1 }]} value={dob} onChangeText={setDob} placeholder="DD/MM/YYYY" placeholderTextColor={Colors.border} />
-            <Ionicons name="calendar-outline" size={18} color={Colors.gray} />
-          </View>
+          <Text style={styles.fieldLabel}>Date of birth <Text style={styles.required}>*</Text></Text>
+          <DatePickerInput
+            value={dob}
+            onChangeText={setDob}
+            placeholder="DD/MM/YYYY"
+            editable={true}
+            style={{ borderRadius: 14, height: 48 }}
+          />
         </View>
         <View style={styles.halfField}>
-          <Text style={styles.fieldLabel}>Nationality</Text>
+          <Text style={styles.fieldLabel}>Nationality <Text style={styles.required}>*</Text></Text>
           <View style={styles.inputWrapper}>
             <TextInput style={styles.input} value={nationality} onChangeText={setNationality} placeholder="Nationality" placeholderTextColor={Colors.border} />
           </View>
@@ -234,7 +350,7 @@ export default function RestaurantSignupScreen() {
 
       <Text style={styles.fieldLabel}>Restaurant phone</Text>
       <View style={styles.inputWrapper}>
-        <TextInput style={styles.input} value={restPhone} onChangeText={setRestPhone} placeholder="Enter phone" placeholderTextColor={Colors.border} keyboardType="phone-pad" />
+        <TextInput style={styles.input} value={restPhone} onChangeText={(t) => setRestPhone(t.replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''))} placeholder="Enter phone" placeholderTextColor={Colors.border} keyboardType="phone-pad" maxLength={15} />
       </View>
 
       <Text style={styles.fieldLabel}>Address</Text>
@@ -299,7 +415,7 @@ export default function RestaurantSignupScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 12, 60) }]}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
@@ -337,10 +453,10 @@ export default function RestaurantSignupScreen() {
           <Text style={styles.nextHintValue}>{NEXT_LABELS[step]}</Text>
         </View>
         <View style={styles.bottomButtons}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
+          <TouchableOpacity style={styles.backBtn} onPress={handleBack} disabled={loading}>
             <Text style={styles.backBtnText}>Back</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.continueBtn} activeOpacity={0.8} onPress={handleContinue}>
+          <TouchableOpacity style={styles.continueBtn} activeOpacity={0.8} onPress={handleContinue} disabled={loading}>
             <LinearGradient
               colors={[Colors.primary, Colors.primaryFaded]}
               start={{ x: 0, y: 0.5 }}
@@ -405,7 +521,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
@@ -500,6 +615,9 @@ const styles = StyleSheet.create({
     color: Colors.text,
     marginBottom: 6,
     marginTop: 14,
+  },
+  required: {
+    color: Colors.error,
   },
   inputWrapper: {
     height: 48,

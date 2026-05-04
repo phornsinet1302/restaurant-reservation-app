@@ -3,7 +3,6 @@ const router = express.Router();
 const favoritesController = require('../controllers/favoritesController');
 const { protect } = require('../middleware/authMiddleware');
 
-// You MUST be logged in to have favorites
 router.use(protect);
 
 router.post('/:restaurant_id', favoritesController.addFavorite);

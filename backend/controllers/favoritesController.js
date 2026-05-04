@@ -1,12 +1,17 @@
 const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 
 // 1. Add a restaurant to favorites
 exports.addFavorite = async (req, res) => {
   try {
-    const user_id = req.user.id; // From the logged-in customer token
-    const { restaurant_id } = req.params; // From the URL
+    const user_id = req.user.id;
+    const restaurant_id = (req.params.restaurant_id || '').trim();
 
-    const { data, error } = await supabase
+    if (!restaurant_id) {
+      return res.status(400).json({ error: 'Restaurant ID is required' });
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('favorites')
       .insert([{ user_id, restaurant_id }])
       .select();
@@ -27,9 +32,13 @@ exports.addFavorite = async (req, res) => {
 exports.removeFavorite = async (req, res) => {
   try {
     const user_id = req.user.id;
-    const { restaurant_id } = req.params;
+    const restaurant_id = (req.params.restaurant_id || '').trim(); // Sanitized
 
-    const { error } = await supabase
+    if (!restaurant_id) {
+      return res.status(400).json({ error: 'Restaurant ID is required' });
+    }
+
+    const { error } = await supabaseAdmin
       .from('favorites')
       .delete()
       .match({ user_id, restaurant_id });
@@ -47,13 +56,23 @@ exports.getMyFavorites = async (req, res) => {
   try {
     const user_id = req.user.id;
 
-    // We use *, restaurants(*) to pull the actual restaurant details, not just the ID!
+    // We use *, restaurants(*) to pull ALL the actual restaurant details
     const { data, error } = await supabase
       .from('favorites')
-      .select('*, restaurants(name, location)')
+      .select('*, restaurants(*)')
       .eq('user_id', user_id);
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Favorites query error:', error);
+      throw error;
+    }
+
+    console.log('✅ Favorites data with restaurant details:', data?.map((item) => ({
+      restaurant_id: item.restaurant_id,
+      name: item.restaurants?.name,
+      image_url: item.restaurants?.image_url,
+      category: item.restaurants?.category,
+    })));
 
     res.status(200).json(data);
   } catch (error) {

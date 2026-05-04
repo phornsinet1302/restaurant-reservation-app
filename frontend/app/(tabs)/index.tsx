@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,21 +9,26 @@ import {
   ImageSourcePropType,
   TouchableOpacity,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_CONFIG } from '@/app/config/apiConfig';
+import { useAuth } from '@/hooks/useAuth';
+import GuestLoginModal from '@/components/GuestLoginModal';
+import StoryRow from '@/components/StoryRow';
+import * as Location from 'expo-location';
+import { useNotifications } from '@/hooks/useNotifications';
+import { useAppToast } from '@/components/ToastProvider';
+
+const API_URL = API_CONFIG.BASE_URL;
+let LAST_HOME_REFRESH_GLOBAL_MS = 0;
+let LAST_HOME_PROFILE_SYNC_GLOBAL_MS = 0;
 
 /* ── Data ── */
-
-type Story = {
-  id: string;
-  name: string;
-  time: string;
-  badge: number;
-  badgeColor: string;
-  image: ImageSourcePropType;
-};
 
 type Restaurant = {
   id: string;
@@ -32,232 +37,727 @@ type Restaurant = {
   distance: string;
   rating: string;
   image: ImageSourcePropType;
+  image_url?: string;
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+  description?: string;
+  category?: string;
+  cuisine?: string;
+  reviews_count?: number;
 };
 
-const STORIES: Story[] = [
-  {
-    id: 's1',
-    name: 'Romeo Lane',
-    time: '8h ago',
-    badge: 2,
-    badgeColor: '#4CAF50',
-    image: require('@/assets/food/food-1.jpeg'),
-  },
-  {
-    id: 's2',
-    name: 'Sakura Sushi…',
-    time: '8h ago',
-    badge: 2,
-    badgeColor: Colors.accent,
-    image: require('@/assets/food/food-2.jpeg'),
-  },
-  {
-    id: 's3',
-    name: 'SkyLounge …',
-    time: '10h ago',
-    badge: 1,
-    badgeColor: Colors.primary,
-    image: require('@/assets/food/food-3.jpeg'),
-  },
-  {
-    id: 's4',
-    name: 'Pret A Manger',
-    time: '13h ago',
-    badge: 1,
-    badgeColor: Colors.primary,
-    image: require('@/assets/food/food-4.jpeg'),
-  },
-];
-
 const CATEGORIES = [
-  { id: 'c1', emoji: '🍽️', label: 'Restaurants' },
-  { id: 'c2', emoji: '🍺', label: 'Pubs' },
-  { id: 'c3', emoji: '🎉', label: 'Night clubs' },
+  { id: 'all', emoji: '🔍', label: 'All' },
+  { id: 'restaurants', emoji: '🍽️', label: 'Restaurants' },
+  { id: 'pubs', emoji: '🍺', label: 'Pubs' },
+  { id: 'cafe', emoji: '☕', label: 'Café' },
 ];
 
-const RESTAURANTS: Restaurant[] = [
-  {
-    id: 'r1',
-    name: 'Romeo Lane',
-    hours: 'Open Until 11:00pm',
-    distance: '0.3 miles',
-    rating: '4.5',
-    image: require('@/assets/restaurant-1.jpg'),
-  },
-  {
-    id: 'r2',
-    name: 'SkyLounge Bar',
-    hours: 'Open Until 1:00am',
-    distance: '0.8 miles',
-    rating: '4.8',
-    image: require('@/assets/restaurant-2.jpg'),
-  },
-  {
-    id: 'r3',
-    name: 'Sakura Sushi House',
-    hours: 'Open Until 10:30pm',
-    distance: '1.2 miles',
-    rating: '4.7',
-    image: require('@/assets/restaurant-3.jpg'),
-  },
-  {
-    id: 'r4',
-    name: 'Pret A Manger',
-    hours: 'Open Until 9:00pm',
-    distance: '0.1 miles',
-    rating: '4.3',
-    image: require('@/assets/restaurant-4.jpg'),
-  },
-];
+// Fallback: Default restaurant images
+const DEFAULT_RESTAURANT_IMAGES: { [key: string]: ImageSourcePropType } = {
+  r1: require('@/assets/restaurant-1.jpg'),
+  r2: require('@/assets/restaurant-2.jpg'),
+  r3: require('@/assets/restaurant-3.jpg'),
+  r4: require('@/assets/restaurant-4.jpg'),
+};
+
+/* ── Helper Functions ── */
+
+// Calculate distance between two coordinates using Haversine formula (returns km)
+const calculateDistance = (
+  userLat: number,
+  userLon: number,
+  restLat: number,
+  restLon: number
+): number => {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (restLat - userLat) * (Math.PI / 180);
+  const dLon = (restLon - userLon) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(userLat * (Math.PI / 180)) *
+      Math.cos(restLat * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// Format distance for display
+const formatDistance = (distanceKm: number): string => {
+  if (distanceKm < 1) {
+    return `${(distanceKm * 1000).toFixed(0)}m`;
+  }
+  return `${distanceKm.toFixed(1)}km`;
+};
+
+const formatRestaurantRating = (rating: unknown): string => {
+  const parsed =
+    typeof rating === 'number'
+      ? rating
+      : typeof rating === 'string'
+        ? Number.parseFloat(rating)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(1) : 'New';
+};
+
+const formatReviewsCount = (count: unknown): string => {
+  const parsed =
+    typeof count === 'number'
+      ? count
+      : typeof count === 'string'
+        ? Number.parseInt(count, 10)
+        : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : '0';
+};
+
+/** Prefer district / neighbourhood, then city — de-duplicated for reverse geocode */
+function lineFromGeocode(a: Location.LocationGeocodedAddress): string {
+  const parts = [a.district, a.subregion, a.city, a.region].filter(
+    (p): p is string => typeof p === 'string' && p.trim().length > 0
+  );
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const p of parts) {
+    const key = p.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(p.trim());
+    if (unique.length >= 2) break;
+  }
+  if (unique.length > 0) return unique.join(' · ');
+  if (a.name) return a.name;
+  return 'Your area';
+}
 
 /* ── Component ── */
 
 export default function HomeScreen() {
+  const { toast } = useAppToast();
   const router = useRouter();
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [token, setToken] = useState<string>('');
+  const [favoriteLoadingId, setFavoriteLoadingId] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string>('Guest');
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  const [greeting, setGreeting] = useState<string>('Good morning');
+  const { isGuest } = useAuth();
+  const [showGuestModal, setShowGuestModal] = useState(false);
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [restaurantsLoading, setRestaurantsLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  
+  // Location tracking
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [userLocationAddress, setUserLocationAddress] = useState<string>('Phnom Penh');
+  const { unreadCount } = useNotifications();
+  const refreshingRef = useRef(false);
+  const loadingRestaurantsRef = useRef(false);
+  const currentLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const lastRefreshAtRef = useRef(LAST_HOME_REFRESH_GLOBAL_MS);
+  const lastProfileSyncAtRef = useRef(LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+  const lastLocationPermissionCheckRef = useRef(0);
+  const lastLocationResolveRef = useRef(0);
+  const HOME_REFRESH_COOLDOWN_MS = 30000;
+  const PROFILE_SYNC_COOLDOWN_MS = 60000;
+  const LOCATION_RESOLVE_COOLDOWN_MS = 15000;
+
+  useEffect(() => {
+    updateGreeting();
+  }, []);
+
+  // Refresh user data whenever screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      void refreshHomeData();
+    }, [refreshHomeData])
+  );
+
+  // Request location permission and get current location
+  const requestLocationPermission = async (): Promise<{ latitude: number; longitude: number }> => {
+    const fallback = { latitude: 11.5564, longitude: 104.9282 };
+    try {
+      const now = Date.now();
+      if (
+        currentLocationRef.current &&
+        now - lastLocationResolveRef.current < LOCATION_RESOLVE_COOLDOWN_MS
+      ) {
+        return currentLocationRef.current;
+      }
+
+      console.log('📍 Requesting location permission...');
+      const existingPerm = await Location.getForegroundPermissionsAsync();
+      let status = existingPerm.status;
+      if (status !== 'granted' && now - lastLocationPermissionCheckRef.current > LOCATION_RESOLVE_COOLDOWN_MS) {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        status = requested.status;
+        lastLocationPermissionCheckRef.current = now;
+      }
+      
+      if (status === 'granted') {
+        console.log('✅ Location permission granted');
+        const loc = await getCurrentLocation();
+        lastLocationResolveRef.current = now;
+        return loc;
+      } else {
+        console.warn('⚠️ Location permission denied');
+        setLocationError('Location permission denied. Using default location.');
+        setUserLocation(fallback);
+        currentLocationRef.current = fallback;
+        try {
+          const addresses = await Location.reverseGeocodeAsync(fallback);
+          if (addresses?.[0]) {
+            setUserLocationAddress(lineFromGeocode(addresses[0]));
+          }
+        } catch {
+          setUserLocationAddress('Phnom Penh');
+        }
+        return fallback;
+      }
+    } catch (error) {
+      console.error('❌ Error requesting location permission:', error);
+      setLocationError('Could not get location');
+      setUserLocation(fallback);
+      currentLocationRef.current = fallback;
+      setUserLocationAddress('Phnom Penh');
+      return fallback;
+    }
+  };
+
+  // Get user's current location
+  const getCurrentLocation = async (): Promise<{ latitude: number; longitude: number }> => {
+    const fallback = { latitude: 11.5564, longitude: 104.9282 };
+    try {
+      // Skip if OS-level location services are disabled (kCLErrorDomain error 1)
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.warn('⚠️ Location services disabled — using default location');
+        setUserLocation(fallback);
+        currentLocationRef.current = fallback;
+        setUserLocationAddress('Phnom Penh');
+        return fallback;
+      }
+
+      console.log('📍 Getting current location...');
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const { latitude, longitude } = location.coords;
+      console.log(`✅ Current location: ${latitude}, ${longitude}`);
+      const nextLocation = { latitude, longitude };
+      setUserLocation(nextLocation);
+      currentLocationRef.current = nextLocation;
+
+      // Get address from coordinates using reverse geocoding
+      try {
+        const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (addresses && addresses.length > 0) {
+          const line = lineFromGeocode(addresses[0]);
+          setUserLocationAddress(line);
+          console.log(`📍 Location address: ${line}`);
+        }
+      } catch (geoError) {
+        console.warn('⚠️ Could not get location address:', geoError);
+        setUserLocationAddress('Your Location');
+      }
+
+      // Store location for later use
+      await AsyncStorage.setItem('userLocation', JSON.stringify(nextLocation));
+      return nextLocation;
+    } catch (error) {
+      console.warn('⚠️ Could not get location — using default:', error);
+      setLocationError('Could not get your location');
+      setUserLocation(fallback);
+      currentLocationRef.current = fallback;
+      setUserLocationAddress('Phnom Penh');
+      return fallback;
+    }
+  };
+
+  // Determine greeting based on current time
+  const updateGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) {
+      setGreeting('Good morning');
+    } else if (hour < 18) {
+      setGreeting('Good afternoon');
+    } else {
+      setGreeting('Good evening');
+    }
+  };
+
+  const refreshHomeData = useCallback(async () => {
+    const now = Date.now();
+    const lastSeen = Math.max(lastRefreshAtRef.current, LAST_HOME_REFRESH_GLOBAL_MS);
+    if (now - lastSeen < HOME_REFRESH_COOLDOWN_MS) return;
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    lastRefreshAtRef.current = now;
+    LAST_HOME_REFRESH_GLOBAL_MS = now;
+    try {
+      await loadUserData();
+      const resolvedLocation = await requestLocationPermission();
+      await loadRestaurants(0, resolvedLocation);
+    } finally {
+      refreshingRef.current = false;
+    }
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      const now = Date.now();
+      const storedToken = await AsyncStorage.getItem('token');
+      if (storedToken) {
+        setToken(storedToken);
+        const lastProfileSync = Math.max(lastProfileSyncAtRef.current, LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+        if (now - lastProfileSync > PROFILE_SYNC_COOLDOWN_MS) {
+          await fetchFavorites(storedToken);
+        }
+      }
+
+      // Load user profile data
+      const userData = await AsyncStorage.getItem('user');
+      const token = await AsyncStorage.getItem('token');
+      
+      if (userData && token) {
+        const parsedUser = JSON.parse(userData);
+        setUserName(parsedUser.fullName || parsedUser.name || 'Guest');
+        setUserEmail(parsedUser.email || '');
+
+        // Fetch latest profile data from backend (includes profile_picture_url)
+        try {
+          const lastProfileSync = Math.max(lastProfileSyncAtRef.current, LAST_HOME_PROFILE_SYNC_GLOBAL_MS);
+          if (now - lastProfileSync <= PROFILE_SYNC_COOLDOWN_MS) {
+            if (parsedUser.profile_picture_url) {
+              setProfileImageUri(parsedUser.profile_picture_url);
+            }
+            return;
+          }
+          console.log('📸 [HomeScreen] Fetching profile data from backend...');
+          const response = await axios.get(`${API_URL}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000,
+          });
+          
+          console.log('📸 [HomeScreen] Backend response received');
+          console.log('   User data:', response.data?.user?.id ? '✅' : '❌');
+          
+          if (response.data?.user?.profile_picture_url) {
+            console.log('📸 [HomeScreen] ✅ Profile picture found!');
+            console.log('   URL:', response.data.user.profile_picture_url.substring(0, 60) + '...');
+            setProfileImageUri(response.data.user.profile_picture_url);
+            
+            // Update AsyncStorage with latest profile picture URL
+            parsedUser.profile_picture_url = response.data.user.profile_picture_url;
+            await AsyncStorage.setItem('user', JSON.stringify(parsedUser));
+            lastProfileSyncAtRef.current = now;
+            LAST_HOME_PROFILE_SYNC_GLOBAL_MS = now;
+            console.log('   ✅ Saved to local storage');
+          } else {
+            console.log('📸 [HomeScreen] ❌ No profile picture found in backend');
+            setProfileImageUri(null);
+            lastProfileSyncAtRef.current = now;
+            LAST_HOME_PROFILE_SYNC_GLOBAL_MS = now;
+          }
+        } catch (error: any) {
+          console.warn('📸 [HomeScreen] ❌ Failed to fetch profile from backend:', error.message);
+          console.log('   Attempt to use fallback from localStorage...');
+          // Fallback to localStorage if backend fails
+          if (parsedUser.profile_picture_url) {
+            console.log('   ✅ Using profile picture from localStorage');
+            setProfileImageUri(parsedUser.profile_picture_url);
+          } else {
+            console.log('   ❌ No picture in localStorage either');
+            setProfileImageUri(null);
+          }
+        }
+      } else {
+        // No user data or token, clear profile image
+        console.log('📸 [HomeScreen] No user data or token found');
+        setProfileImageUri(null);
+      }
+    } catch (error) {
+      console.warn('Failed to load user data:', error);
+    }
+  };
+
+  const fetchFavorites = async (authToken: string) => {
+    try {
+      const response = await axios.get(`${API_URL}/api/favorites`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      const favoriteIds = response.data.map((fav: any) => fav.restaurant_id);
+      setFavorites(favoriteIds);
+    } catch (error) {
+      console.warn('Failed to fetch favorites:', error);
+    }
+  };
+
+  const loadRestaurants = async (
+    retryCount = 0,
+    forcedLocation?: { latitude: number; longitude: number } | null
+  ) => {
+    if (loadingRestaurantsRef.current) return;
+    try {
+      loadingRestaurantsRef.current = true;
+      setRestaurantsLoading(true);
+      console.log('📱 Loading restaurants...', retryCount > 0 ? `(Retry ${retryCount})` : '');
+      // Use 30s timeout for consistency with search screen
+      const response = await axios.get(`${API_URL}/api/restaurants`, { timeout: 30000 });
+      
+      // Get user location from state or storage
+      let currentLocation = forcedLocation ?? currentLocationRef.current ?? userLocation;
+      if (!currentLocation) {
+        const storedLocation = await AsyncStorage.getItem('userLocation');
+        if (storedLocation) {
+          currentLocation = JSON.parse(storedLocation);
+        } else {
+          // Default to Phnom Penh if no location available
+          currentLocation = { latitude: 11.5564, longitude: 104.9282 };
+        }
+      }
+      
+      // Transform API data to match Restaurant type
+      const apiRestaurants = response.data?.map((r: any, index: number) => {
+        let distance = 'Unknown';
+        
+        // Calculate distance if restaurant has coordinates
+        if (r.latitude && r.longitude && currentLocation) {
+          const distanceKm = calculateDistance(
+            currentLocation.latitude,
+            currentLocation.longitude,
+            r.latitude,
+            r.longitude
+          );
+          distance = formatDistance(distanceKm);
+        }
+        
+        return {
+          id: r.id || `r${index + 1}`,
+          name: r.name || 'Restaurant',
+          hours: r.opening_hours || 'Check hours',
+          distance: distance,
+          rating: formatRestaurantRating(r.rating),
+          latitude: r.latitude || null,
+          longitude: r.longitude || null,
+          // Use uploaded cover image if available, otherwise fall back to default
+          image: DEFAULT_RESTAURANT_IMAGES[`r${(index % 4) + 1}`] || DEFAULT_RESTAURANT_IMAGES.r1,
+          image_url: r.image_url || null,
+          description: r.description || '',
+          address: r.address || '',
+          category: r.category || '',
+          cuisine: r.cuisine || '',
+          reviews_count: typeof r.reviews_count === 'number' ? r.reviews_count : 0,
+        };
+      }) || [];
+      
+      console.log('📱 [HomeScreen] Loaded restaurants with distances:', apiRestaurants.map((r: any) => ({ 
+        id: r.id, 
+        name: r.name,
+        distance: r.distance,
+      })));
+      
+      setRestaurants(apiRestaurants);
+    } catch (error: any) {
+      console.warn('Failed to load restaurants:', error.message);
+      
+      // Check if it's a timeout error and retry
+      if (error.code === 'ECONNABORTED' && retryCount < 2) {
+        console.log('⏱️ Timeout occurred, retrying... (' + (retryCount + 1) + '/2)');
+        // Wait 2 seconds before retrying
+        await new Promise(r => setTimeout(r, 2000));
+        loadingRestaurantsRef.current = false;
+        return loadRestaurants(retryCount + 1, forcedLocation);
+      }
+      
+      setRestaurants([]);
+    } finally {
+      loadingRestaurantsRef.current = false;
+      setRestaurantsLoading(false);
+    }
+  };
+
+  const handleToggleFavorite = async (restaurantId: string, restaurantName: string) => {
+    if (isGuest) {
+      setShowGuestModal(true);
+      return;
+    }
+
+    if (!token) {
+      toast('You must be logged in to favorite restaurants', 'error');
+      return;
+    }
+
+    setFavoriteLoadingId(restaurantId);
+    try {
+      const isFavorited = favorites.includes(restaurantId);
+      
+      if (isFavorited) {
+        // Remove from favorites
+        await axios.delete(`${API_URL}/api/favorites/${restaurantId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setFavorites((prev) => prev.filter((id) => id !== restaurantId));
+        toast(`${restaurantName} removed from favorites`, 'success');
+      } else {
+        // Add to favorites
+        await axios.post(
+          `${API_URL}/api/favorites/${restaurantId}`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setFavorites((prev) => [...prev, restaurantId]);
+        toast(`${restaurantName} added to favorites`, 'success');
+      }
+    } catch (error: any) {
+      console.error('Favorite toggle error:', error.response?.data || error.message);
+      toast('Failed to update favorite. Please try again.', 'error');
+    } finally {
+      setFavoriteLoadingId(null);
+    }
+  };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
       {/* ── Header ── */}
       <View style={styles.headerRow}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarLetter}>G</Text>
+            {isGuest ? (
+              // Show avatar icon for guests
+              <Ionicons name="person-circle" size={44} color={Colors.primary} />
+            ) : profileImageUri ? (
+              // Show profile picture if user has one
+              <Image source={{ uri: profileImageUri }} style={styles.avatarImage} />
+            ) : (
+              // Show user initial or avatar fallback
+              <Text style={styles.avatarLetter}>{userName.charAt(0).toUpperCase()}</Text>
+            )}
           </View>
           <View>
-            <Text style={styles.greeting}>Good morning!</Text>
-            <Text style={styles.subGreeting}>Welcome, Google User</Text>
+            <Text style={styles.greeting}>{greeting}!</Text>
+            <Text style={styles.subGreeting}>
+              Welcome, {isGuest ? 'Guest' : userName}
+            </Text>
+            {userLocationAddress ? (
+              <View style={styles.locationRow}>
+                <Ionicons name="location-outline" size={14} color={Colors.gray} />
+                <Text style={styles.userEmail}>{userLocationAddress}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
-        <TouchableOpacity style={styles.bellButton} onPress={() => router.push('/notifications' as any)}>
+        <TouchableOpacity style={styles.bellButton} onPress={() => router.push('../notifications' as any)}>
           <Ionicons name="notifications-outline" size={22} color={Colors.text} />
+          {unreadCount > 0 && (
+            <View style={styles.notifBadge}>
+              <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
       {/* ── Search ── */}
-      <View style={styles.searchBox}>
+      <TouchableOpacity 
+        style={styles.searchBox}
+        onPress={() => router.push('./search' as any)}
+        activeOpacity={0.7}
+      >
         <Ionicons name="search" size={18} color={Colors.gray} />
         <TextInput
           style={styles.searchInput}
           placeholder="Enter postcode or town or city"
           placeholderTextColor={Colors.gray}
+          editable={false}
+          pointerEvents="none"
         />
-      </View>
+      </TouchableOpacity>
 
       {/* ── Latest Stories ── */}
-      <View style={styles.sectionHeaderCol}>
-        <Text style={styles.sectionTitle}>Latest stories</Text>
-        <Text style={styles.sectionSub}>Quick updates from restaurants near you</Text>
-      </View>
-
-      <FlatList
-        data={STORIES}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.storiesList}
-        renderItem={({ item, index }) => (
-          <TouchableOpacity
-            style={styles.storyItem}
-            onPress={() => router.push({ pathname: '/story', params: { groupIndex: String(index) } } as any)}
-          >
-            <View style={styles.storyImageWrapper}>
-              <Image source={item.image} style={styles.storyImage} />
-              <View style={[styles.storyBadge, { backgroundColor: item.badgeColor }]}>
-                <Text style={styles.storyBadgeText}>{item.badge}</Text>
-              </View>
-            </View>
-            <Text style={styles.storyName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <View style={styles.storyTimeRow}>
-              <Ionicons name="time-outline" size={11} color={Colors.gray} />
-              <Text style={styles.storyTime}>{item.time}</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-      />
+      <StoryRow />
 
       {/* ── Categories ── */}
-      <View style={styles.categoriesRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.categoriesRow}
+      >
         {CATEGORIES.map((cat) => (
-          <TouchableOpacity key={cat.id} style={styles.categoryPill}>
+          <TouchableOpacity
+            key={cat.id}
+            style={[
+              styles.categoryPill,
+              selectedCategory === cat.id && styles.categoryPillActive,
+            ]}
+            onPress={() => setSelectedCategory(cat.id)}
+          >
             <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
-            <Text style={styles.categoryLabel}>{cat.label}</Text>
+            <Text style={[
+              styles.categoryLabel,
+              selectedCategory === cat.id && styles.categoryLabelActive,
+            ]}>
+              {cat.label}
+            </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* ── Top Restaurants ── */}
       <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>Top restaurants in London</Text>
-        <TouchableOpacity>
+        <Text style={styles.sectionTitle}>Top restaurants in Phnom Penh</Text>
+        <TouchableOpacity onPress={() => router.push('./search' as any)}>
           <Text style={styles.seeAll}>See all</Text>
         </TouchableOpacity>
       </View>
 
-      {RESTAURANTS.map((restaurant) => (
-        <TouchableOpacity
-          key={restaurant.id}
-          style={styles.restaurantCard}
-          activeOpacity={0.9}
-          onPress={() =>
-            router.push({
-              pathname: '/restaurant-detail',
-              params: {
-                name: restaurant.name,
-                rating: restaurant.rating,
-                reviews: '3.2k',
-                address: '42 Fleet Street, City',
-                description: 'Fresh, handmade food and organic coffee, served quickly and with a smile.',
-                hours: restaurant.hours,
-                distance: restaurant.distance,
-              },
-            } as any)
-          }
-        >
-          {/* Image with rating badge */}
-          <View style={styles.restaurantImageWrapper}>
-            <Image source={restaurant.image} style={styles.restaurantImage} />
-            <View style={styles.ratingBadge}>
-              <Ionicons name="star" size={13} color="#FFFBF0" />
-              <Text style={styles.ratingText}>{restaurant.rating}</Text>
-            </View>
-          </View>
+      {restaurantsLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>Loading restaurants...</Text>
+        </View>
+      ) : (() => {
+        // Filter restaurants by selected category - match search screen logic
+        const categoryMap: Record<string, string[]> = {
+          'restaurants': ['restaurant', 'restaurants'],
+          'pubs': ['pub', 'pubs', 'bar'],
+          'cafe': ['cafe', 'café', 'coffee'],
+        };
 
-          {/* Info row */}
-          <View style={styles.restaurantInfoRow}>
-            <View style={styles.restaurantNameCol}>
-              <Text style={styles.restaurantName}>{restaurant.name}</Text>
-            </View>
-            <View style={styles.restaurantActions}>
-              <TouchableOpacity>
-                <Ionicons name="heart-outline" size={22} color={Colors.text} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.detailsButton}>
-                <Text style={styles.detailsText}>Details</Text>
-                <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
-              </TouchableOpacity>
-            </View>
-          </View>
+        const filteredRestaurants = selectedCategory === 'all'
+          ? restaurants
+          : restaurants.filter(r => {
+              const allowedCategories = categoryMap[selectedCategory] || [];
+              const restaurantCategory = r.category?.toLowerCase() || '';
+              return allowedCategories.some(cat => restaurantCategory.includes(cat));
+            });
+        
+        return filteredRestaurants.length > 0 ? (
+          <View>
+            {filteredRestaurants.map((restaurant) => (
+              <TouchableOpacity
+                key={restaurant.id}
+                style={styles.restaurantCard}
+                activeOpacity={0.9}
+                onPress={() =>
+                  router.push({
+                    pathname: '../restaurant-detail',
+                    params: {
+                      id: restaurant.id,
+                      name: restaurant.name,
+                      rating: restaurant.rating,
+                      reviews: formatReviewsCount(restaurant.reviews_count),
+                      address: restaurant.address || 'Address unavailable',
+                      description: restaurant.description || 'Description unavailable',
+                      hours: restaurant.hours,
+                      distance: restaurant.distance,
+                      latitude: restaurant.latitude || '',
+                      longitude: restaurant.longitude || '',
+                    },
+                  } as any)
+                }
+              >
+                {/* Image with rating badge */}
+                <View style={styles.restaurantImageWrapper}>
+                  {restaurant.image_url ? (
+                    <Image source={{ uri: restaurant.image_url }} style={styles.restaurantImage} />
+                  ) : (
+                    <Image source={restaurant.image} style={styles.restaurantImage} />
+                  )}
+                  <View style={styles.ratingBadge}>
+                    <Ionicons name="star" size={13} color="#FFFBF0" />
+                    <Text style={styles.ratingText}>{restaurant.rating}</Text>
+                  </View>
+                </View>
 
-          {/* Meta row */}
-          <View style={styles.restaurantMeta}>
-            <View style={styles.metaItem}>
-              <Ionicons name="time-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{restaurant.hours}</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <Ionicons name="location-outline" size={14} color={Colors.gray} />
-              <Text style={styles.metaText}>{restaurant.distance}</Text>
-            </View>
+                {/* Info row */}
+                <View style={styles.restaurantInfoRow}>
+                  <View style={styles.restaurantNameCol}>
+                    <Text style={styles.restaurantName}>{restaurant.name}</Text>
+                    {/* Hours and Distance */}
+                    <View style={styles.restaurantMeta}>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="time-outline" size={12} color={Colors.gray} />
+                        <Text style={styles.metaText}>{restaurant.hours || 'Check hours'}</Text>
+                      </View>
+                      <View style={styles.metaDivider} />
+                      <View style={styles.metaItem}>
+                        <Ionicons name="location-outline" size={12} color={Colors.gray} />
+                        <Text style={styles.metaText}>{restaurant.distance || 'Distance unavailable'}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.restaurantActions}>
+                    <TouchableOpacity 
+                      onPress={() => handleToggleFavorite(restaurant.id, restaurant.name)}
+                      disabled={favoriteLoadingId === restaurant.id}
+                    >
+                      {favoriteLoadingId === restaurant.id ? (
+                        <ActivityIndicator size="small" color={Colors.primary} />
+                      ) : (
+                        <Ionicons 
+                          name={favorites.includes(restaurant.id) ? 'heart' : 'heart-outline'} 
+                          size={22} 
+                          color={favorites.includes(restaurant.id) ? Colors.accent : Colors.text}
+                        />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.detailsButton}
+                      onPress={() =>
+                        router.push({
+                          pathname: '../restaurant-detail',
+                          params: {
+                            id: restaurant.id,
+                            name: restaurant.name,
+                            rating: restaurant.rating,
+                            reviews: formatReviewsCount(restaurant.reviews_count),
+                            address: restaurant.address || 'Address unavailable',
+                            description: restaurant.description || 'Description unavailable',
+                            hours: restaurant.hours,
+                            distance: restaurant.distance,
+                            latitude: restaurant.latitude || '',
+                            longitude: restaurant.longitude || '',
+                          },
+                        } as any)
+                      }
+                    >
+                      <Text style={styles.detailsText}>Details</Text>
+                      <Ionicons name="chevron-forward" size={14} color={Colors.primary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
           </View>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="restaurant-outline" size={48} color={Colors.gray} />
+            <Text style={styles.emptyText}>
+              {selectedCategory === 'all' ? 'No restaurants available' : 'No restaurants in this category'}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {selectedCategory === 'all' 
+                ? 'Check back later for new restaurants' 
+                : 'Try selecting a different category'}
+            </Text>
+          </View>
+        );
+      })()}
+      </ScrollView>
+
+      <GuestLoginModal
+        visible={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+        feature="Favorites"
+      />
+    </View>
   );
 }
 
@@ -295,6 +795,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#F0E5C0',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
   },
   avatarLetter: {
     fontFamily: 'PlusJakartaSans-Bold',
@@ -312,6 +818,18 @@ const styles = StyleSheet.create({
     color: Colors.gray,
     marginTop: 1,
   },
+  userEmail: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 11,
+    color: Colors.gray,
+    marginTop: 2,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
   bellButton: {
     width: 44,
     height: 44,
@@ -320,6 +838,23 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FF2424',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  notifBadgeText: {
+    fontFamily: 'PlusJakartaSans-Bold',
+    fontSize: 10,
+    color: '#fff',
   },
 
   /* Search */
@@ -431,6 +966,7 @@ const styles = StyleSheet.create({
   categoriesRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
+    paddingVertical: 0,
     gap: 10,
     marginBottom: 24,
   },
@@ -445,6 +981,10 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.background,
   },
+  categoryPillActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
   categoryEmoji: {
     fontSize: 16,
   },
@@ -452,6 +992,9 @@ const styles = StyleSheet.create({
     fontFamily: 'PlusJakartaSans-Medium',
     fontSize: 14,
     color: Colors.text,
+  },
+  categoryLabelActive: {
+    color: '#FFFFFF',
   },
 
   /* Restaurant card */
@@ -489,21 +1032,45 @@ const styles = StyleSheet.create({
   restaurantInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginTop: 12,
+    gap: 10,
   },
   restaurantNameCol: {
     flex: 1,
+    minWidth: 0,
   },
   restaurantName: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 18,
     color: Colors.text,
   },
+  restaurantMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: Colors.border,
+  },
+  metaText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 12,
+    color: Colors.gray,
+  },
   restaurantActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 10,
+    flexShrink: 0,
   },
   detailsButton: {
     flexDirection: 'row',
@@ -512,7 +1079,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: 20,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
   detailsText: {
@@ -520,18 +1087,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.text,
   },
-  restaurantMeta: {
-    flexDirection: 'row',
+  loadingContainer: {
     alignItems: 'center',
-    gap: 20,
-    marginTop: 6,
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 12,
   },
-  metaItem: {
-    flexDirection: 'row',
+  loadingText: {
+    fontFamily: 'PlusJakartaSans-Regular',
+    fontSize: 14,
+    color: Colors.gray,
+  },
+  emptyContainer: {
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 8,
   },
-  metaText: {
+  emptyText: {
+    fontFamily: 'PlusJakartaSans-Medium',
+    fontSize: 16,
+    color: Colors.text,
+  },
+  emptySubtext: {
     fontFamily: 'PlusJakartaSans-Regular',
     fontSize: 13,
     color: Colors.gray,

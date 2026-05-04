@@ -1,19 +1,25 @@
 const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 
-// 1. Get My Notifications
-exports.getMyNotifications = async (req, res) => {
+exports.getNotifications = async (req, res) => {
   try {
-    // We get the user_id from your auth token!
-    const user_id = req.user.id; 
+    const user_id = req.user.id;
 
-    const { data, error } = await supabase
+    // Use supabaseAdmin to bypass RLS — the user_id filter still ensures
+    // each user only receives their own notifications.
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .select('*')
       .eq('user_id', user_id)
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    res.status(200).json(data);
+    if (error) {
+      console.error('❌ getNotifications error:', error.message);
+      throw error;
+    }
+
+    console.log(`📢 getNotifications: returning ${data?.length ?? 0} notifications for user ${user_id}`);
+    res.status(200).json(data ?? []);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -23,7 +29,7 @@ exports.markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true })
       .eq('id', id)
@@ -36,16 +42,15 @@ exports.markAsRead = async (req, res) => {
   }
 };
 
-// 3. Mark ALL Notifications as Read
 exports.markAllAsRead = async (req, res) => {
   try {
     const user_id = req.user.id;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true })
       .eq('user_id', user_id)
-      .eq('is_read', false) // Only update the unread ones
+      .eq('is_read', false) 
       .select();
 
     if (error) throw error;
@@ -60,7 +65,7 @@ exports.deleteNotification = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('notifications')
       .delete()
       .eq('id', id);
@@ -78,9 +83,9 @@ exports.createTestNotification = async (req, res) => {
     const user_id = req.user.id;
     const { title, message } = req.body;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
-      .insert([{ user_id, title, message }])
+      .insert([{ user_id, title, message, type: 'test', is_read: false }])
       .select();
 
     if (error) throw error;
