@@ -92,7 +92,13 @@ export default function RestaurantSignupScreen() {
     try {
       // Retrieve role from AsyncStorage (set during account-type selection)
       const selectedRole = await AsyncStorage.getItem('selectedRole') || 'restaurant';
-      
+
+      // Convert dob from DD/MM/YYYY to YYYY-MM-DD for PostgreSQL
+      const formatDob = (d: string): string => {
+        const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : d;
+      };
+
       const payload = {
         email,
         password,
@@ -100,7 +106,7 @@ export default function RestaurantSignupScreen() {
         fullName,
         identity: {
           legalName,
-          dob,
+          dob: formatDob(dob),
           nationality,
           cityProvince: city,
           currentAddress: address,

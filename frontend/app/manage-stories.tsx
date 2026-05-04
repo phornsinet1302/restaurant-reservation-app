@@ -121,6 +121,7 @@ export default function ManageStoriesScreen() {
   const [loading, setLoading] = useState(true);
   const [restaurantName, setRestaurantName] = useState('');
   const [restaurantId, setRestaurantId] = useState('');
+  const [restaurantCoverUrl, setRestaurantCoverUrl] = useState<string | null>(null);
   const [stories, setStories] = useState<Story[]>([]);
 
   // Create story form state
@@ -195,6 +196,9 @@ export default function ManageStoriesScreen() {
         console.log('   My restaurant ID:', myRestaurant.id);
         console.log('   My restaurant name:', myRestaurant.name);
         setRestaurantId(myRestaurant.id);
+        // Save any available cover/hero image so we can reuse it for "Use Cover"
+        const coverUrl = myRestaurant.image_url || myRestaurant.cover_url || myRestaurant.hero_image || null;
+        setRestaurantCoverUrl(coverUrl);
         
         // Get stories from the stories endpoint
         try {
@@ -387,7 +391,8 @@ export default function ManageStoriesScreen() {
           return;
         }
       } else if (imageUri === 'cover') {
-        cloudImageUrl = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4';
+        // Use the restaurant's configured cover image when available
+        cloudImageUrl = restaurantCoverUrl || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4';
       } else {
         // No image selected
         cloudImageUrl = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4';
@@ -685,7 +690,14 @@ export default function ManageStoriesScreen() {
                 </View>
               ) : imageUri === 'cover' ? (
                 <View style={styles.mediaSelectedImage}>
-                  <Image source={require('@/assets/images/hero-restaurant.jpg')} style={styles.mediaThumb} />
+                  <Image
+                    source={
+                      restaurantCoverUrl
+                        ? { uri: restaurantCoverUrl }
+                        : require('@/assets/images/hero-restaurant.jpg')
+                    }
+                    style={styles.mediaThumb}
+                  />
                   <TouchableOpacity onPress={() => setImageUri(null)} style={styles.mediaRemoveBtn}>
                     <Ionicons name="close-circle" size={22} color="#E74C3C" />
                   </TouchableOpacity>

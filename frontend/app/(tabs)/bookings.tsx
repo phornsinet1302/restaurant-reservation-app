@@ -145,30 +145,39 @@ export default function BookingsScreen() {
   const router = useRouter();
   const { isGuest } = useAuth();
 
+  console.log('👀 [BookingsScreen] Rendered. isGuest:', isGuest, 'loading:', loading);
+
   // Fetch bookings from API
   const loadBookings = useCallback(async (force = false) => {
     const now = Date.now();
     const lastSeen = Math.max(lastBookingsRefreshRef.current, LAST_BOOKINGS_REFRESH_GLOBAL_MS);
     if (!force && now - lastSeen < BOOKINGS_REFRESH_COOLDOWN_MS) {
+      console.log('⏱️ [loadBookings] Cooldown active. Skipping request.');
+      setLoading(false); // ensure loading is cleared even when skipped
       return;
     }
     lastBookingsRefreshRef.current = now;
     LAST_BOOKINGS_REFRESH_GLOBAL_MS = now;
+    
+    console.log('🚀 [loadBookings] Starting to fetch bookings (force:', force, ')');
     try {
       const token = await AsyncStorage.getItem('token');
+      console.log('🔑 [loadBookings] Token retrieved:', token ? '✅ exists' : '❌ missing');
+      
       if (!token) {
-        console.log('No token found');
+        console.log('⚠️  [loadBookings] No token found, skipping API call');
         setLoading(false);
         return;
       }
 
-      console.log('📋 Loading customer bookings...');
+      console.log('📋 [loadBookings] Fetching bookings from:', API_CONFIG.BASE_URL + '/api/reservations/my-reservations');
       const response = await axios.get(`${API_CONFIG.BASE_URL}/api/reservations/my-reservations`, {
         headers: { Authorization: `Bearer ${token}` },
+        timeout: 25000,
       });
       setBookingError(null);
 
-      console.log('✅ Bookings loaded:', response.data);
+      console.log('✅ [loadBookings] API Response received:', response.data);
 
       // Extract customer ID from token or first booking (for WebSocket)
       if (!customerId && response.data && response.data.length > 0) {
@@ -214,7 +223,7 @@ export default function BookingsScreen() {
           dbStatus: apiBooking.status,
           image: restaurantImageUrl ? { uri: restaurantImageUrl } : require('@/assets/restaurant-1.jpg'),
           imageUrl: restaurantImageUrl,
-          address: apiBooking.restaurant_address,
+          address: apiBooking.restaurants?.address,
           restaurantId: apiBooking.restaurant_id,
           reservationDateRaw: dateRaw,
           reservationTimeRaw: timeRaw,
@@ -234,8 +243,19 @@ export default function BookingsScreen() {
 
       setBookings(transformedBookings);
     } catch (error: any) {
-      console.error('❌ Error loading bookings:', error);
-      setBookingError('Could not load bookings. Please check your connection and try again.');
+      const isNetworkError =
+        !error.response &&
+        (error.message === 'Network Error' ||
+          error.code === 'ECONNABORTED' ||
+          error.code === 'ERR_NETWORK');
+
+      if (isNetworkError) {
+        console.warn('⚠️ [CustomerBookings] No internet connection');
+        setBookingError('No internet connection. Please check your network and try again.');
+      } else {
+        console.warn('⚠️ [CustomerBookings] Error loading bookings:', error.response?.status, error.message);
+        setBookingError('Could not load bookings. Please try again.');
+      }
       setBookings([]);
     } finally {
       setLoading(false);
@@ -269,18 +289,25 @@ export default function BookingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (loading || refreshing) return;
+      if (refreshing) return; // don't double-fetch during manual pull-to-refresh
       loadBookings();
-    }, [loadBookings, loading, refreshing])
+    }, [loadBookings, refreshing])
   );
 
+  // Modify is only allowed for pending (Upcoming) bookings — not after merchant confirms
   const canModifyBooking = (booking: Booking): boolean => {
-    if (booking.status !== 'Upcoming' && booking.status !== 'Confirmed') return false;
-
+    if (booking.status !== 'Upcoming') return false;
     const start = parseReservationStart(booking.reservationDateRaw, booking.reservationTimeRaw);
     if (!start) return false;
-    const timeDiffMinutes = (start.getTime() - Date.now()) / (1000 * 60);
-    return timeDiffMinutes > 30;
+    return (start.getTime() - Date.now()) / (1000 * 60) > 30;
+  };
+
+  // Cancel is allowed for both pending and confirmed bookings (within 30 min of slot)
+  const canCancelBooking = (booking: Booking): boolean => {
+    if (booking.status !== 'Upcoming' && booking.status !== 'Confirmed') return false;
+    const start = parseReservationStart(booking.reservationDateRaw, booking.reservationTimeRaw);
+    if (!start) return false;
+    return (start.getTime() - Date.now()) / (1000 * 60) > 30;
   };
 
   const handleLeaveReview = (booking: Booking) => {
@@ -323,6 +350,10 @@ export default function BookingsScreen() {
   };
 
   const handleModify = (booking: Booking) => {
+    if (booking.status === 'Confirmed') {
+      toast('This booking has been confirmed by the restaurant and can no longer be modified.', 'warning');
+      return;
+    }
     if (!canModifyBooking(booking)) {
       toast('You can only modify your booking more than 30 minutes before the reservation time.', 'warning');
       return;
@@ -348,7 +379,7 @@ export default function BookingsScreen() {
   };
 
   const handleCancel = async (booking: Booking) => {
-    if (!canModifyBooking(booking)) {
+    if (!canCancelBooking(booking)) {
       toast('You cannot cancel within 30 minutes of your reservation time.', 'warning');
       return;
     }
@@ -466,6 +497,7 @@ export default function BookingsScreen() {
 
               {filtered.map((booking) => {
                 const canModify = canModifyBooking(booking);
+                const canCancel = canCancelBooking(booking);
                 return (
                   <View key={booking.id} style={styles.bookingCard}>
                     {/* Top section */}
@@ -527,29 +559,33 @@ export default function BookingsScreen() {
                     {/* Action buttons — vary by status */}
                     {(booking.status === 'Upcoming' || booking.status === 'Confirmed') && (
                       <View style={styles.bookingActions}>
+                        {/* Modify — hidden once merchant has confirmed */}
+                        {booking.status === 'Upcoming' && (
+                          <TouchableOpacity
+                            style={[styles.modifyBtn, !canModify && styles.disabledBtn]}
+                            onPress={() => handleModify(booking)}
+                            disabled={!canModify}
+                          >
+                            <Text style={[styles.modifyText, !canModify && styles.disabledText]}>
+                              Modify
+                            </Text>
+                            {!canModify && (
+                              <Text style={styles.timeWarning}>(within 30 min)</Text>
+                            )}
+                          </TouchableOpacity>
+                        )}
+                        {/* Cancel — available for both Upcoming and Confirmed */}
                         <TouchableOpacity
-                          style={[styles.modifyBtn, !canModify && styles.disabledBtn]}
-                          onPress={() => handleModify(booking)}
-                          disabled={!canModify}
-                        >
-                          <Text style={[styles.modifyText, !canModify && styles.disabledText]}>
-                            Modify
-                          </Text>
-                          {!canModify && (
-                            <Text style={styles.timeWarning}>(within 30 min)</Text>
-                          )}
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.cancelBtn, !canModify && styles.disabledBtn]}
+                          style={[styles.cancelBtn, !canCancel && styles.disabledBtn]}
                           onPress={() => handleCancel(booking)}
-                          disabled={!canModify}
+                          disabled={!canCancel}
                         >
                           <Ionicons
                             name="close"
                             size={16}
-                            color={canModify ? Colors.accent : Colors.gray}
+                            color={canCancel ? Colors.accent : Colors.gray}
                           />
-                          <Text style={[styles.cancelText, !canModify && styles.disabledText]}>
+                          <Text style={[styles.cancelText, !canCancel && styles.disabledText]}>
                             Cancel
                           </Text>
                         </TouchableOpacity>

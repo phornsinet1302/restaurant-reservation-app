@@ -91,6 +91,11 @@ export default function LocationTracking({ restaurantId, restaurantName }: Locat
 
   const getCurrentUserLocation = async () => {
     try {
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.warn('⚠️ Location services disabled');
+        return;
+      }
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
@@ -104,7 +109,7 @@ export default function LocationTracking({ restaurantId, restaurantName }: Locat
         calculateDistance(userLoc, restaurantLocation);
       }
     } catch (error) {
-      console.error('Get location error:', error);
+      console.warn('⚠️ Could not get user location:', error);
     }
   };
 

@@ -51,32 +51,59 @@ exports.searchRestaurants = async (req, res) => {
       restaurants = data;
     }
 
-    // Fetch active stories and menu items for each restaurant
+    // Fetch stories, menu items, and reviews in 3 batch queries instead of N*2 individual queries
     const now = new Date().toISOString();
-    const restaurantsWithData = await Promise.all(
-      restaurants.map(async (restaurant) => {
-        const { data: stories } = await supabase
-          .from('stories')
-          .select('id, image_url, title, description, created_at, video_url')
-          .eq('restaurant_id', restaurant.id)
-          .gt('expires_at', now)
-          .order('created_at', { ascending: false })
-          .limit(3);
+    const restaurantIds = restaurants.map((r) => r.id);
 
-        const { data: menuItems } = await supabase
-          .from('menu_items')
-          .select('id, name, category, price, image_url')
-          .eq('restaurant_id', restaurant.id)
-          .eq('is_available', true)
-          .limit(5);
+    const [{ data: allStories }, { data: allMenuItems }, { data: allReviews }] = await Promise.all([
+      supabase
+        .from('stories')
+        .select('id, restaurant_id, image_url, title, description, created_at, video_url')
+        .in('restaurant_id', restaurantIds)
+        .gt('expires_at', now)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('menu_items')
+        .select('id, restaurant_id, name, category, price, image_url')
+        .in('restaurant_id', restaurantIds)
+        .eq('is_available', true),
+      supabase
+        .from('reviews')
+        .select('restaurant_id, rating')
+        .in('restaurant_id', restaurantIds),
+    ]);
 
-        return {
-          ...restaurant,
-          stories: stories || [],
-          menu_items: menuItems || []
-        };
-      })
-    );
+    // Group by restaurant_id, capping at 3 stories and 5 menu items per restaurant
+    const storiesByRestaurant = {};
+    for (const story of allStories || []) {
+      if (!storiesByRestaurant[story.restaurant_id]) storiesByRestaurant[story.restaurant_id] = [];
+      if (storiesByRestaurant[story.restaurant_id].length < 3) storiesByRestaurant[story.restaurant_id].push(story);
+    }
+    const menuByRestaurant = {};
+    for (const item of allMenuItems || []) {
+      if (!menuByRestaurant[item.restaurant_id]) menuByRestaurant[item.restaurant_id] = [];
+      if (menuByRestaurant[item.restaurant_id].length < 5) menuByRestaurant[item.restaurant_id].push(item);
+    }
+
+    // Compute average rating and review count from real customer reviews
+    const ratingByRestaurant = {};
+    for (const review of allReviews || []) {
+      if (!ratingByRestaurant[review.restaurant_id]) ratingByRestaurant[review.restaurant_id] = { sum: 0, count: 0 };
+      ratingByRestaurant[review.restaurant_id].sum += Number(review.rating || 0);
+      ratingByRestaurant[review.restaurant_id].count += 1;
+    }
+
+    const restaurantsWithData = restaurants.map((restaurant) => {
+      const rd = ratingByRestaurant[restaurant.id];
+      const computedRating = rd && rd.count > 0 ? Number((rd.sum / rd.count).toFixed(2)) : null;
+      return {
+        ...restaurant,
+        rating: computedRating,
+        reviews_count: rd ? rd.count : 0,
+        stories: storiesByRestaurant[restaurant.id] || [],
+        menu_items: menuByRestaurant[restaurant.id] || [],
+      };
+    });
 
     res.status(200).json(restaurantsWithData);
   } catch (error) {
@@ -353,12 +380,24 @@ exports.updateMerchantRestaurant = async (req, res) => {
       return res.status(404).json({ error: "Restaurant not found. Please contact support." });
     }
 
-    // Update restaurant
+    // Separate time_slots from the rest (handle independently so an absent column never breaks the save)
+    const { time_slots, ...coreUpdates } = updates;
+
+    // Update core restaurant fields
     const { data: updatedRestaurant, error: updateError } = await supabaseAdmin
       .from('restaurants')
-      .update(updates)
+      .update(coreUpdates)
       .eq('merchant_id', merchantId)
       .select('*');
+
+    // Save time_slots (Supabase returns {data,error} — never throws, so check error explicitly)
+    if (Array.isArray(time_slots)) {
+      const { error: slotError } = await supabaseAdmin
+        .from('restaurants')
+        .update({ time_slots })
+        .eq('merchant_id', merchantId);
+      if (slotError) console.warn('⚠️  time_slots not saved:', slotError.message);
+    }
 
     if (updateError) {
       console.error('❌ Update error:', updateError.message);

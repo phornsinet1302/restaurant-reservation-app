@@ -129,16 +129,23 @@ export default function SearchScreen() {
 
   // Get current location
   const getCurrentLocation = async () => {
+    const fallback = { latitude: 11.5564, longitude: 104.9282 };
     try {
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.warn('⚠️ Location services disabled — using default location');
+        setUserLocation(fallback);
+        return;
+      }
       const location = await Location.getCurrentPositionAsync({});
       const { latitude, longitude } = location.coords;
       setUserLocation({ latitude, longitude });
       setLocationError(null);
       await AsyncStorage.setItem('userLocation', JSON.stringify({ latitude, longitude }));
     } catch (error) {
-      console.error('Error getting location:', error);
+      console.warn('⚠️ Could not get location — using default:', error);
       setLocationError('Failed to get current location');
-      setUserLocation({ latitude: 11.5564, longitude: 104.9282 });
+      setUserLocation(fallback);
     }
   };
 

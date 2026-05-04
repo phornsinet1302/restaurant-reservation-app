@@ -4,25 +4,29 @@ const { supabaseAdmin } = require('../config/supabase');
 // ==================== HELPER FUNCTION - CREATE NOTIFICATIONS ====================
 const createNotification = async (userId, title, message, type = 'booking', relatedId = null) => {
   try {
-    const row = {
-      user_id: userId,
-      title,
-      message,
-      type,
-      is_read: false,
-    };
-    if (relatedId) row.related_id = relatedId;
+    const baseRow = { user_id: userId, title, message, type, is_read: false };
+    const rowWithId = relatedId ? { ...baseRow, related_id: relatedId } : baseRow;
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('notifications')
-      .insert([row])
+      .insert([rowWithId])
       .select();
-    
+
+    // If the related_id column doesn't exist yet (PGRST204), retry without it
+    // so notifications still land in the DB until the column is added via SQL migration
+    if (error && relatedId && (error.code === 'PGRST204' || error.message?.includes('related_id'))) {
+      console.warn('⚠️ related_id column missing — retrying without it. Run FIX_NOTIFICATIONS.sql in Supabase.');
+      ({ data, error } = await supabaseAdmin
+        .from('notifications')
+        .insert([baseRow])
+        .select());
+    }
+
     if (error) {
       console.error('⚠️ Failed to create notification:', error.message);
       return null;
     }
-    
+
     console.log(`📢 Notification created for user ${userId}: ${title}`);
     return data[0];
   } catch (err) {
@@ -465,30 +469,43 @@ exports.getMyReservationStats = async (req, res) => {
 // 2. GET MY RESERVATIONS (GET)
 exports.getMyReservations = async (req, res) => {
   try {
+    console.log('📋 [getMyReservations] Starting request for customer:', req.user.id);
+    
     const { data, error } = await supabase
       .from('reservations')
-      .select('id, restaurant_id, table_id, reservation_date, reservation_time, party_size, status, customer_name, customer_email, special_request, restaurants(name, image_url), tables(table_number)') 
-      .eq('customer_id', req.user.id);
+      .select('id, restaurant_id, table_id, reservation_date, reservation_time, party_size, status, customer_name, customer_email, special_request, restaurants(name, image_url, address), tables(table_number)') 
+      .eq('customer_id', req.user.id)
+      .order('created_at', { ascending: false });
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      console.error('❌ Supabase query error:', error.message);
+      return res.status(400).json({ error: error.message });
+    }
     
     // Debug logging
     console.log('📋 [getMyReservations] Retrieved reservations for customer:', req.user.id);
     if (data && data.length > 0) {
-      console.log(`   Found ${data.length} reservations`);
+      console.log(`   ✅ Found ${data.length} reservations`);
       data.forEach((booking, idx) => {
         console.log(`   Booking ${idx + 1}:`);
+        console.log(`     - ID:`, booking.id);
         console.log(`     - Restaurant:`, booking.restaurants?.name);
-        console.log(`     - Customer Name:`, booking.customer_name);
-        console.log(`     - Customer Email:`, booking.customer_email);
-        console.log(`     - Special Request:`, booking.special_request);
+        console.log(`     - Address:`, booking.restaurants?.address);
+        console.log(`     - Status:`, booking.status);
+        console.log(`     - Date:`, booking.reservation_date);
+        console.log(`     - Time:`, booking.reservation_time);
+        console.log(`     - Guests:`, booking.party_size);
       });
+    } else {
+      console.log(`   ℹ️ No reservations found for this customer`);
     }
     
-    res.status(200).json(data);
+    console.log('✅ Successfully returning bookings data');
+    res.status(200).json(data || []);
   } catch (err) {
     console.error('❌ Error in getMyReservations:', err.message);
-    res.status(400).json({ error: err.message });
+    console.error('Stack:', err.stack);
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -960,27 +977,14 @@ exports.merchantConfirmReservation = async (req, res) => {
     // Emit WebSocket event to notify merchant AND customer in real-time
     const io = req.app.get('io');
     if (io && reservationData) {
-      const restaurantId = reservationData.restaurant_id;
       const customerId = reservationData.customer_id;
-      
-      // Notify merchant
-      io.to(restaurantId).emit('reservation_updated', {
-        id: reservationId,
-        status: 'confirmed',
-        action: 'confirmed',
-        message: 'A booking has been confirmed'
-      });
-      console.log('📡 WebSocket event sent to restaurant:', restaurantId);
-      
-      // Notify customer
-      io.to(customerId).emit('booking_confirmed', {
-        id: reservationId,
-        status: 'confirmed',
-        action: 'confirmed',
-        message: '✅ Your booking has been confirmed by the restaurant!'
-      });
-      console.log('📡 WebSocket event sent to customer:', customerId);
-      
+
+      // Notify merchant via notification_received (matches frontend listener)
+      emitNotificationEvent(io, merchantId, '✅ Booking Confirmed', `You confirmed a reservation for ${reservationData.party_size} guests on ${reservationData.reservation_date} at ${reservationData.reservation_time}.`, { type: 'booking_confirmed', related_id: reservationId });
+
+      // Notify customer via notification_received
+      emitNotificationEvent(io, customerId, '✅ Booking Confirmed!', `Your reservation at ${restaurantName} on ${reservationData.reservation_date} at ${reservationData.reservation_time} has been confirmed!`, { type: 'booking_confirmed', related_id: reservationId });
+
       // 📢 Broadcast table status change in REAL-TIME to all clients
       io.emit('table_status_updated', {
         table_id: reservationData.table_id,
@@ -1115,26 +1119,16 @@ exports.merchantRejectReservation = async (req, res) => {
     // Emit WebSocket event to notify merchant AND customer in real-time
     const io = req.app.get('io');
     if (io && reservationData) {
-      const restaurantId = reservationData.restaurant_id;
       const customerId = reservationData.customer_id;
-      
-      io.to(restaurantId).emit('reservation_updated', {
-        id: reservationId,
-        status: 'rejected',
-        action: 'rejected',
-        message: 'Your booking has been rejected'
-      });
-      
-      // Notify customer
-      io.to(customerId).emit('booking_rejected', {
-        id: reservationId,
-        status: 'rejected',
-        action: 'rejected',
-        message: '❌ Your booking has been rejected by the restaurant',
-        reason: reason.trim()
-      });
-      console.log('📡 WebSocket event sent for rejection - merchant and customer');
-      
+
+      // Notify merchant via notification_received (matches frontend listener)
+      emitNotificationEvent(io, merchantId, '❌ Booking Rejected', `You rejected a reservation. Reason: ${reason.trim()}`, { type: 'booking_rejected', related_id: reservationId });
+
+      // Notify customer via notification_received
+      emitNotificationEvent(io, customerId, '❌ Booking Rejected', `Your reservation at ${restaurantName} has been rejected. Reason: ${reason.trim()}`, { type: 'booking_rejected', related_id: reservationId });
+
+      console.log('📡 WebSocket notification_received sent for rejection - merchant and customer');
+
       // 📢 Broadcast table status change in REAL-TIME
       io.emit('table_status_updated', {
         table_id: reservationData.table_id,
@@ -1170,7 +1164,7 @@ exports.merchantCancelReservation = async (req, res) => {
     // Get reservation first
     const { data: reservationData, error: reservationError } = await supabaseAdmin
       .from('reservations')
-      .select('id, restaurant_id, status')
+      .select('id, restaurant_id, status, customer_id')
       .eq('id', reservationId)
       .single();
 
@@ -1215,17 +1209,15 @@ exports.merchantCancelReservation = async (req, res) => {
     
     // Emit WebSocket event to notify about cancellation
     const io = req.app.get('io');
-    if (io && reservationData) {
-      const restaurantId = reservationData.restaurant_id;
-      io.to(restaurantId).emit('reservation_updated', {
-        id: reservationId,
-        status: 'cancelled',
-        action: 'cancelled',
-        message: 'A booking has been cancelled'
-      });
-      console.log('📡 WebSocket event sent for cancellation');
+    if (io) {
+      const customerId = reservationData.customer_id;
+      emitNotificationEvent(io, merchantId, '🚫 Booking Cancelled', 'You cancelled a reservation.', { type: 'booking_cancelled', related_id: reservationId });
+      if (customerId) {
+        emitNotificationEvent(io, customerId, '🚫 Booking Cancelled by Restaurant', 'A restaurant has cancelled your reservation.', { type: 'booking_cancelled', related_id: reservationId });
+      }
+      console.log('📡 WebSocket notification_received sent for merchant cancellation');
     }
-    
+
     res.status(200).json({ message: 'Reservation cancelled', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -1450,20 +1442,14 @@ exports.merchantMarkArrived = async (req, res) => {
     }
 
     console.log('✅ Reservation marked as arrived');
-    
+
     // Emit WebSocket event to notify about arrival
     const io = req.app.get('io');
-    if (io && reservationData) {
-      const restaurantId = reservationData.restaurant_id;
-      io.to(restaurantId).emit('reservation_updated', {
-        id: reservationId,
-        status: 'arrived',
-        action: 'arrived',
-        message: 'Guest has arrived'
-      });
-      console.log('📡 WebSocket event sent for guest arrival');
+    if (io) {
+      emitNotificationEvent(io, merchantId, '🚗 Guest Arrived', 'A guest has arrived for their reservation.', { type: 'booking_arrived', related_id: reservationId });
+      console.log('📡 WebSocket notification_received sent for guest arrival');
     }
-    
+
     res.status(200).json({ message: 'Reservation marked as arrived', data: data[0] });
   } catch (err) {
     console.error('❌ Unexpected error:', err.message);
@@ -1597,12 +1583,8 @@ exports.merchantMarkCompleted = async (req, res) => {
           }
         );
 
-        // Emit to merchant (via restaurant room)
-        io.to(`restaurant_${reservationData.restaurant_id}`).emit('reservation_updated', {
-          type: 'booking_completed',
-          reservationId: reservationId,
-          message: 'Booking marked as completed'
-        });
+        // Emit to merchant via notification_received (uses merchantId room, not restaurant UUID)
+        emitNotificationEvent(io, merchantId, '✅ Booking Completed', 'You have marked a booking as completed.', { type: 'booking_completed', related_id: reservationId });
       }
     }
 

@@ -1,17 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
-  Dimensions,
   TouchableOpacity,
+  Linking,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface RestaurantLocation {
   latitude: number;
@@ -23,90 +22,118 @@ interface RestaurantLocation {
 interface RestaurantMapProps {
   location: RestaurantLocation;
   height?: number;
-  showFullScreen?: boolean;
-  onFullScreenToggle?: (isFullScreen: boolean) => void;
+  onOpenMaps?: () => void;
 }
 
-export default function RestaurantMap({
-  location,
-  height = 300,
-  showFullScreen = false,
-  onFullScreenToggle,
-}: RestaurantMapProps) {
-  const [loading, setLoading] = useState(false);
-  const [isFullScreen, setIsFullScreen] = useState(showFullScreen);
-
-  useEffect(() => {
-    if (location?.latitude && location?.longitude) {
-      setLoading(false);
-    }
-  }, [location]);
-
-  const handleFullScreen = () => {
-    const newState = !isFullScreen;
-    setIsFullScreen(newState);
-    onFullScreenToggle?.(newState);
-  };
-
+export default function RestaurantMap({ location, height = 220, onOpenMaps }: RestaurantMapProps) {
   if (!location?.latitude || !location?.longitude) {
     return (
-      <View style={[styles.container, { height }]}>
-        <Text style={styles.errorText}>Location not available</Text>
+      <View style={[styles.noLocation, { height }]}>
+        <Ionicons name="map-outline" size={32} color="#bbb" />
+        <Text style={styles.noLocationText}>Location not available</Text>
       </View>
     );
   }
 
-  const mapHeight = isFullScreen ? Dimensions.get('window').height : height;
+  const { latitude, longitude } = location;
+
+  const openMaps = async () => {
+    if (onOpenMaps) {
+      onOpenMaps();
+      return;
+    }
+    const destination = `${latitude},${longitude}`;
+    const urls = Platform.select({
+      ios: [
+        `comgooglemaps://?daddr=${destination}&directionsmode=driving`,
+        `https://www.google.com/maps/dir/?api=1&destination=${destination}`,
+      ],
+      android: [
+        `google.navigation:q=${destination}`,
+        `https://www.google.com/maps/dir/?api=1&destination=${destination}`,
+      ],
+      default: [`https://www.google.com/maps/dir/?api=1&destination=${destination}`],
+    }) || [];
+
+    for (const url of urls) {
+      try {
+        if (await Linking.canOpenURL(url)) {
+          await Linking.openURL(url);
+          return;
+        }
+      } catch {}
+    }
+  };
+
+  const mapHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #f0ede8; }
+    #map { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    var map = L.map('map', {
+      center: [${latitude}, ${longitude}],
+      zoom: 16,
+      zoomControl: false,
+      attributionControl: false,
+      dragging: true,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      touchZoom: true,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    var icon = L.divIcon({
+      html: '<div style="background:${Colors.primary};width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+      className: ''
+    });
+
+    L.marker([${latitude}, ${longitude}], { icon: icon, interactive: false }).addTo(map);
+  </script>
+</body>
+</html>`;
 
   return (
-    <View style={[styles.container, { height: mapHeight }]}>
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-        </View>
-      )}
+    <View style={[styles.container, { height }]}>
+      <WebView
+        source={{ html: mapHtml }}
+        style={styles.webview}
+        javaScriptEnabled
+        scrollEnabled={false}
+        nestedScrollEnabled={false}
+        overScrollMode="never"
+        bounces={false}
+        startInLoadingState
+        renderLoading={() => (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+          </View>
+        )}
+      />
 
-      <MapView
-        provider={PROVIDER_GOOGLE}
-        style={{ width: '100%', height: '100%' }}
-        initialRegion={{
-          latitude: location.latitude,
-          longitude: location.longitude,
-          latitudeDelta: 0.015,
-          longitudeDelta: 0.0121,
-        }}
-      >
-        <Marker
-          coordinate={{
-            latitude: location.latitude,
-            longitude: location.longitude,
-          }}
-          title={location.name || 'Restaurant Location'}
-          description={location.address || ''}
-          pinColor={Colors.primary}
-        />
-      </MapView>
+      {/* Tap overlay — directs to Google Maps */}
+      <TouchableOpacity style={StyleSheet.absoluteFill} onPress={openMaps} activeOpacity={1} />
 
-      {!isFullScreen && (
-        <TouchableOpacity
-          style={styles.fullScreenButton}
-          onPress={handleFullScreen}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="expand" size={20} color="white" />
-          <Text style={styles.buttonText}>View Full Map</Text>
-        </TouchableOpacity>
-      )}
-
-      {isFullScreen && (
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={handleFullScreen}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="close" size={24} color="white" />
-        </TouchableOpacity>
-      )}
+      {/* "Open in Maps" badge */}
+      <TouchableOpacity style={styles.badge} onPress={openMaps} activeOpacity={0.85}>
+        <Ionicons name="navigate" size={14} color="#fff" />
+        <Text style={styles.badgeText}>Open in Maps</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -116,53 +143,50 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f0ede8',
   },
-  loadingContainer: {
+  webview: {
+    flex: 1,
+  },
+  loading: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    zIndex: 10,
+    backgroundColor: '#f5f3ee',
   },
-  errorText: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    marginTop: 100,
-  },
-  fullScreenButton: {
+  badge: {
     position: 'absolute',
-    bottom: 16,
-    right: 16,
+    bottom: 12,
+    right: 12,
     flexDirection: 'row',
-    backgroundColor: Colors.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    backgroundColor: Colors.primary,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
-    elevation: 5,
+    elevation: 4,
   },
-  closeButton: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
+  badgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontFamily: 'PlusJakartaSans-SemiBold',
+  },
+  noLocation: {
+    width: '100%',
+    borderRadius: 12,
+    backgroundColor: '#F5F3EE',
     alignItems: 'center',
-    zIndex: 20,
+    justifyContent: 'center',
+    gap: 8,
   },
-  buttonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
+  noLocationText: {
+    fontSize: 13,
+    color: '#aaa',
+    fontFamily: 'PlusJakartaSans-Regular',
   },
 });
