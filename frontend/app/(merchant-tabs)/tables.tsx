@@ -130,20 +130,14 @@ export default function MerchantTablesScreen() {
   };
 
   const handleAddTable = async () => {
-    console.log('📌 [handleAddTable] Validation check:');
-    console.log('   Table Number:', newTableNumber ? `"${newTableNumber}"` : 'EMPTY');
-    console.log('   Capacity:', newCapacity ? `"${newCapacity}"` : 'EMPTY');
-    console.log('   Restaurant ID:', restaurantId ? `"${restaurantId}"` : 'EMPTY');
+    if (!restaurantId) {
+      toast('Restaurant not loaded yet. Please wait a moment and try again.', 'warning');
+      loadData();
+      return;
+    }
 
-    if (!newTableNumber || !newCapacity || !restaurantId) {
-      let missingFields = [];
-      if (!newTableNumber) missingFields.push('Table Number');
-      if (!newCapacity) missingFields.push('Capacity');
-      if (!restaurantId) missingFields.push('Restaurant ID (try reloading the page)');
-      
-      const message = `Please fill in: ${missingFields.join(', ')}`;
-      console.log('❌ Validation failed:', message);
-      toast(message, 'error');
+    if (!newTableNumber || !newCapacity) {
+      toast('Please fill in Table Number and Capacity.', 'warning');
       return;
     }
 

@@ -428,7 +428,7 @@ exports.uploadProfilePicture = async (req, res) => {
       .from('user-profiles')
       .upload(fileName, req.file.buffer, {
         cacheControl: '3600',
-        upsert: false,
+        upsert: true,
         contentType: req.file.mimetype || 'image/jpeg',
       });
 

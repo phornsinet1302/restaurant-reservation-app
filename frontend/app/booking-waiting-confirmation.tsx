@@ -120,7 +120,7 @@ export default function BookingWaitingConfirmationScreen() {
       {/* Action Buttons */}
       <TouchableOpacity
         style={styles.viewBookingsBtn}
-        onPress={() => router.push('/(tabs)/bookings')}
+        onPress={() => router.navigate('/(tabs)/bookings' as any)}
       >
         <Ionicons name="calendar" size={20} color="white" />
         <Text style={styles.viewBookingsBtnText}>View in Bookings</Text>
@@ -128,7 +128,7 @@ export default function BookingWaitingConfirmationScreen() {
 
       <TouchableOpacity
         style={styles.homeBtn}
-        onPress={() => router.push('/(tabs)')}
+        onPress={() => router.navigate('/(tabs)' as any)}
       >
         <Ionicons name="home" size={20} color={Colors.primary} />
         <Text style={styles.homeBtnText}>Back Home</Text>

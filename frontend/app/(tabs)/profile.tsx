@@ -8,6 +8,7 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -108,21 +109,12 @@ export default function ProfileScreen() {
   };
 
   // Pick image from camera or gallery
-  const handlePickImage = async () => {
-    confirm('Upload Profile Picture', 'Choose a source', [
-        {
-          text: 'Camera',
-          onPress: () => pickImageFromCamera(),
-        },
-        {
-          text: 'Gallery',
-          onPress: () => pickImageFromGallery(),
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ]);
+  const handlePickImage = () => {
+    Alert.alert('Upload Profile Picture', 'Choose a source', [
+      { text: 'Camera', onPress: pickImageFromCamera },
+      { text: 'Gallery', onPress: pickImageFromGallery },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const pickImageFromCamera = async () => {
@@ -157,7 +149,7 @@ export default function ProfileScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -182,7 +174,6 @@ export default function ProfileScreen() {
         return;
       }
 
-      // Upload to backend
       const formData = new FormData();
       formData.append('file', {
         uri: imageUri,
@@ -190,22 +181,25 @@ export default function ProfileScreen() {
         name: `profile_${Date.now()}.jpg`,
       } as any);
 
-      const uploadRes = await axios.post(
+      // Use fetch instead of axios — React Native's fetch handles FormData
+      // boundary correctly whereas axios has known multipart issues on mobile.
+      const response = await fetch(
         `${API_CONFIG.BASE_URL}/api/auth/upload-profile-picture`,
-        formData,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 60000,
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
         }
       );
 
-      const newUrl = uploadRes.data.profile_picture_url;
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || `Upload failed (${response.status})`);
+      }
+
+      const newUrl = data.profile_picture_url;
       setProfileImageUri(newUrl);
 
-      // Update user in AsyncStorage
       const userStr = await AsyncStorage.getItem('user');
       const user = userStr ? JSON.parse(userStr) : {};
       user.profile_picture_url = newUrl;
@@ -213,7 +207,7 @@ export default function ProfileScreen() {
 
       toast('Profile picture updated!', 'success');
     } catch (error: any) {
-      toast(error.response?.data?.error || 'Failed to upload profile picture.', 'error');
+      toast(error.message || 'Failed to upload profile picture.', 'error');
       console.error('Upload error:', error.message);
     } finally {
       setUploading(false);

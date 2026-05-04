@@ -100,22 +100,23 @@ export default function MerchantProfileScreen() {
           name: `profile_${Date.now()}.jpg`,
         } as any);
 
-        const uploadRes = await axios.post(
+        const response = await fetch(
           `${API_CONFIG.BASE_URL}/api/auth/upload-profile-picture`,
-          formData,
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'multipart/form-data',
-            },
-            timeout: 60000,
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
           }
         );
 
-        const newUrl = uploadRes.data.profile_picture_url;
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || `Upload failed (${response.status})`);
+        }
+
+        const newUrl = data.profile_picture_url;
         setProfileImageUri(newUrl);
 
-        // Update AsyncStorage
         const userStr = await AsyncStorage.getItem('user');
         const user = userStr ? JSON.parse(userStr) : {};
         user.profile_picture_url = newUrl;
@@ -124,7 +125,7 @@ export default function MerchantProfileScreen() {
         toast('Profile picture updated!', 'success');
       }
     } catch (error: any) {
-      toast(error.response?.data?.error || 'Failed to upload.', 'error');
+      toast(error.message || 'Failed to upload.', 'error');
     } finally {
       setUploadingImage(false);
     }

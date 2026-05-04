@@ -169,15 +169,8 @@ export default function HomeScreen() {
     updateGreeting();
   }, []);
 
-  // Refresh user data whenever screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      void refreshHomeData();
-    }, [refreshHomeData])
-  );
-
   // Request location permission and get current location
-  const requestLocationPermission = async (): Promise<{ latitude: number; longitude: number }> => {
+  const requestLocationPermission = useCallback(async (): Promise<{ latitude: number; longitude: number }> => {
     const fallback = { latitude: 11.5564, longitude: 104.9282 };
     try {
       const now = Date.now();
@@ -225,10 +218,10 @@ export default function HomeScreen() {
       setUserLocationAddress('Phnom Penh');
       return fallback;
     }
-  };
+  }, []);
 
   // Get user's current location
-  const getCurrentLocation = async (): Promise<{ latitude: number; longitude: number }> => {
+  const getCurrentLocation = useCallback(async (): Promise<{ latitude: number; longitude: number }> => {
     const fallback = { latitude: 11.5564, longitude: 104.9282 };
     try {
       // Skip if OS-level location services are disabled (kCLErrorDomain error 1)
@@ -276,7 +269,7 @@ export default function HomeScreen() {
       setUserLocationAddress('Phnom Penh');
       return fallback;
     }
-  };
+  }, []);
 
   // Determine greeting based on current time
   const updateGreeting = () => {
@@ -307,7 +300,14 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const loadUserData = async () => {
+  // Refresh user data whenever screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      void refreshHomeData();
+    }, [refreshHomeData])
+  );
+
+  const loadUserData = useCallback(async () => {
     try {
       const now = Date.now();
       const storedToken = await AsyncStorage.getItem('token');
@@ -383,9 +383,9 @@ export default function HomeScreen() {
     } catch (error) {
       console.warn('Failed to load user data:', error);
     }
-  };
+  }, []);
 
-  const fetchFavorites = async (authToken: string) => {
+  const fetchFavorites = useCallback(async (authToken: string) => {
     try {
       const response = await axios.get(`${API_URL}/api/favorites`, {
         headers: { Authorization: `Bearer ${authToken}` },
@@ -395,7 +395,7 @@ export default function HomeScreen() {
     } catch (error) {
       console.warn('Failed to fetch favorites:', error);
     }
-  };
+  }, []);
 
   const loadRestaurants = async (
     retryCount = 0,

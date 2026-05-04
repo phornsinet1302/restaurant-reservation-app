@@ -319,7 +319,9 @@ export default function BookingConfirmationScreen() {
           </View>
         </View>
         
-        <TouchableOpacity style={styles.skipBtn} activeOpacity={0.8} onPress={() => router.replace('/(tabs)/bookings' as any)}>
+        <TouchableOpacity style={styles.skipBtn} activeOpacity={0.8} onPress={() =>
+          router.navigate((params.returnTo === 'merchant' ? '/(merchant-tabs)/bookings' : '/(tabs)/bookings') as any)
+        }>
           <Text style={styles.skipBtnText}>Back to Bookings</Text>
         </TouchableOpacity>
       </ScrollView>

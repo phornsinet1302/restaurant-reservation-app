@@ -105,8 +105,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const handleConfirmButton = (btn: ConfirmButton) => {
     setConfirmVisible(false);
-    // Small delay so modal closes smoothly before callback runs
-    setTimeout(() => btn.onPress?.(), 150);
+    // iOS needs ~400ms for a modal to fully dismiss before another native UI (e.g. image picker) can open
+    setTimeout(() => btn.onPress?.(), 500);
   };
 
   const cfg = TOAST_CONFIG[toastType];

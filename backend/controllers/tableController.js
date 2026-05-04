@@ -12,8 +12,8 @@ exports.getAllTables = async (req, res) => {
 
     console.log(`📋 [getAllTables] Fetching tables for restaurant: ${restaurant_id}`);
 
-    // Get all tables for the restaurant
-    const { data, error } = await supabase
+    // Get all tables — use admin client to bypass RLS on server-side requests
+    const { data, error } = await supabaseAdmin
       .from('tables')
       .select('*')
       .eq('restaurant_id', restaurant_id)

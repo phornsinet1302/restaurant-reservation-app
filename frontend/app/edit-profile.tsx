@@ -94,24 +94,25 @@ export default function EditProfileScreen() {
         } as any);
 
         console.log('📤 Uploading profile picture to backend...');
-        const uploadRes = await axios.post(
+        const response = await fetch(
           `${API_CONFIG.BASE_URL}/api/auth/upload-profile-picture`,
-          formData,
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'multipart/form-data',
-            },
-            timeout: 60000,
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
           }
         );
 
-        const newUrl = uploadRes.data.profile_picture_url;
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || `Upload failed (${response.status})`);
+        }
+
+        const newUrl = data.profile_picture_url;
         console.log('✅ Profile picture uploaded:', newUrl.substring(0, 60) + '...');
-        
+
         setProfilePictureUrl(newUrl);
-        
-        // Update user in AsyncStorage with new profile picture URL
+
         const userStr = await AsyncStorage.getItem('user');
         const user = userStr ? JSON.parse(userStr) : {};
         user.profile_picture_url = newUrl;
@@ -122,7 +123,7 @@ export default function EditProfileScreen() {
       }
     } catch (error: any) {
       console.error('❌ Image upload failed:', error.message);
-      toast(error.response?.data?.error || error.message, 'error');
+      toast(error.message, 'error');
       setUploadingImage(false);
     }
   };

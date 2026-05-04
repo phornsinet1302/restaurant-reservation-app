@@ -105,7 +105,7 @@ export default function NotificationsScreen() {
 
     const relatedId = n.related_id?.trim();
     if (!relatedId) {
-      router.push(bookingsRoute as any);
+      router.navigate(bookingsRoute as any);
       return;
     }
 
@@ -122,7 +122,7 @@ export default function NotificationsScreen() {
         case 'booking_created':
           if (status === 'pending' || status === 'modified') {
             if (isMerchant) {
-              router.push(bookingsRoute as any);
+              router.navigate(bookingsRoute as any);
             } else {
               router.push({
                 pathname: '/booking-waiting-confirmation',
@@ -146,7 +146,7 @@ export default function NotificationsScreen() {
               params: { ...base, initialStep: 'success', returnTo },
             } as any);
           } else {
-            router.push(bookingsRoute as any);
+            router.navigate(bookingsRoute as any);
           }
           break;
         case 'booking_confirmed':
@@ -157,17 +157,17 @@ export default function NotificationsScreen() {
           } as any);
           break;
         case 'booking_modified':
-          router.push(bookingsRoute as any);
+          router.navigate(bookingsRoute as any);
           break;
         case 'booking_rejected':
         case 'booking_cancelled':
-          router.push(bookingsRoute as any);
+          router.navigate(bookingsRoute as any);
           break;
         case 'booking_received':
-          router.push('/(merchant-tabs)/bookings' as any);
+          router.navigate('/(merchant-tabs)/bookings' as any);
           break;
         default:
-          router.push(bookingsRoute as any);
+          router.navigate(bookingsRoute as any);
       }
     } catch (e: any) {
       console.warn('Notification deep link failed:', e?.response?.data || e?.message);
@@ -177,7 +177,7 @@ export default function NotificationsScreen() {
           : 'Could not load booking details. Try Bookings.',
         'error'
       );
-      router.push(bookingsRoute as any);
+      router.navigate(bookingsRoute as any);
     } finally {
       setOpeningId(null);
     }

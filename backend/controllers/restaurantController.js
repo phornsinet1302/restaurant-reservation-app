@@ -323,8 +323,8 @@ exports.getMerchantRestaurant = async (req, res) => {
 
     console.log('📋 Fetching merchant restaurant for merchant:', merchantId);
 
-    // Get merchant's restaurant
-    const { data: restaurant, error } = await supabase
+    // Get merchant's restaurant — use admin client to bypass RLS on server-side requests
+    const { data: restaurant, error } = await supabaseAdmin
       .from('restaurants')
       .select('*')
       .eq('merchant_id', merchantId)

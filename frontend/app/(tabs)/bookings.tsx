@@ -143,7 +143,7 @@ export default function BookingsScreen() {
   const BOOKINGS_REFRESH_COOLDOWN_MS = 30000;
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const router = useRouter();
-  const { isGuest } = useAuth();
+  const { isGuest, loading: authLoading } = useAuth();
 
   console.log('👀 [BookingsScreen] Rendered. isGuest:', isGuest, 'loading:', loading);
 
@@ -416,7 +416,11 @@ export default function BookingsScreen() {
 
   return (
     <View style={styles.container}>
-      {isGuest ? (
+      {authLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : isGuest ? (
         <ScrollView
           contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 16, 60) }]}
           showsVerticalScrollIndicator={false}
