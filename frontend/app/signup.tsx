@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
-import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import {
   View,
@@ -41,103 +40,58 @@ export default function SignUpScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
-  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
-  const googleRedirectUri = Platform.OS === 'ios'
-    ? `com.googleusercontent.apps.${iosClientId.split('.apps.googleusercontent.com')[0]}:/oauthredirect`
-    : 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
 
-  const googleClientId = Platform.OS === 'ios'
-    ? iosClientId
-    : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
-
-  const discovery = {
-    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  const parseGoogleAuthParams = (url: string): Record<string, string> => {
+    const query = url.split('?')[1] || '';
+    return Object.fromEntries(
+      query.split('&').filter(Boolean).map(pair => {
+        const idx = pair.indexOf('=');
+        return [
+          decodeURIComponent(pair.slice(0, idx >= 0 ? idx : undefined)),
+          idx >= 0 ? decodeURIComponent(pair.slice(idx + 1)) : '',
+        ];
+      })
+    );
   };
-
-  const [request, response, promptAsync] = useAuthRequest(
-    {
-      clientId: googleClientId,
-      redirectUri: googleRedirectUri,
-      scopes: ['openid', 'profile', 'email'],
-      responseType: ResponseType.Code,
-      usePKCE: true,
-    },
-    discovery
-  );
 
   const handleGoogleSignUp = async () => {
     setGoogleLoading(true);
     try {
-      const result = await promptAsync();
-      console.log('Google auth result:', result);
-      
-      if (result?.type === 'success') {
-        const { code } = result.params;
-        
-        if (!code) {
-          toast('Failed to get authorization code', 'error');
+      const selectedRole = await AsyncStorage.getItem('selectedRole') || 'customer';
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+      const result = await WebBrowser.openAuthSessionAsync(
+        `${backendUrl}/api/auth/google-oauth-init?action=signup&role=${selectedRole}`,
+        'restaurant-app://'
+      );
+
+      if (result.type === 'success' && result.url) {
+        const params = parseGoogleAuthParams(result.url);
+
+        if (params.error) {
+          toast(params.error, 'error');
           return;
         }
 
-        // Exchange code for tokens
-        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            code,
-            client_id: googleClientId,
-            redirect_uri: googleRedirectUri,
-            grant_type: 'authorization_code',
-            code_verifier: request?.codeVerifier || '',
-          }).toString(),
-        });
-
-        const tokens = await tokenResponse.json();
-
-        if (!tokens.access_token) {
-          toast(tokens.error_description || 'Token exchange failed', 'error');
-          return;
-        }
-
-        console.log('Sending access_token to backend...');
-        const backendResponse = await axios.post(API_CONFIG.ENDPOINTS.AUTH.GOOGLE_SIGNUP, {
-          access_token: tokens.access_token,
-        });
-
-        console.log('Backend response:', backendResponse.data);
-        const token =
-          backendResponse.data.access_token ||
-          backendResponse.data.session?.access_token;
-        if (token) {
-          await AsyncStorage.setItem('token', token);
-          const authUser = backendResponse.data.user || backendResponse.data.session?.user;
-          if (authUser) {
-            await AsyncStorage.setItem('user', JSON.stringify(authUser));
-          }
-          // Critical: ensure we leave guest mode after OAuth sign up
-          await AsyncStorage.removeItem('guestMode');
-          toast('Signed up with Google successfully!', 'success');
-          const oauthRole = authUser?.role;
-          if (oauthRole === 'merchant' || oauthRole === 'restaurant') {
-            router.replace('/(merchant-tabs)');
-          } else {
-            router.replace('/(tabs)');
+        if (params.token) {
+          await AsyncStorage.setItem('token', params.token);
+          if (params.user) {
+            const user = JSON.parse(params.user);
+            await AsyncStorage.setItem('user', JSON.stringify(user));
+            await AsyncStorage.removeItem('guestMode');
+            toast('Signed up with Google successfully!', 'success');
+            if (user.role === 'merchant' || user.role === 'restaurant') {
+              router.replace('/(merchant-tabs)');
+            } else {
+              router.replace('/(tabs)');
+            }
           }
         } else {
-          toast('No token received from backend', 'error');
+          toast('Sign up failed. Please try again.', 'error');
         }
-      } else if (result?.type === 'error') {
-        toast(`Authentication failed: ${result.params?.error || 'Unknown error'}`, 'error');
       }
     } catch (error) {
       console.error('Google signup error:', error);
-      if (axios.isAxiosError(error)) {
-        toast(error.response?.data?.error || error.message, 'error');
-      } else {
-        toast('Google signup failed. Please try again.', 'error');
-      }
+      toast('Google signup failed. Please try again.', 'error');
     } finally {
       setGoogleLoading(false);
     }
@@ -491,14 +445,16 @@ export default function SignUpScreen() {
                   <Text style={styles.googleIcon}>G</Text>
                   <Text style={styles.socialText}>{googleLoading ? 'Opening Google...' : 'Sign up with Google'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.socialButton}
-                  onPress={handleAppleSignUp}
-                  disabled={appleLoading}
-                >
-                  <Ionicons name="logo-apple" size={20} color={Colors.text} />
-                  <Text style={styles.socialText}>{appleLoading ? 'Opening Apple...' : 'Sign up with Apple'}</Text>
-              </TouchableOpacity>
+                {Platform.OS === 'ios' && (
+                  <TouchableOpacity
+                    style={styles.socialButton}
+                    onPress={handleAppleSignUp}
+                    disabled={appleLoading}
+                  >
+                    <Ionicons name="logo-apple" size={20} color={Colors.text} />
+                    <Text style={styles.socialText}>{appleLoading ? 'Opening Apple...' : 'Sign up with Apple'}</Text>
+                  </TouchableOpacity>
+                )}
             </View>
           </>
         )}

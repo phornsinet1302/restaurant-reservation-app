@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, TextInput, ScrollView, KeyboardAvoidingView, Platform, StyleSheet, BackHandler } from 'react-native';
 import axios from 'axios';
 import * as WebBrowser from 'expo-web-browser';
-import { useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as Apple from 'expo-apple-authentication';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -36,101 +35,56 @@ export default function LoginScreen() {
     return () => sub.remove();
   }, []);
 
-  // Use iOS client ID with its native reverse scheme (bypasses auth.expo.io proxy)
-  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!;
-  const googleRedirectUri = Platform.OS === 'ios'
-    ? `com.googleusercontent.apps.${iosClientId.split('.apps.googleusercontent.com')[0]}:/oauthredirect`
-    : 'https://auth.expo.io/@fr3_bin/restaurant-table-order-app';
 
-  const googleClientId = Platform.OS === 'ios'
-    ? iosClientId
-    : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!;
-
-  const discovery = {
-    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenEndpoint: 'https://oauth2.googleapis.com/token',
+  const parseGoogleAuthParams = (url: string): Record<string, string> => {
+    const query = url.split('?')[1] || '';
+    return Object.fromEntries(
+      query.split('&').filter(Boolean).map(pair => {
+        const idx = pair.indexOf('=');
+        return [
+          decodeURIComponent(pair.slice(0, idx >= 0 ? idx : undefined)),
+          idx >= 0 ? decodeURIComponent(pair.slice(idx + 1)) : '',
+        ];
+      })
+    );
   };
-
-  const [request, response, promptAsync] = useAuthRequest(
-    {
-      clientId: googleClientId,
-      redirectUri: googleRedirectUri,
-      scopes: ['openid', 'profile', 'email'],
-      responseType: ResponseType.Code,
-      usePKCE: true,
-    },
-    discovery
-  );
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
     try {
-      const result = await promptAsync();
-      console.log('Google auth result:', result);
-      
-      if (result?.type === 'success') {
-        const { code } = result.params;
-        
-        if (!code) {
-          toast('Failed to get authorization code', 'error');
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+      const result = await WebBrowser.openAuthSessionAsync(
+        `${backendUrl}/api/auth/google-oauth-init?action=login`,
+        'restaurant-app://'
+      );
+
+      if (result.type === 'success' && result.url) {
+        const params = parseGoogleAuthParams(result.url);
+
+        if (params.error) {
+          toast(params.error, 'error');
           return;
         }
 
-        // Exchange code for tokens
-        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            code,
-            client_id: googleClientId,
-            redirect_uri: googleRedirectUri,
-            grant_type: 'authorization_code',
-            code_verifier: request?.codeVerifier || '',
-          }).toString(),
-        });
-
-        const tokens = await tokenResponse.json();
-
-        if (!tokens.access_token) {
-          toast(tokens.error_description || 'Token exchange failed', 'error');
-          return;
-        }
-
-        console.log('Sending access_token to backend...');
-        const backendResponse = await api.post('/api/auth/google-login', {
-          access_token: tokens.access_token,
-        });
-
-        const token = backendResponse.data.session?.access_token;
-        if (token) {
-          await AsyncStorage.setItem('token', token);
-          if (backendResponse.data.user) {
-            await AsyncStorage.setItem('user', JSON.stringify(backendResponse.data.user));
-          }
-          await AsyncStorage.removeItem('guestMode');
-          
-          const googleUserRole = backendResponse.data.user?.role;
-          if (googleUserRole === 'merchant' || googleUserRole === 'restaurant') {
-            router.replace('/(merchant-tabs)');
-          } else {
-            router.replace('/(tabs)');
+        if (params.token) {
+          await AsyncStorage.setItem('token', params.token);
+          if (params.user) {
+            const user = JSON.parse(params.user);
+            await AsyncStorage.setItem('user', JSON.stringify(user));
+            await AsyncStorage.removeItem('guestMode');
+            if (user.role === 'merchant' || user.role === 'restaurant') {
+              router.replace('/(merchant-tabs)');
+            } else {
+              router.replace('/(tabs)');
+            }
           }
         } else {
-          toast('No token received from backend', 'error');
+          toast('Login failed. Please try again.', 'error');
         }
-      } else if (result?.type === 'error') {
-        toast(`Authentication failed: ${result.params?.error || 'Unknown error'}`, 'error');
       }
     } catch (error) {
       console.error('Google login error:', error);
-      if (axios.isAxiosError(error)) {
-        const msg = error.code === 'ECONNABORTED'
-          ? 'Server is not reachable. Check your network connection.'
-          : (error.response?.data?.error || error.message);
-        toast(msg, 'error');
-      } else {
-        toast('Google login failed. Please try again.', 'error');
-      }
+      toast('Google login failed. Please try again.', 'error');
     } finally {
       setGoogleLoading(false);
     }
@@ -344,14 +298,16 @@ export default function LoginScreen() {
             <Text style={styles.googleIcon}>G</Text>
             <Text style={styles.socialText}>{googleLoading ? 'Opening Google...' : 'Sign in with Google'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.socialButton}
-            onPress={handleAppleLogin}
-            disabled={appleLoading}
-          >
-            <Ionicons name="logo-apple" size={20} color={Colors.text} />
-            <Text style={styles.socialText}>{appleLoading ? 'Opening Apple...' : 'Sign in with Apple'}</Text>
-          </TouchableOpacity>
+          {Platform.OS === 'ios' && (
+            <TouchableOpacity
+              style={styles.socialButton}
+              onPress={handleAppleLogin}
+              disabled={appleLoading}
+            >
+              <Ionicons name="logo-apple" size={20} color={Colors.text} />
+              <Text style={styles.socialText}>{appleLoading ? 'Opening Apple...' : 'Sign in with Apple'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Footer */}

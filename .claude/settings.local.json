@@ -4,7 +4,8 @@
       "Bash(grep -E \"\\\\.\\(js|ts\\)$\")",
       "Bash(findstr \"react-native-webview\" \"c:\\\\Users\\\\Admin\\\\restaurant-reservation-app\\\\frontend\\\\package.json\")",
       "PowerShell(Get-Process -Name \"node\" -ErrorAction SilentlyContinue)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue)"
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-ChildItem \"c:\\\\Users\\\\Admin\\\\restaurant-reservation-app\" | ForEach-Object { $_.Name })"
     ]
   }
 }

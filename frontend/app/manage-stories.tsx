@@ -265,8 +265,6 @@ export default function ManageStoriesScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [9, 16],
       quality: 0.8,
     });
 
@@ -286,7 +284,6 @@ export default function ManageStoriesScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['videos'],
-      allowsEditing: true,
       quality: 0.5,
       videoMaxDuration: 60,
     });

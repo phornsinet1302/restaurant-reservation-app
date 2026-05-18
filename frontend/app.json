@@ -17,7 +17,9 @@
         "NSAppleMusicUsageDescription": "Allow $(PRODUCT_NAME) to access your Apple Music library",
         "NSLocationWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to show nearby restaurants and track your journey to the restaurant.",
-        "LSApplicationQueriesSchemes": ["comgooglemaps"]
+        "LSApplicationQueriesSchemes": [
+          "comgooglemaps"
+        ]
       },
       "config": {
         "googleMapsApiKey": "AIzaSyCIkLAU412I5NDh_taEpWErZ7qRmDtCIbI"
@@ -30,9 +32,11 @@
       },
       "package": "com.restaurant.tableorderapp",
       "permissions": [
+        "android.permission.INTERNET",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro",
@@ -57,6 +61,12 @@
       "image": "./assets/seatlylogo.png",
       "resizeMode": "contain",
       "backgroundColor": "#FFFFFF"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0e47259e-7ee2-4d2a-b038-8600eb2770f4"
+      }
     }
   }
 }

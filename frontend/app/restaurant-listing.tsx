@@ -205,8 +205,6 @@ export default function RestaurantListingScreen() {
       
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1],
         quality: 0.8,
       });
 
@@ -367,8 +365,6 @@ export default function RestaurantListingScreen() {
       
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [16, 9],
         quality: 0.8,
       });
 
@@ -473,7 +469,10 @@ export default function RestaurantListingScreen() {
           setPhone(myRestaurant.phone || '');
           setSearchTags(myRestaurant.cuisine || '');
           if (myRestaurant.image_url) setCoverImage(myRestaurant.image_url);
-          
+          if (myRestaurant.category && venueTypes.includes(myRestaurant.category as VenueType)) {
+            setSelectedVenueType(myRestaurant.category as VenueType);
+          }
+
           // Load menu photos
           await loadMenuPhotos(myRestaurant.id);
           

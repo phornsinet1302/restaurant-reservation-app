@@ -195,6 +195,7 @@ export default function RestaurantDetailScreen() {
   const [closingHours, setClosingHours] = useState('');
   const [savedTimeSlots, setSavedTimeSlots] = useState<string[]>([]);
   const [distance] = useState(params.distance || 'Distance unavailable');
+  const [venueCategory, setVenueCategory] = useState('');
 
   // Use uploaded cover image if available, otherwise fall back to static map
   const heroImage = heroImageUrl
@@ -467,6 +468,7 @@ export default function RestaurantDetailScreen() {
         }
         if (r.latitude != null) setLatitude(parseFloat(r.latitude));
         if (r.longitude != null) setLongitude(parseFloat(r.longitude));
+        if (r.category) setVenueCategory(r.category);
       }
 
       if (response.data?.menu_items) {
@@ -685,6 +687,12 @@ export default function RestaurantDetailScreen() {
         {/* ── Restaurant Story ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Restaurant story</Text>
+          {!!venueCategory && (
+            <View style={styles.venueBadge}>
+              <Ionicons name="storefront-outline" size={13} color={Colors.primary} />
+              <Text style={styles.venueBadgeText}>{venueCategory}</Text>
+            </View>
+          )}
           <Text style={styles.storyDesc}>{description}</Text>
           <View style={styles.storyMeta}>
             <Ionicons name="location-outline" size={16} color={Colors.gray} />
@@ -1655,6 +1663,24 @@ const styles = StyleSheet.create({
   menuItemPrice: {
     fontFamily: 'PlusJakartaSans-Bold',
     fontSize: 16,
+    color: Colors.primary,
+  },
+  venueBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    backgroundColor: `${Colors.primary}15`,
+    borderWidth: 1,
+    borderColor: `${Colors.primary}40`,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 12,
+  },
+  venueBadgeText: {
+    fontFamily: 'PlusJakartaSans-SemiBold',
+    fontSize: 12,
     color: Colors.primary,
   },
 });
