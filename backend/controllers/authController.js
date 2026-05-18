@@ -1389,3 +1389,144 @@ exports.deleteAccount = async (req, res) => {
     res.status(500).json({ error: 'Failed to delete account: ' + error.message });
   }
 };
+
+// @desc    Initiate server-side Google OAuth (for Android APK)
+exports.googleOAuthInit = (req, res) => {
+  const { action = 'login', role = 'customer' } = req.query;
+
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  const redirectUri = `${protocol}://${host}/api/auth/google-oauth-callback`;
+
+  const state = Buffer.from(JSON.stringify({ action, role })).toString('base64');
+
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_WEB_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid profile email',
+    state,
+    access_type: 'offline',
+    prompt: 'select_account',
+  });
+
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+};
+
+// @desc    Handle server-side Google OAuth callback
+exports.googleOAuthCallback = async (req, res) => {
+  const appScheme = 'restaurant-app://google-auth';
+  const { code, state, error } = req.query;
+
+  if (error) {
+    return res.redirect(`${appScheme}?error=${encodeURIComponent(error)}`);
+  }
+
+  if (!code) {
+    return res.redirect(`${appScheme}?error=${encodeURIComponent('Authorization failed')}`);
+  }
+
+  let action = 'login';
+  let role = 'customer';
+  try {
+    const stateData = JSON.parse(Buffer.from(state || '', 'base64').toString());
+    action = stateData.action || 'login';
+    role = stateData.role || 'customer';
+  } catch (e) {}
+
+  try {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const redirectUri = `${protocol}://${host}/api/auth/google-oauth-callback`;
+
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_WEB_CLIENT_ID,
+        client_secret: process.env.GOOGLE_WEB_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }).toString(),
+    });
+
+    const tokens = await tokenResponse.json();
+
+    if (tokens.error) {
+      console.error('Google token exchange error:', tokens);
+      return res.redirect(`${appScheme}?error=${encodeURIComponent(tokens.error_description || 'Token exchange failed')}`);
+    }
+
+    let googleUser;
+    if (tokens.id_token) {
+      const info = await (await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokens.id_token)}`)).json();
+      googleUser = { email: info.email, name: info.name };
+    } else if (tokens.access_token) {
+      const info = await (await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      })).json();
+      googleUser = { email: info.email, name: info.name };
+    }
+
+    if (!googleUser?.email) {
+      return res.redirect(`${appScheme}?error=${encodeURIComponent('Could not retrieve user info from Google')}`);
+    }
+
+    const { email, name: fullName } = googleUser;
+
+    const { data: existingUser } = await supabaseAdmin
+      .from('users')
+      .select('id, role, name, phone, profile_picture_url')
+      .eq('email', email)
+      .single();
+
+    let userId, userRole, userName, userPhone, userPic;
+
+    if (existingUser) {
+      userId = existingUser.id;
+      userRole = existingUser.role;
+      userName = existingUser.name;
+      userPhone = existingUser.phone;
+      userPic = existingUser.profile_picture_url;
+    } else if (action === 'signup') {
+      const newUserId = crypto.randomUUID();
+      const { data: newUser, error: createError } = await supabaseAdmin
+        .from('users')
+        .insert([{ id: newUserId, email, name: fullName || email.split('@')[0], role }])
+        .select('id, role, name')
+        .single();
+
+      if (createError) {
+        console.error('User creation error:', createError);
+        return res.redirect(`${appScheme}?error=${encodeURIComponent('Failed to create account')}`);
+      }
+
+      userId = newUser.id;
+      userRole = newUser.role;
+      userName = newUser.name;
+    } else {
+      return res.redirect(`${appScheme}?error=${encodeURIComponent('Account not found. Please sign up first.')}`);
+    }
+
+    const jwtToken = jwt.sign(
+      { id: userId, email, role: userRole || 'customer' },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '7d' }
+    );
+
+    const userData = JSON.stringify({
+      id: userId,
+      email,
+      role: userRole || 'customer',
+      fullName: userName || fullName,
+      phone: userPhone || null,
+      profile_picture_url: userPic || null,
+    });
+
+    res.redirect(`${appScheme}?token=${encodeURIComponent(jwtToken)}&user=${encodeURIComponent(userData)}`);
+  } catch (err) {
+    console.error('Google OAuth callback error:', err);
+    res.redirect(`${appScheme}?error=${encodeURIComponent('Authentication failed')}`);
+  }
+};

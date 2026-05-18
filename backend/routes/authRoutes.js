@@ -39,6 +39,10 @@ router.post('/google-login', authController.googleLogin);
 router.post('/apple-signup', authController.appleSignUp);
 router.post('/apple-login', authController.appleLogin);
 
+// --- Web-based Google OAuth (for Android APK) ---
+router.get('/google-oauth-init', authController.googleOAuthInit);
+router.get('/google-oauth-callback', authController.googleOAuthCallback);
+
 // --- Protected Routes ---
 router.get('/me', protect, authController.getProfile);
 router.put('/update-profile', protect, authController.updateProfile);
