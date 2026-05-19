@@ -363,19 +363,16 @@ export default function ManageStoriesScreen() {
           console.log('   📤 Sending image to backend...');
           console.log('   Endpoint: /api/media/upload-image');
           
-          const uploadRes = await axios.post(
+          const uploadRes = await fetch(
             `${API_CONFIG.BASE_URL}/api/media/upload-image`,
-            formData,
             {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'multipart/form-data',
-              },
-              timeout: 60000,
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData,
             }
           );
-          
-          cloudImageUrl = uploadRes.data.image_url;
+          const uploadData = await uploadRes.json();
+          cloudImageUrl = uploadData.image_url;
           console.log('   ✅ Image uploaded successfully');
           console.log('   Cloud URL:', cloudImageUrl.substring(0, 80) + '...');
         } catch (uploadError: any) {
@@ -414,49 +411,25 @@ export default function ManageStoriesScreen() {
           console.log('   📤 Sending form data to backend...');
           console.log('   Endpoint: /api/media/upload-video');
           
-          const uploadRes = await axios.post(
+          const uploadRes = await fetch(
             `${API_CONFIG.BASE_URL}/api/media/upload-video`,
-            formData,
             {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'multipart/form-data',
-              },
-              timeout: 120000,
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData,
             }
           );
-          
-          cloudVideoUrl = uploadRes.data.video_url;
+          const uploadData = await uploadRes.json();
+          cloudVideoUrl = uploadData.video_url;
           console.log('   ✅ Video uploaded successfully');
           console.log('   Cloud URL:', cloudVideoUrl.substring(0, 80) + '...');
         } catch (uploadError: any) {
           console.error('   ❌ Video upload failed:', uploadError.message);
-          console.error('   Response:', uploadError.response?.data);
 
-          const isTimeout = uploadError.code === 'ECONNABORTED' || uploadError.message?.includes('timeout');
-          const serverMsg = uploadError.response?.data?.error;
-          const isFileTooLarge =
-            uploadError.response?.status === 413 ||
-            serverMsg?.toLowerCase().includes('too large') ||
-            serverMsg?.toLowerCase().includes('exceeded') ||
-            serverMsg?.toLowerCase().includes('payload');
-
-          if (isTimeout) {
-            toast(
-              'Upload timed out — your video may be too large for the free plan. Try a shorter clip under 10 MB.',
-              'error',
-            );
-          } else if (isFileTooLarge) {
-            toast(
-              'Video exceeds the storage size limit. Please use a shorter or lower-quality clip (max 10 MB).',
-              'error',
-            );
-          } else {
-            toast(
-              `Upload failed: ${serverMsg || uploadError.message}. Try a smaller video.`,
-              'error',
-            );
-          }
+          toast(
+            `Upload failed: ${uploadError.message || 'Unknown error'}. Try a smaller video.`,
+            'error',
+          );
 
           setPublishing(false);
           return;

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "aca6b8a0-d609-4401-86b2-5624941187bd"
+      }
+    },
+    "android": {
+      "package": "com.sinetphorn.restaurantreservationapp"
+    }
+  }
+}

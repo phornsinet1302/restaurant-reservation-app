@@ -192,17 +192,16 @@ export default function MerchantMenuScreen() {
           name: `menu-${Date.now()}.jpg`,
         } as any);
         try {
-          const uploadRes = await axios.post(
+          const uploadRes = await fetch(
             `${API_CONFIG.BASE_URL}/api/media/upload-image`,
-            formData,
             {
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'multipart/form-data',
-              },
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData,
             }
           );
-          imageUrl = uploadRes.data?.image_url;
+          const uploadData = await uploadRes.json();
+          imageUrl = uploadData?.image_url;
         } catch {
           toast('Image upload failed, keeping current photo', 'warning');
         }

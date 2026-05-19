@@ -141,18 +141,16 @@ export default function ManageStoriesScreen() {
         name: `story-${Date.now()}.jpg`,
       } as any);
 
-      const uploadRes = await axios.post(
+      const uploadRes = await fetch(
         `${API_URL}/api/media/upload`,
-        formData,
         {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
         }
       );
-
-      const imageUrl = uploadRes.data?.url || uploadRes.data;
+      const uploadData = await uploadRes.json();
+      const imageUrl = uploadData?.url || uploadData;
 
       // Create story
       const storyRes = await axios.post(

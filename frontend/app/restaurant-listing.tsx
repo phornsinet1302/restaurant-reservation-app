@@ -270,20 +270,16 @@ export default function RestaurantListingScreen() {
       console.log(`[uploadMenuPhoto] POST to: ${endpoint}`);
       console.log(`[uploadMenuPhoto] Token present: ${!!token}`);
       
-      const uploadRes = await axios.post(
-        endpoint,
-        formData,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
-        }
-      );
+      const uploadRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const uploadData = await uploadRes.json();
 
-      console.log(`[uploadMenuPhoto] Response:`, uploadRes.data);
+      console.log(`[uploadMenuPhoto] Response:`, uploadData);
 
-      const uploadedPhoto = uploadRes.data?.photo || uploadRes.data?.data;
+      const uploadedPhoto = uploadData?.photo || uploadData?.data;
       if (uploadedPhoto?.id) {
         setMenuPhotos((prev) => {
           const next = prev.filter((p) => p.display_order !== uploadedPhoto.display_order && p.id !== uploadedPhoto.id);
@@ -411,18 +407,16 @@ export default function RestaurantListingScreen() {
         name: `cover-${Date.now()}.jpg`,
       } as any);
 
-      const uploadRes = await axios.post(
+      const uploadRes = await fetch(
         `${API_CONFIG.BASE_URL}/api/media/upload-image`,
-        formData,
         {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data',
-          },
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
         }
       );
-
-      const imageUrl = uploadRes.data?.image_url;
+      const uploadData = await uploadRes.json();
+      const imageUrl = uploadData?.image_url;
       if (imageUrl) {
         setCoverImage(imageUrl);
         setShowImagePreview(false);
