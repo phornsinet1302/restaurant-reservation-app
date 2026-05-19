@@ -1489,7 +1489,8 @@ exports.googleOAuthCallback = async (req, res) => {
       userName = existingUser.name;
       userPhone = existingUser.phone;
       userPic = existingUser.profile_picture_url;
-    } else if (action === 'signup') {
+    } else {
+      // Auto-create account on first sign-in with Google (works for both login and signup)
       const newUserId = crypto.randomUUID();
       const { data: newUser, error: createError } = await supabaseAdmin
         .from('users')
@@ -1505,8 +1506,6 @@ exports.googleOAuthCallback = async (req, res) => {
       userId = newUser.id;
       userRole = newUser.role;
       userName = newUser.name;
-    } else {
-      return res.redirect(`${appScheme}?error=${encodeURIComponent('Account not found. Please sign up first.')}`);
     }
 
     const jwtToken = jwt.sign(
