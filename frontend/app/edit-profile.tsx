@@ -7,6 +7,7 @@ import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAppToast } from '@/components/ToastProvider';
@@ -83,10 +84,11 @@ export default function EditProfileScreen() {
         setUploadingImage(true);
         const token = await AsyncStorage.getItem('token');
 
-        // Create FormData
+        const jpegUri = await convertToJpeg(image.uri);
+
         const formData = new FormData();
         formData.append('file', {
-          uri: image.uri,
+          uri: jpegUri,
           type: 'image/jpeg',
           name: `profile_${Date.now()}.jpg`,
         } as any);

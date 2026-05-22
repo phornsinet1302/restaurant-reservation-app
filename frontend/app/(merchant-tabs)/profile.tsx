@@ -9,6 +9,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAppToast } from '@/components/ToastProvider';
 
@@ -91,9 +92,11 @@ export default function MerchantProfileScreen() {
         setUploadingImage(true);
         const token = await AsyncStorage.getItem('token');
 
+        const jpegUri = await convertToJpeg(result.assets[0].uri);
+
         const formData = new FormData();
         formData.append('file', {
-          uri: result.assets[0].uri,
+          uri: jpegUri,
           type: 'image/jpeg',
           name: `profile_${Date.now()}.jpg`,
         } as any);

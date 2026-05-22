@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import { useAppToast } from '@/components/ToastProvider';
@@ -353,9 +354,10 @@ export default function ManageStoriesScreen() {
       if (imageUri && imageUri !== 'cover') {
         console.log('   🖼️ Uploading image to cloud storage...');
         try {
+          const jpegUri = await convertToJpeg(imageUri);
           const formData = new FormData();
           formData.append('file', {
-            uri: imageUri,
+            uri: jpegUri,
             type: 'image/jpeg',
             name: `story_${Date.now()}.jpg`,
           } as any);

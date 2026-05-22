@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { API_CONFIG } from '@/app/config/apiConfig';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import { useAppToast } from '@/components/ToastProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -185,9 +186,10 @@ export default function MerchantMenuScreen() {
 
       // Upload new image if one was picked
       if (editImageUri) {
+        const jpegUri = await convertToJpeg(editImageUri);
         const formData = new FormData();
         formData.append('file', {
-          uri: editImageUri,
+          uri: jpegUri,
           type: 'image/jpeg',
           name: `menu-${Date.now()}.jpg`,
         } as any);

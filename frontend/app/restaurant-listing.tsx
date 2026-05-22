@@ -7,6 +7,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -253,9 +254,10 @@ export default function RestaurantListingScreen() {
       console.log(`   Restaurant ID: ${restaurantId}`);
       console.log(`   Image URI: ${imageUri}`);
       
+      const jpegUri = await convertToJpeg(imageUri);
       const formData = new FormData();
       formData.append('image', {
-        uri: imageUri,
+        uri: jpegUri,
         type: 'image/jpeg',
         name: `menu-photo-${displayOrder}-${Date.now()}.jpg`,
       } as any);
@@ -399,10 +401,11 @@ export default function RestaurantListingScreen() {
   const uploadCoverImage = async (imageUri: string) => {
     try {
       setUploadingImage(true);
-      
+
+      const jpegUri = await convertToJpeg(imageUri);
       const formData = new FormData();
       formData.append('file', {
-        uri: imageUri,
+        uri: jpegUri,
         type: 'image/jpeg',
         name: `cover-${Date.now()}.jpg`,
       } as any);

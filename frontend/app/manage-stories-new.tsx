@@ -5,6 +5,7 @@ import {
   FlatList, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -134,9 +135,10 @@ export default function ManageStoriesScreen() {
       setUploading(true);
 
       // Upload image
+      const jpegUri = await convertToJpeg(selectedImage.uri);
       const formData = new FormData();
       formData.append('file', {
-        uri: selectedImage.uri,
+        uri: jpegUri,
         type: 'image/jpeg',
         name: `story-${Date.now()}.jpg`,
       } as any);

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Seatly",
-    "slug": "restaurant-table-order-app",
+    "slug": "restaurant-reservation-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "primaryColor": "#D4A017",
@@ -34,9 +34,13 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION"
-      ],
-      "usesCleartextTraffic": true
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -52,7 +56,16 @@
       ],
       "expo-router",
       "expo-font",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Seatly to access your photos to upload profile pictures and menu images.",
+          "cameraPermission": "Allow Seatly to use your camera to take profile pictures and menu photos."
+        }
+      ],
+      "expo-video",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
@@ -65,7 +78,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "0e47259e-7ee2-4d2a-b038-8600eb2770f4"
+        "projectId": "aca6b8a0-d609-4401-86b2-5624941187bd"
       }
     }
   }

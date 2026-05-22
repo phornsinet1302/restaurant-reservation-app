@@ -13,6 +13,7 @@ import {
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
+import { convertToJpeg } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -170,9 +171,11 @@ export default function ProfileScreen() {
         return;
       }
 
+      const jpegUri = await convertToJpeg(imageUri);
+
       const formData = new FormData();
       formData.append('file', {
-        uri: imageUri,
+        uri: jpegUri,
         type: 'image/jpeg',
         name: `profile_${Date.now()}.jpg`,
       } as any);
